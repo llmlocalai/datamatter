@@ -1,0 +1,103 @@
+{
+ "source": "USASpending Budget-Execution Account Data (file_a, agency 097 = DoD)",
+ "granularity": "OMB functional classification + agency, from Statement of Budgetary Resources",
+ "fiscal_year_focus": 2025,
+ "total_obligations_fy2025": 1560195764863.9,
+ "by_function": [
+  {
+   "function_name": "National Defense",
+   "obligations": 1357612350789.0,
+   "percentage": 87.02
+  },
+  {
+   "function_name": "International Affairs",
+   "obligations": 108667760740.11,
+   "percentage": 6.97
+  },
+  {
+   "function_name": "Income Security",
+   "obligations": 80648469974.22,
+   "percentage": 5.17
+  },
+  {
+   "function_name": "Health",
+   "obligations": 12974760678.81,
+   "percentage": 0.83
+  },
+  {
+   "function_name": "Veterans Benefits and Services",
+   "obligations": 278198424.24,
+   "percentage": 0.02
+  },
+  {
+   "function_name": "Natural Resources and Environment",
+   "obligations": 14224257.52,
+   "percentage": 0.0
+  }
+ ],
+ "by_agency": [
+  {
+   "agency_name": "Department of Defense",
+   "obligations": 628064986642.7,
+   "percentage": 40.26
+  },
+  {
+   "agency_name": "Department of the Navy",
+   "obligations": 299857352307.88,
+   "percentage": 19.22
+  },
+  {
+   "agency_name": "Department of the Air Force",
+   "obligations": 281684048537.15,
+   "percentage": 18.05
+  },
+  {
+   "agency_name": "Department of the Army",
+   "obligations": 241921616636.06,
+   "percentage": 15.51
+  },
+  {
+   "agency_name": "Executive Office of the President",
+   "obligations": 108667760740.11,
+   "percentage": 6.97
+  }
+ ],
+ "fiscal_year_trend": [
+  {
+   "fiscal_year": 2021,
+   "total_budgetary_resources": 1514296053257.55,
+   "obligations_incurred": 1188986904787.6,
+   "gross_outlays": 1133174212945.9
+  },
+  {
+   "fiscal_year": 2022,
+   "total_budgetary_resources": 1635073184398.36,
+   "obligations_incurred": 1259768961924.46,
+   "gross_outlays": 1198491041750.65
+  },
+  {
+   "fiscal_year": 2023,
+   "total_budgetary_resources": 1523433316840.06,
+   "obligations_incurred": 1338593322940.97,
+   "gross_outlays": 1209046485641.29
+  },
+  {
+   "fiscal_year": 2024,
+   "total_budgetary_resources": 1991791156124.69,
+   "obligations_incurred": 1462102518685.87,
+   "gross_outlays": 1334566854748.32
+  },
+  {
+   "fiscal_year": 2025,
+   "total_budgetary_resources": 2213230963902.27,
+   "obligations_incurred": 1560195764863.9,
+   "gross_outlays": 1400678719045.88
+  },
+  {
+   "fiscal_year": 2026,
+   "total_budgetary_resources": 2575166024522.84,
+   "obligations_incurred": 1285021806246.13,
+   "gross_outlays": 1145176594768.8
+  }
+ ]
+}

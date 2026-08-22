@@ -1,0 +1,52 @@
+{
+ "source": "GAO report inventory + DoD FY2025 Agency Financial Report (knowledge bank)",
+ "total_gao_reports": 119,
+ "dod_relevant_reports": 33,
+ "afr_disclaimer_of_opinion": true,
+ "afr_files": [
+  "DoD_FY2025_Agency-Financial-Report.pdf"
+ ],
+ "findings_by_year": [
+  {
+   "year": 2026,
+   "findings": 119,
+   "material_weaknesses": 0
+  }
+ ],
+ "finding_types": [
+  {
+   "type": "Modernization & Acquisition",
+   "count": 7
+  },
+  {
+   "type": "Budget & Appropriations",
+   "count": 12
+  },
+  {
+   "type": "Fraud & Oversight",
+   "count": 2
+  },
+  {
+   "type": "Workforce & Readiness",
+   "count": 4
+  },
+  {
+   "type": "Other DoD",
+   "count": 19
+  }
+ ],
+ "sample_dod_reports": [
+  "Weapon-System-Sustainment-DOD-Identified-Critical-Cost-Growth-and-the-Army-Should-Take-Act",
+  "Priority-Open-Recommendations-Department-of-Defense",
+  "Federal-Budget-Authorization-and-Appropriation-Information-for-Selected-Agencies",
+  "Department-of-Energy-Inspector-General-s-Budget-Estimates-for-Audits-of-Certain-Contractor",
+  "Defense-Health-Care-DOD-Should-Assess-Its-Needs-for-Managing-Potential-Brain-Health-Effect",
+  "Navy-And-Coast-Guard-Shipbuilding-A-Disciplined-Strategy-Driven-Approach-Is-Needed-to-Achi",
+  "Inflation-Reduction-Act-EPA-s-Use-and-Oversight-of-11.5-Billion-in-Appropriations",
+  "Fiscal-Year-2027-Budget-Request-U.S.-Government-Accountability-Office",
+  "VA-Acquisitions-Leadership-Accountability-and-Savings-Goals-Needed-to-Improve-Purchasing-E",
+  "Ukraine-State-Should-Build-on-USAID-s-Oversight-of-Direct-Budget-Support",
+  "Defense-Budget-Clearer-Guidance-Is-Needed-to-Improve-Visibility-into-Resourcing-of-Pacific",
+  "International-Agreements-DOD-Has-Opportunities-to-Improve-Internal-Communication-and-Overs"
+ ]
+}
