@@ -4,6 +4,51 @@ import Footer from '@/components/Footer';
 
 const showcases = [
   {
+    title: 'Contracting & Procurement Intelligence',
+    description:
+       'Pre-aggregated obligations across ~24M DoD contract actions (FY2021–2026), streamed from the full USASpending warehouse. Prime-contractor, set-aside, and sole-source analysis.',
+    icon: '🎯',
+    href: '/contracting',
+    tags: ['USASpending', '24M awards', 'FAR 6.302', 'LIVE DATA'],
+    features: [
+       'Obligation by DoD component',
+       'Top prime contractors',
+       'Small-business / set-aside participation',
+       'Non-competitive / sole-source exposure',
+     ],
+    live: true,
+   },
+   {
+    title: 'Budget Execution & Funds Control',
+    description:
+       'TAS-level Statement of Budgetary Resources from USASpending account data: obligation rates, unobligated balances, and lapse / antideficiency risk — the data that guards against ADA violations.',
+    icon: '🛡️',
+    href: '/funds-control',
+    tags: ['Antideficiency', 'Statement of Budgetary Resources', 'Lapse risk', 'LIVE DATA'],
+    features: [
+       'Obligation & outlay rates',
+       'Unobligated (lapse) exposure',
+       'Top obligating Treasury accounts',
+       'FY-over-FY execution trend',
+     ],
+    live: true,
+   },
+   {
+    title: 'Regulatory Q&A (RAG)',
+    description:
+       'Cited, authority-ranked retrieval over the curated DoD-FM knowledge wiki. Ask a question and get an answer with primary-source citations — regulation and statute outrank secondary summaries.',
+    icon: '📚',
+    href: '/regulation',
+    tags: ['RAG', 'Cited', 'Source authority', 'LIVE DATA'],
+    features: [
+       'Cited answers with primary sources',
+       'Source-authority re-ranking',
+       '75 curated DoD-FM pages',
+       'Exact statutory/technical term matching',
+     ],
+    live: true,
+   },
+   {
     title: 'Budget Analysis Dashboard',
     description:
       'Enterprise-grade budget analysis for senior budget analysts. Leverage USASpending data, PPBE compliance metrics, and congressional oversight tracking.',
@@ -84,13 +129,22 @@ export default function ShowcasePage() {
       <section className="py-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {showcases.map((showcase) => (
-              <Link
+            {showcases.map((showcase) => {
+             const isLive = (showcase as { live?: boolean }).live === true;
+             return (
+               <Link
                 key={showcase.title}
                 href={showcase.href}
-                className="glass-card rounded-xl p-6 hover:border-accent-500/40 hover:shadow-lg transition-all duration-300 group"
-              >
-                <div className="text-3xl mb-4">{showcase.icon}</div>
+                className={`glass-card rounded-xl p-6 hover:border-accent-500/40 hover:shadow-lg transition-all duration-300 group ${isLive ? 'border-accent-500/30' : ''}`}
+               >
+                 <div className="flex items-start justify-between mb-4">
+                  <div className="text-3xl">{showcase.icon}</div>
+                  {isLive && (
+                   <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300">
+                    ● Live data
+                   </span>
+                  )}
+                 </div>
                 <h3 className="text-navy-50 font-bold text-lg mb-3">{showcase.title}</h3>
                 <p className="text-navy-400 text-sm mb-4 line-clamp-4">
                   {showcase.description}
@@ -109,7 +163,8 @@ export default function ShowcasePage() {
                   View Details →
                 </div>
               </Link>
-            ))}
+                );
+             })}
           </div>
         </div>
       </section>

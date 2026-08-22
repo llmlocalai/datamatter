@@ -14,7 +14,10 @@ export default function Navbar() {
 
   const links = [
     { href: "/showcase", label: "Showcases" },
-    { href: "/budget", label: "Budget" },
+    { href: "/contracting", label: "Contracting" },
+   { href: "/funds-control", label: "Funds Control" },
+   { href: "/regulation", label: "Regulation Q&A" },
+   { href: "/budget", label: "Budget" },
     { href: "/ppbe", label: "PPBE" },
     { href: "/gao", label: "GAO" },
     { href: "/congressional", label: "Congress" },

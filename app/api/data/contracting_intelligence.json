@@ -1,0 +1,3310 @@
+{
+ "source": "USASpending agency 097 (DoD) \u2014 contract warehouse",
+ "vintage": "2026-08-06",
+ "fiscal_years": [
+  2021,
+  2022,
+  2023,
+  2024,
+  2025,
+  2026
+ ],
+ "generated_by": "scripts/etl_contracting.py",
+ "records": [
+  {
+   "fiscal_year": 2021,
+   "total_obligation": 386952757532.63,
+   "award_count": 4339370,
+   "simplified_commercial_awards": 41478,
+   "by_sub_agency": [
+    {
+     "name": "Department of the Navy",
+     "obligation": 111745679645.46
+    },
+    {
+     "name": "Department of the Army",
+     "obligation": 109457583804.97
+    },
+    {
+     "name": "Department of the Air Force",
+     "obligation": 79273767233.82
+    },
+    {
+     "name": "Defense Logistics Agency",
+     "obligation": 39043165554.51
+    },
+    {
+     "name": "Defense Health Agency",
+     "obligation": 16015846249.21
+    },
+    {
+     "name": "Missile Defense Agency",
+     "obligation": 8817318508.25
+    },
+    {
+     "name": "Defense Information Systems Agency",
+     "obligation": 6032629220.14
+    },
+    {
+     "name": "U.S. Special Operations Command",
+     "obligation": 4517567059.33
+    },
+    {
+     "name": "USTRANSCOM",
+     "obligation": 3889220793.77
+    },
+    {
+     "name": "Washington Headquarters Services",
+     "obligation": 2197261959.16
+    },
+    {
+     "name": "Defense Advanced Research Projects Agency",
+     "obligation": 1532296679.37
+    },
+    {
+     "name": "Defense Microelectronics Activity",
+     "obligation": 1119628157.76
+    },
+    {
+     "name": "Defense Threat Reduction Agency",
+     "obligation": 908399578.67
+    },
+    {
+     "name": "Defense Counterintelligence and Security Agency",
+     "obligation": 833005443.83
+    },
+    {
+     "name": "Defense Finance and Accounting Service",
+     "obligation": 340053199.7
+    }
+   ],
+   "top_recipients": [
+    {
+     "name": "LOCKHEED MARTIN CORPORATION",
+     "obligation": 28477614358.76
+    },
+    {
+     "name": "THE BOEING COMPANY",
+     "obligation": 21716321815.68
+    },
+    {
+     "name": "RAYTHEON COMPANY",
+     "obligation": 14330699987.4
+    },
+    {
+     "name": "PFIZER INC",
+     "obligation": 13317984941.46
+    },
+    {
+     "name": "NORTHROP GRUMMAN SYSTEMS CORPORATION",
+     "obligation": 9210105465.49
+    },
+    {
+     "name": "ELECTRIC BOAT CORPORATION",
+     "obligation": 8680217652.07
+    },
+    {
+     "name": "HUMANA GOVERNMENT BUSINESS INC",
+     "obligation": 7144989965.72
+    },
+    {
+     "name": "MODERNATX, INC.",
+     "obligation": 6920591662.6
+    },
+    {
+     "name": "LOCKHEED MARTIN CORP",
+     "obligation": 6413321651.38
+    },
+    {
+     "name": "REGENERON PHARMACEUTICALS INC",
+     "obligation": 5565000000.0
+    },
+    {
+     "name": "SIKORSKY AIRCRAFT CORPORATION",
+     "obligation": 4665014888.17
+    },
+    {
+     "name": "RTX CORPORATION",
+     "obligation": 3697599936.69
+    },
+    {
+     "name": "HUNTINGTON INGALLS INC",
+     "obligation": 3632827749.84
+    },
+    {
+     "name": "LEIDOS, INC.",
+     "obligation": 3279757909.4
+    },
+    {
+     "name": "HEALTH NET FEDERAL SERVICES, LLC",
+     "obligation": 3217755178.72
+    },
+    {
+     "name": "MCKESSON CORPORATION",
+     "obligation": 2966827977.0
+    },
+    {
+     "name": "ATLANTIC DIVING SUPPLY, INC.",
+     "obligation": 2773641667.04
+    },
+    {
+     "name": "GENERAL ELECTRIC COMPANY",
+     "obligation": 2772252084.19
+    },
+    {
+     "name": "GENERAL DYNAMICS LAND SYSTEMS INC.",
+     "obligation": 2511308363.24
+    },
+    {
+     "name": "BELL BOEING JOINT PROJECT OFFICE",
+     "obligation": 2470234540.62
+    }
+   ],
+   "by_recipient_state": [
+    {
+     "state": "VA",
+     "obligation": 51875477350.24
+    },
+    {
+     "state": "CA",
+     "obligation": 34698113897.55
+    },
+    {
+     "state": "TX",
+     "obligation": 34532788611.26
+    },
+    {
+     "state": "NY",
+     "obligation": 27445162225.23
+    },
+    {
+     "state": "MA",
+     "obligation": 20099384878.19
+    },
+    {
+     "state": "CT",
+     "obligation": 18365691993.02
+    },
+    {
+     "state": "FL",
+     "obligation": 17850686786.49
+    },
+    {
+     "state": "MD",
+     "obligation": 16086654287.52
+    },
+    {
+     "state": "MO",
+     "obligation": 11391919789.6
+    },
+    {
+     "state": "AZ",
+     "obligation": 10979021929.75
+    },
+    {
+     "state": "WA",
+     "obligation": 10200290580.45
+    },
+    {
+     "state": "PA",
+     "obligation": 9984341019.18
+    },
+    {
+     "state": "KY",
+     "obligation": 9346300310.72
+    },
+    {
+     "state": "AL",
+     "obligation": 9130816014.5
+    },
+    {
+     "state": "CO",
+     "obligation": 8404928470.19
+    }
+   ],
+   "by_performance_state": [
+    {
+     "state": "VA",
+     "obligation": 38921433579.56
+    },
+    {
+     "state": "TX",
+     "obligation": 36024550090.23
+    },
+    {
+     "state": "CA",
+     "obligation": 32628189703.5
+    },
+    {
+     "state": "NY",
+     "obligation": 26803207503.28
+    },
+    {
+     "state": "MA",
+     "obligation": 19327523953.92
+    },
+    {
+     "state": "FL",
+     "obligation": 19199660314.96
+    },
+    {
+     "state": "CT",
+     "obligation": 17860186175.28
+    },
+    {
+     "state": "MD",
+     "obligation": 15411040316.95
+    },
+    {
+     "state": "PA",
+     "obligation": 12690622248.66
+    },
+    {
+     "state": "AZ",
+     "obligation": 11481793729.57
+    },
+    {
+     "state": "KY",
+     "obligation": 10856196564.35
+    },
+    {
+     "state": "WA",
+     "obligation": 10139606074.57
+    },
+    {
+     "state": "MO",
+     "obligation": 10068916969.08
+    },
+    {
+     "state": "AL",
+     "obligation": 9996922594.59
+    },
+    {
+     "state": "CO",
+     "obligation": 7888365493.2
+    }
+   ],
+   "top_naics": [
+    {
+     "code": "336411",
+     "description": "AIRCRAFT MANUFACTURING",
+     "obligation": 39956842829.54
+    },
+    {
+     "code": "541330",
+     "description": "ENGINEERING SERVICES",
+     "obligation": 31058577835.67
+    },
+    {
+     "code": "541715",
+     "description": "RESEARCH AND DEVELOPMENT IN THE PHYSICAL, ENGINEERING, AND LIFE SCIENCES (EXCEPT NANOTECHNOLOGY AND BIOTECHNOLOGY)",
+     "obligation": 19704171432.63
+    },
+    {
+     "code": "336611",
+     "description": "SHIP BUILDING AND REPAIRING",
+     "obligation": 19093007639.78
+    },
+    {
+     "code": "325414",
+     "description": "BIOLOGICAL PRODUCT (EXCEPT DIAGNOSTIC) MANUFACTURING",
+     "obligation": 18937296199.39
+    },
+    {
+     "code": "336414",
+     "description": "GUIDED MISSILE AND SPACE VEHICLE MANUFACTURING",
+     "obligation": 15429236472.04
+    },
+    {
+     "code": "236220",
+     "description": "COMMERCIAL AND INSTITUTIONAL BUILDING CONSTRUCTION",
+     "obligation": 15294660986.39
+    },
+    {
+     "code": "336413",
+     "description": "OTHER AIRCRAFT PARTS AND AUXILIARY EQUIPMENT MANUFACTURING",
+     "obligation": 13851189484.88
+    },
+    {
+     "code": "524114",
+     "description": "DIRECT HEALTH AND MEDICAL INSURANCE CARRIERS",
+     "obligation": 12985966555.09
+    },
+    {
+     "code": "334511",
+     "description": "SEARCH, DETECTION, NAVIGATION, GUIDANCE, AERONAUTICAL, AND NAUTICAL SYSTEM AND INSTRUMENT MANUFACTURING",
+     "obligation": 12600025803.71
+    },
+    {
+     "code": "325412",
+     "description": "PHARMACEUTICAL PREPARATION MANUFACTURING",
+     "obligation": 11510733219.84
+    },
+    {
+     "code": "541712",
+     "description": "RESEARCH AND DEVELOPMENT IN THE PHYSICAL, ENGINEERING, AND LIFE SCIENCES (EXCEPT BIOTECHNOLOGY)",
+     "obligation": 10168891891.95
+    },
+    {
+     "code": "561210",
+     "description": "FACILITIES SUPPORT SERVICES",
+     "obligation": 9270930225.8
+    },
+    {
+     "code": "541519",
+     "description": "OTHER COMPUTER RELATED SERVICES",
+     "obligation": 7950693775.29
+    },
+    {
+     "code": "336412",
+     "description": "AIRCRAFT ENGINE AND ENGINE PARTS MANUFACTURING",
+     "obligation": 7268406813.99
+    }
+   ],
+   "by_set_aside": [
+    {
+     "type": "NO SET ASIDE USED.",
+     "obligation": 193392494499.47
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - TOTAL",
+     "obligation": 14709372857.91
+    },
+    {
+     "type": "8(A) SOLE SOURCE",
+     "obligation": 4478272733.89
+    },
+    {
+     "type": "8A COMPETED",
+     "obligation": 1614298142.52
+    },
+    {
+     "type": "SERVICE DISABLED VETERAN OWNED SMALL BUSINESS SET-ASIDE",
+     "obligation": 1058476392.75
+    },
+    {
+     "type": "HUBZONE SET-ASIDE",
+     "obligation": 386722873.69
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS",
+     "obligation": 385745951.43
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - PARTIAL",
+     "obligation": 125305609.88
+    },
+    {
+     "type": "SDVOSB SOLE SOURCE",
+     "obligation": 48384631.17
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS SOLE SOURCE",
+     "obligation": 35952677.35
+    },
+    {
+     "type": "HUBZONE SOLE SOURCE",
+     "obligation": 17433062.93
+    },
+    {
+     "type": "ECONOMICALLY DISADVANTAGED WOMEN OWNED SMALL BUSINESS",
+     "obligation": 15835171.73
+    }
+   ],
+   "by_competition_exception": [
+    {
+     "reason": "ONLY ONE SOURCE-OTHER (FAR 6.302-1 OTHER)",
+     "obligation": 97704268580.52
+    },
+    {
+     "reason": "URGENCY (FAR 6.302-2)",
+     "obligation": 30904109926.47
+    },
+    {
+     "reason": "UNIQUE SOURCE (FAR 6.302-1(B)(1))",
+     "obligation": 13335712438.66
+    },
+    {
+     "reason": "AUTHORIZED BY STATUTE (FAR 6.302-5(A)(2)(I))",
+     "obligation": 12829353797.97
+    },
+    {
+     "reason": "MOBILIZATION, ESSENTIAL R&D (FAR 6.302-3)",
+     "obligation": 9849710428.6
+    },
+    {
+     "reason": "INTERNATIONAL AGREEMENT (FAR 6.302-4)",
+     "obligation": 8914479661.06
+    },
+    {
+     "reason": "FOLLOW-ON CONTRACT (FAR 6.302-1(A)(2)(II/III))",
+     "obligation": 6782928624.84
+    },
+    {
+     "reason": "NATIONAL SECURITY (FAR 6.302-6)",
+     "obligation": 4768530249.07
+    },
+    {
+     "reason": "SAP NON-COMPETITION (FAR 13)",
+     "obligation": 2157365048.46
+    },
+    {
+     "reason": "PATENT OR DATA RIGHTS (FAR 6.302-1(B)(2))",
+     "obligation": 1246086171.06
+    },
+    {
+     "reason": "UTILITIES (FAR 6.302-1(B)(3))",
+     "obligation": 468798491.74
+    },
+    {
+     "reason": "BRAND NAME DESCRIPTION (FAR 6.302-1(C))",
+     "obligation": 326929530.96
+    }
+   ],
+   "by_extent_competed": [
+    {
+     "code": "C",
+     "label": "Simplified Acquisition ($250K threshold)",
+     "obligation": 156497455193.1
+    },
+    {
+     "code": "A",
+     "label": "Full & Open Competition",
+     "obligation": 151644961614.99
+    },
+    {
+     "code": "D",
+     "label": "Simplified Acquisition / Other",
+     "obligation": 45306465300.91
+    },
+    {
+     "code": "B",
+     "label": "Other Than Full & Open \u2014 Authorized by Statute",
+     "obligation": 20979047845.65
+    },
+    {
+     "code": "F",
+     "label": "Full & Open (Commercial)",
+     "obligation": 8928635440.97
+    },
+    {
+     "code": "G",
+     "label": "Other",
+     "obligation": 3573951239.97
+    },
+    {
+     "code": "E",
+     "label": "E",
+     "obligation": 22230897.04
+    }
+   ],
+   "by_contract_pricing": [
+    {
+     "code": "J",
+     "label": "Firm Fixed Price",
+     "obligation": 221115894107.65
+    },
+    {
+     "code": "U",
+     "label": "Cost Reimbursement",
+     "obligation": 78347992527.46
+    },
+    {
+     "code": "L",
+     "label": "Fixed Price with Economic Price Adjustment",
+     "obligation": 36075796630.97
+    },
+    {
+     "code": "V",
+     "label": "Cost Plus Fixed Fee",
+     "obligation": 24848427890.03
+    },
+    {
+     "code": "K",
+     "label": "Cost Plus Incentive Fee",
+     "obligation": 10069480952.87
+    },
+    {
+     "code": "S",
+     "label": "Cost Plus Award Fee",
+     "obligation": 5894292735.8
+    },
+    {
+     "code": "R",
+     "label": "Time & Materials / Labor Hour",
+     "obligation": 5355155877.18
+    },
+    {
+     "code": "Y",
+     "label": "Incentive Fixed Price",
+     "obligation": 1916087178.52
+    },
+    {
+     "code": "B",
+     "label": "Fixed Price Incentive",
+     "obligation": 1177866972.97
+    },
+    {
+     "code": "M",
+     "label": "Cost Plus Fixed Fee (variant)",
+     "obligation": 890837273.75
+    },
+    {
+     "code": "Z",
+     "label": "Not Applicable / IDV",
+     "obligation": 764295466.32
+    },
+    {
+     "code": "A",
+     "label": "Cost Reimbursement (variant)",
+     "obligation": 319447746.99
+    }
+   ]
+  },
+  {
+   "fiscal_year": 2022,
+   "total_obligation": 414377543337.02,
+   "award_count": 4351900,
+   "simplified_commercial_awards": 31329,
+   "by_sub_agency": [
+    {
+     "name": "Department of the Navy",
+     "obligation": 123940501202.99
+    },
+    {
+     "name": "Department of the Army",
+     "obligation": 112342518924.61
+    },
+    {
+     "name": "Department of the Air Force",
+     "obligation": 78776618954.97
+    },
+    {
+     "name": "Defense Logistics Agency",
+     "obligation": 48299633446.95
+    },
+    {
+     "name": "Defense Health Agency",
+     "obligation": 17804358422.1
+    },
+    {
+     "name": "Missile Defense Agency",
+     "obligation": 9848144034.78
+    },
+    {
+     "name": "Defense Information Systems Agency",
+     "obligation": 6286578378.19
+    },
+    {
+     "name": "U.S. Special Operations Command",
+     "obligation": 4395268801.34
+    },
+    {
+     "name": "USTRANSCOM",
+     "obligation": 4227721711.2
+    },
+    {
+     "name": "Washington Headquarters Services",
+     "obligation": 2133797643.36
+    },
+    {
+     "name": "Defense Advanced Research Projects Agency",
+     "obligation": 1669986931.4
+    },
+    {
+     "name": "Defense Threat Reduction Agency",
+     "obligation": 913018306.84
+    },
+    {
+     "name": "Defense Microelectronics Activity",
+     "obligation": 903183279.64
+    },
+    {
+     "name": "Defense Counterintelligence and Security Agency",
+     "obligation": 701398144.01
+    },
+    {
+     "name": "Immediate Office of the Secretary of Defense",
+     "obligation": 667896467.47
+    }
+   ],
+   "top_recipients": [
+    {
+     "name": "LOCKHEED MARTIN CORPORATION",
+     "obligation": 35885186896.3
+    },
+    {
+     "name": "PFIZER INC",
+     "obligation": 16669568468.43
+    },
+    {
+     "name": "RAYTHEON COMPANY",
+     "obligation": 14752592641.76
+    },
+    {
+     "name": "THE BOEING COMPANY",
+     "obligation": 14172298802.92
+    },
+    {
+     "name": "NORTHROP GRUMMAN SYSTEMS CORPORATION",
+     "obligation": 9474227878.75
+    },
+    {
+     "name": "ELECTRIC BOAT CORPORATION",
+     "obligation": 9426835904.21
+    },
+    {
+     "name": "RTX CORPORATION",
+     "obligation": 7981399814.08
+    },
+    {
+     "name": "HUMANA GOVERNMENT BUSINESS INC",
+     "obligation": 7739712977.71
+    },
+    {
+     "name": "LOCKHEED MARTIN CORP",
+     "obligation": 6084980216.2
+    },
+    {
+     "name": "GENERAL DYNAMICS LAND SYSTEMS INC.",
+     "obligation": 3949365340.29
+    },
+    {
+     "name": "LEIDOS, INC.",
+     "obligation": 3735697926.26
+    },
+    {
+     "name": "HEALTH NET FEDERAL SERVICES, LLC",
+     "obligation": 3530805878.37
+    },
+    {
+     "name": "SIKORSKY AIRCRAFT CORPORATION",
+     "obligation": 3395088423.75
+    },
+    {
+     "name": "ATLANTIC DIVING SUPPLY, INC.",
+     "obligation": 3036584117.16
+    },
+    {
+     "name": "HUNTINGTON INGALLS INC",
+     "obligation": 2967123121.13
+    },
+    {
+     "name": "MCKESSON CORPORATION",
+     "obligation": 2912482832.2
+    },
+    {
+     "name": "ELI LILLY AND COMPANY",
+     "obligation": 2752650000.0
+    },
+    {
+     "name": "NORTHROP GRUMMAN SYSTEMS CORP",
+     "obligation": 2725027843.39
+    },
+    {
+     "name": "GENERAL ELECTRIC COMPANY",
+     "obligation": 2451228608.82
+    },
+    {
+     "name": "BOOZ ALLEN HAMILTON INC",
+     "obligation": 2383999122.19
+    }
+   ],
+   "by_recipient_state": [
+    {
+     "state": "VA",
+     "obligation": 54097450986.04
+    },
+    {
+     "state": "TX",
+     "obligation": 45273521452.51
+    },
+    {
+     "state": "CA",
+     "obligation": 40985187503.01
+    },
+    {
+     "state": "NY",
+     "obligation": 25811000315.18
+    },
+    {
+     "state": "CT",
+     "obligation": 22264347329.72
+    },
+    {
+     "state": "FL",
+     "obligation": 18822813443.82
+    },
+    {
+     "state": "MD",
+     "obligation": 16344222077.19
+    },
+    {
+     "state": "MA",
+     "obligation": 14213196811.12
+    },
+    {
+     "state": "AZ",
+     "obligation": 12181913972.8
+    },
+    {
+     "state": "PA",
+     "obligation": 11442001176.34
+    },
+    {
+     "state": "CO",
+     "obligation": 10066482157.0
+    },
+    {
+     "state": "KY",
+     "obligation": 9978294906.42
+    },
+    {
+     "state": "AL",
+     "obligation": 8381919426.17
+    },
+    {
+     "state": "MO",
+     "obligation": 8315265384.0
+    },
+    {
+     "state": "IL",
+     "obligation": 7787087396.85
+    }
+   ],
+   "by_performance_state": [
+    {
+     "state": "TX",
+     "obligation": 46575329930.2
+    },
+    {
+     "state": "VA",
+     "obligation": 40315707352.23
+    },
+    {
+     "state": "CA",
+     "obligation": 37001043711.01
+    },
+    {
+     "state": "NY",
+     "obligation": 24801059481.56
+    },
+    {
+     "state": "CT",
+     "obligation": 21732920657.64
+    },
+    {
+     "state": "FL",
+     "obligation": 20850815874.22
+    },
+    {
+     "state": "MD",
+     "obligation": 16146858263.51
+    },
+    {
+     "state": "PA",
+     "obligation": 14482940243.49
+    },
+    {
+     "state": "MA",
+     "obligation": 13775546423.74
+    },
+    {
+     "state": "AZ",
+     "obligation": 12680726251.08
+    },
+    {
+     "state": "KY",
+     "obligation": 10936431014.55
+    },
+    {
+     "state": "AL",
+     "obligation": 9741409202.72
+    },
+    {
+     "state": "CO",
+     "obligation": 8647236202.84
+    },
+    {
+     "state": "IL",
+     "obligation": 7815590331.97
+    },
+    {
+     "state": "MO",
+     "obligation": 7484591619.31
+    }
+   ],
+   "top_naics": [
+    {
+     "code": "336411",
+     "description": "AIRCRAFT MANUFACTURING",
+     "obligation": 36791245313.04
+    },
+    {
+     "code": "541330",
+     "description": "ENGINEERING SERVICES",
+     "obligation": 31848393153.96
+    },
+    {
+     "code": "541715",
+     "description": "RESEARCH AND DEVELOPMENT IN THE PHYSICAL, ENGINEERING, AND LIFE SCIENCES (EXCEPT NANOTECHNOLOGY AND BIOTECHNOLOGY)",
+     "obligation": 24307915454.76
+    },
+    {
+     "code": "325412",
+     "description": "PHARMACEUTICAL PREPARATION MANUFACTURING",
+     "obligation": 23987991507.59
+    },
+    {
+     "code": "336611",
+     "description": "SHIP BUILDING AND REPAIRING",
+     "obligation": 20994968504.97
+    },
+    {
+     "code": "336414",
+     "description": "GUIDED MISSILE AND SPACE VEHICLE MANUFACTURING",
+     "obligation": 19139717259.47
+    },
+    {
+     "code": "236220",
+     "description": "COMMERCIAL AND INSTITUTIONAL BUILDING CONSTRUCTION",
+     "obligation": 17087900648.71
+    },
+    {
+     "code": "336413",
+     "description": "OTHER AIRCRAFT PARTS AND AUXILIARY EQUIPMENT MANUFACTURING",
+     "obligation": 14316095097.17
+    },
+    {
+     "code": "524114",
+     "description": "DIRECT HEALTH AND MEDICAL INSURANCE CARRIERS",
+     "obligation": 14105472178.41
+    },
+    {
+     "code": "324110",
+     "description": "PETROLEUM REFINERIES",
+     "obligation": 13663854224.96
+    },
+    {
+     "code": "334511",
+     "description": "SEARCH, DETECTION, NAVIGATION, GUIDANCE, AERONAUTICAL, AND NAUTICAL SYSTEM AND INSTRUMENT MANUFACTURING",
+     "obligation": 13484804036.81
+    },
+    {
+     "code": "336412",
+     "description": "AIRCRAFT ENGINE AND ENGINE PARTS MANUFACTURING",
+     "obligation": 11091175515.64
+    },
+    {
+     "code": "561210",
+     "description": "FACILITIES SUPPORT SERVICES",
+     "obligation": 10429370238.7
+    },
+    {
+     "code": "541519",
+     "description": "OTHER COMPUTER RELATED SERVICES",
+     "obligation": 8335203552.71
+    },
+    {
+     "code": "237990",
+     "description": "OTHER HEAVY AND CIVIL ENGINEERING CONSTRUCTION",
+     "obligation": 8248379612.33
+    }
+   ],
+   "by_set_aside": [
+    {
+     "type": "NO SET ASIDE USED.",
+     "obligation": 201546730347.71
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - TOTAL",
+     "obligation": 16537414171.13
+    },
+    {
+     "type": "8(A) SOLE SOURCE",
+     "obligation": 4630411823.98
+    },
+    {
+     "type": "8A COMPETED",
+     "obligation": 1641165419.82
+    },
+    {
+     "type": "SERVICE DISABLED VETERAN OWNED SMALL BUSINESS SET-ASIDE",
+     "obligation": 1054569312.88
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS",
+     "obligation": 431743394.27
+    },
+    {
+     "type": "HUBZONE SET-ASIDE",
+     "obligation": 368832498.48
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - PARTIAL",
+     "obligation": 108583437.03
+    },
+    {
+     "type": "SDVOSB SOLE SOURCE",
+     "obligation": 38703341.78
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS SOLE SOURCE",
+     "obligation": 32677305.81
+    },
+    {
+     "type": "HUBZONE SOLE SOURCE",
+     "obligation": 31121446.47
+    },
+    {
+     "type": "ECONOMICALLY DISADVANTAGED WOMEN OWNED SMALL BUSINESS",
+     "obligation": 6384990.11
+    }
+   ],
+   "by_competition_exception": [
+    {
+     "reason": "ONLY ONE SOURCE-OTHER (FAR 6.302-1 OTHER)",
+     "obligation": 112030519555.05
+    },
+    {
+     "reason": "MOBILIZATION, ESSENTIAL R&D (FAR 6.302-3)",
+     "obligation": 13144983311.99
+    },
+    {
+     "reason": "AUTHORIZED BY STATUTE (FAR 6.302-5(A)(2)(I))",
+     "obligation": 12718937896.53
+    },
+    {
+     "reason": "URGENCY (FAR 6.302-2)",
+     "obligation": 11402725071.82
+    },
+    {
+     "reason": "UNIQUE SOURCE (FAR 6.302-1(B)(1))",
+     "obligation": 10847764363.87
+    },
+    {
+     "reason": "INTERNATIONAL AGREEMENT (FAR 6.302-4)",
+     "obligation": 8902925921.03
+    },
+    {
+     "reason": "FOLLOW-ON CONTRACT (FAR 6.302-1(A)(2)(II/III))",
+     "obligation": 6252310081.6
+    },
+    {
+     "reason": "NATIONAL SECURITY (FAR 6.302-6)",
+     "obligation": 4578349945.44
+    },
+    {
+     "reason": "SAP NON-COMPETITION (FAR 13)",
+     "obligation": 2235926842.46
+    },
+    {
+     "reason": "PATENT OR DATA RIGHTS (FAR 6.302-1(B)(2))",
+     "obligation": 1023036365.87
+    },
+    {
+     "reason": "UTILITIES (FAR 6.302-1(B)(3))",
+     "obligation": 491683348.72
+    },
+    {
+     "reason": "BRAND NAME DESCRIPTION (FAR 6.302-1(C))",
+     "obligation": 483437427.31
+    }
+   ],
+   "by_extent_competed": [
+    {
+     "code": "A",
+     "label": "Full & Open Competition",
+     "obligation": 179254590434.47
+    },
+    {
+     "code": "C",
+     "label": "Simplified Acquisition ($250K threshold)",
+     "obligation": 142035174594.23
+    },
+    {
+     "code": "D",
+     "label": "Simplified Acquisition / Other",
+     "obligation": 57889009560.31
+    },
+    {
+     "code": "B",
+     "label": "Other Than Full & Open \u2014 Authorized by Statute",
+     "obligation": 22177199687.43
+    },
+    {
+     "code": "F",
+     "label": "Full & Open (Commercial)",
+     "obligation": 9381564641.1
+    },
+    {
+     "code": "G",
+     "label": "Other",
+     "obligation": 3618143275.18
+    },
+    {
+     "code": "E",
+     "label": "E",
+     "obligation": 21792141.07
+    }
+   ],
+   "by_contract_pricing": [
+    {
+     "code": "J",
+     "label": "Firm Fixed Price",
+     "obligation": 229044857351.14
+    },
+    {
+     "code": "U",
+     "label": "Cost Reimbursement",
+     "obligation": 82979165763.08
+    },
+    {
+     "code": "L",
+     "label": "Fixed Price with Economic Price Adjustment",
+     "obligation": 44453969471.07
+    },
+    {
+     "code": "V",
+     "label": "Cost Plus Fixed Fee",
+     "obligation": 24836779579.53
+    },
+    {
+     "code": "K",
+     "label": "Cost Plus Incentive Fee",
+     "obligation": 17543526210.75
+    },
+    {
+     "code": "S",
+     "label": "Cost Plus Award Fee",
+     "obligation": 5834454641.24
+    },
+    {
+     "code": "R",
+     "label": "Time & Materials / Labor Hour",
+     "obligation": 4696780912.97
+    },
+    {
+     "code": "Y",
+     "label": "Incentive Fixed Price",
+     "obligation": 1827117313.48
+    },
+    {
+     "code": "B",
+     "label": "Fixed Price Incentive",
+     "obligation": 1042368431.07
+    },
+    {
+     "code": "Z",
+     "label": "Not Applicable / IDV",
+     "obligation": 1025845804.99
+    },
+    {
+     "code": "M",
+     "label": "Cost Plus Fixed Fee (variant)",
+     "obligation": 571312083.91
+    },
+    {
+     "code": "A",
+     "label": "Cost Reimbursement (variant)",
+     "obligation": 443989542.1
+    }
+   ]
+  },
+  {
+   "fiscal_year": 2023,
+   "total_obligation": 456792386534.12,
+   "award_count": 4404726,
+   "simplified_commercial_awards": 30500,
+   "by_sub_agency": [
+    {
+     "name": "Department of the Navy",
+     "obligation": 151849627895.29
+    },
+    {
+     "name": "Department of the Army",
+     "obligation": 111651950312.35
+    },
+    {
+     "name": "Department of the Air Force",
+     "obligation": 92366156625.86
+    },
+    {
+     "name": "Defense Logistics Agency",
+     "obligation": 50530805329.5
+    },
+    {
+     "name": "Defense Health Agency",
+     "obligation": 18507210684.09
+    },
+    {
+     "name": "Missile Defense Agency",
+     "obligation": 7075527126.51
+    },
+    {
+     "name": "Defense Information Systems Agency",
+     "obligation": 6484962748.56
+    },
+    {
+     "name": "USTRANSCOM",
+     "obligation": 4688304292.61
+    },
+    {
+     "name": "U.S. Special Operations Command",
+     "obligation": 4255791777.18
+    },
+    {
+     "name": "Washington Headquarters Services",
+     "obligation": 2481860260.92
+    },
+    {
+     "name": "Defense Advanced Research Projects Agency",
+     "obligation": 1624506919.22
+    },
+    {
+     "name": "Defense Microelectronics Activity",
+     "obligation": 1294026401.66
+    },
+    {
+     "name": "Defense Threat Reduction Agency",
+     "obligation": 1245398761.56
+    },
+    {
+     "name": "Defense Counterintelligence and Security Agency",
+     "obligation": 800796912.25
+    },
+    {
+     "name": "Defense Commissary Agency",
+     "obligation": 394452832.21
+    }
+   ],
+   "top_recipients": [
+    {
+     "name": "LOCKHEED MARTIN CORPORATION",
+     "obligation": 55581174317.06
+    },
+    {
+     "name": "THE BOEING COMPANY",
+     "obligation": 21512596651.69
+    },
+    {
+     "name": "RAYTHEON COMPANY",
+     "obligation": 17601721614.87
+    },
+    {
+     "name": "NORTHROP GRUMMAN SYSTEMS CORPORATION",
+     "obligation": 11307961745.77
+    },
+    {
+     "name": "ELECTRIC BOAT CORPORATION",
+     "obligation": 10832262197.66
+    },
+    {
+     "name": "RTX CORPORATION",
+     "obligation": 8219634524.45
+    },
+    {
+     "name": "HUMANA GOVERNMENT BUSINESS INC",
+     "obligation": 7779551423.4
+    },
+    {
+     "name": "LOCKHEED MARTIN CORP",
+     "obligation": 7155336260.13
+    },
+    {
+     "name": "HUNTINGTON INGALLS INCORPORATED",
+     "obligation": 5947009942.98
+    },
+    {
+     "name": "SIKORSKY AIRCRAFT CORPORATION",
+     "obligation": 5230226565.18
+    },
+    {
+     "name": "ATLANTIC DIVING SUPPLY, INC.",
+     "obligation": 4423508274.84
+    },
+    {
+     "name": "AMERISOURCEBERGEN DRUG CORP",
+     "obligation": 4392827444.45
+    },
+    {
+     "name": "GENERAL ELECTRIC COMPANY",
+     "obligation": 3917791367.46
+    },
+    {
+     "name": "NORTHROP GRUMMAN SYSTEMS CORP",
+     "obligation": 3708991234.16
+    },
+    {
+     "name": "LEIDOS, INC.",
+     "obligation": 3649910082.88
+    },
+    {
+     "name": "HEALTH NET FEDERAL SERVICES, LLC",
+     "obligation": 3601081143.53
+    },
+    {
+     "name": "GENERAL DYNAMICS LAND SYSTEMS INC.",
+     "obligation": 3523205474.64
+    },
+    {
+     "name": "HUNTINGTON INGALLS INC",
+     "obligation": 3183330921.73
+    },
+    {
+     "name": "BAE SYSTEMS LAND & ARMAMENTS L.P.",
+     "obligation": 2634957355.14
+    },
+    {
+     "name": "BOOZ ALLEN HAMILTON INC",
+     "obligation": 2535214720.08
+    }
+   ],
+   "by_recipient_state": [
+    {
+     "state": "TX",
+     "obligation": 62496903526.09
+    },
+    {
+     "state": "VA",
+     "obligation": 60110654838.84
+    },
+    {
+     "state": "CA",
+     "obligation": 39331529307.44
+    },
+    {
+     "state": "CT",
+     "obligation": 25641515384.9
+    },
+    {
+     "state": "FL",
+     "obligation": 20664776817.75
+    },
+    {
+     "state": "MD",
+     "obligation": 18364708033.95
+    },
+    {
+     "state": "PA",
+     "obligation": 16817055126.66
+    },
+    {
+     "state": "AZ",
+     "obligation": 16411605271.64
+    },
+    {
+     "state": "MA",
+     "obligation": 15933798789.96
+    },
+    {
+     "state": "MO",
+     "obligation": 12945085639.76
+    },
+    {
+     "state": "NY",
+     "obligation": 11948477112.32
+    },
+    {
+     "state": "CO",
+     "obligation": 11496629059.64
+    },
+    {
+     "state": "KY",
+     "obligation": 10227795135.45
+    },
+    {
+     "state": "AL",
+     "obligation": 8915767083.33
+    },
+    {
+     "state": "IL",
+     "obligation": 8540819966.91
+    }
+   ],
+   "by_performance_state": [
+    {
+     "state": "TX",
+     "obligation": 61154026904.66
+    },
+    {
+     "state": "VA",
+     "obligation": 44546205086.44
+    },
+    {
+     "state": "CA",
+     "obligation": 38550368741.89
+    },
+    {
+     "state": "CT",
+     "obligation": 25386385258.99
+    },
+    {
+     "state": "FL",
+     "obligation": 21670788683.57
+    },
+    {
+     "state": "PA",
+     "obligation": 18373707707.27
+    },
+    {
+     "state": "MD",
+     "obligation": 17714098295.52
+    },
+    {
+     "state": "AZ",
+     "obligation": 16784355317.85
+    },
+    {
+     "state": "MA",
+     "obligation": 14678541572.25
+    },
+    {
+     "state": "MO",
+     "obligation": 11853574860.74
+    },
+    {
+     "state": "KY",
+     "obligation": 11348851644.6
+    },
+    {
+     "state": "AL",
+     "obligation": 11094886501.91
+    },
+    {
+     "state": "NY",
+     "obligation": 10927175487.49
+    },
+    {
+     "state": "CO",
+     "obligation": 9012937317.7
+    },
+    {
+     "state": "MS",
+     "obligation": 7808856890.82
+    }
+   ],
+   "top_naics": [
+    {
+     "code": "336411",
+     "description": "AIRCRAFT MANUFACTURING",
+     "obligation": 59711662623.19
+    },
+    {
+     "code": "541330",
+     "description": "ENGINEERING SERVICES",
+     "obligation": 36017044688.94
+    },
+    {
+     "code": "541715",
+     "description": "RESEARCH AND DEVELOPMENT IN THE PHYSICAL, ENGINEERING, AND LIFE SCIENCES (EXCEPT NANOTECHNOLOGY AND BIOTECHNOLOGY)",
+     "obligation": 28825666553.13
+    },
+    {
+     "code": "336611",
+     "description": "SHIP BUILDING AND REPAIRING",
+     "obligation": 25436843461.84
+    },
+    {
+     "code": "336414",
+     "description": "GUIDED MISSILE AND SPACE VEHICLE MANUFACTURING",
+     "obligation": 24425346637.51
+    },
+    {
+     "code": "236220",
+     "description": "COMMERCIAL AND INSTITUTIONAL BUILDING CONSTRUCTION",
+     "obligation": 21765263328.53
+    },
+    {
+     "code": "334511",
+     "description": "SEARCH, DETECTION, NAVIGATION, GUIDANCE, AERONAUTICAL, AND NAUTICAL SYSTEM AND INSTRUMENT MANUFACTURING",
+     "obligation": 16378065031.99
+    },
+    {
+     "code": "336413",
+     "description": "OTHER AIRCRAFT PARTS AND AUXILIARY EQUIPMENT MANUFACTURING",
+     "obligation": 15971926763.1
+    },
+    {
+     "code": "524114",
+     "description": "DIRECT HEALTH AND MEDICAL INSURANCE CARRIERS",
+     "obligation": 14059890816.13
+    },
+    {
+     "code": "336412",
+     "description": "AIRCRAFT ENGINE AND ENGINE PARTS MANUFACTURING",
+     "obligation": 13653808190.18
+    },
+    {
+     "code": "324110",
+     "description": "PETROLEUM REFINERIES",
+     "obligation": 12629871346.2
+    },
+    {
+     "code": "561210",
+     "description": "FACILITIES SUPPORT SERVICES",
+     "obligation": 10680810685.23
+    },
+    {
+     "code": "541519",
+     "description": "OTHER COMPUTER RELATED SERVICES",
+     "obligation": 8632855019.67
+    },
+    {
+     "code": "332993",
+     "description": "AMMUNITION (EXCEPT SMALL ARMS) MANUFACTURING",
+     "obligation": 8025551938.14
+    },
+    {
+     "code": "237990",
+     "description": "OTHER HEAVY AND CIVIL ENGINEERING CONSTRUCTION",
+     "obligation": 7969862193.74
+    }
+   ],
+   "by_set_aside": [
+    {
+     "type": "NO SET ASIDE USED.",
+     "obligation": 211422382989.85
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - TOTAL",
+     "obligation": 18274034194.59
+    },
+    {
+     "type": "8(A) SOLE SOURCE",
+     "obligation": 5581512123.45
+    },
+    {
+     "type": "8A COMPETED",
+     "obligation": 1799455666.5
+    },
+    {
+     "type": "SERVICE DISABLED VETERAN OWNED SMALL BUSINESS SET-ASIDE",
+     "obligation": 1078770313.7
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS",
+     "obligation": 477270725.18
+    },
+    {
+     "type": "HUBZONE SET-ASIDE",
+     "obligation": 437814025.19
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - PARTIAL",
+     "obligation": 84242307.2
+    },
+    {
+     "type": "SDVOSB SOLE SOURCE",
+     "obligation": 43553292.21
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS SOLE SOURCE",
+     "obligation": 38209758.31
+    },
+    {
+     "type": "HUBZONE SOLE SOURCE",
+     "obligation": 31916298.3
+    },
+    {
+     "type": "ECONOMICALLY DISADVANTAGED WOMEN OWNED SMALL BUSINESS",
+     "obligation": 18442536.71
+    }
+   ],
+   "by_competition_exception": [
+    {
+     "reason": "ONLY ONE SOURCE-OTHER (FAR 6.302-1 OTHER)",
+     "obligation": 143327532133.16
+    },
+    {
+     "reason": "MOBILIZATION, ESSENTIAL R&D (FAR 6.302-3)",
+     "obligation": 19113832393.01
+    },
+    {
+     "reason": "AUTHORIZED BY STATUTE (FAR 6.302-5(A)(2)(I))",
+     "obligation": 14537518317.39
+    },
+    {
+     "reason": "FOLLOW-ON CONTRACT (FAR 6.302-1(A)(2)(II/III))",
+     "obligation": 11371261984.21
+    },
+    {
+     "reason": "UNIQUE SOURCE (FAR 6.302-1(B)(1))",
+     "obligation": 9974477346.85
+    },
+    {
+     "reason": "INTERNATIONAL AGREEMENT (FAR 6.302-4)",
+     "obligation": 9457855425.95
+    },
+    {
+     "reason": "NATIONAL SECURITY (FAR 6.302-6)",
+     "obligation": 5144106569.19
+    },
+    {
+     "reason": "SAP NON-COMPETITION (FAR 13)",
+     "obligation": 2474989523.47
+    },
+    {
+     "reason": "BRAND NAME DESCRIPTION (FAR 6.302-1(C))",
+     "obligation": 1345346068.82
+    },
+    {
+     "reason": "URGENCY (FAR 6.302-2)",
+     "obligation": 1196311321.41
+    },
+    {
+     "reason": "PUBLIC INTEREST (FAR 6.302-7)",
+     "obligation": 993144879.1
+    },
+    {
+     "reason": "PATENT OR DATA RIGHTS (FAR 6.302-1(B)(2))",
+     "obligation": 961671861.71
+    }
+   ],
+   "by_extent_competed": [
+    {
+     "code": "A",
+     "label": "Full & Open Competition",
+     "obligation": 179502618068.74
+    },
+    {
+     "code": "C",
+     "label": "Simplified Acquisition ($250K threshold)",
+     "obligation": 175147419185.85
+    },
+    {
+     "code": "D",
+     "label": "Simplified Acquisition / Other",
+     "obligation": 61906762936.98
+    },
+    {
+     "code": "B",
+     "label": "Other Than Full & Open \u2014 Authorized by Statute",
+     "obligation": 25790761320.91
+    },
+    {
+     "code": "F",
+     "label": "Full & Open (Commercial)",
+     "obligation": 10368499790.91
+    },
+    {
+     "code": "G",
+     "label": "Other",
+     "obligation": 4065847034.46
+    },
+    {
+     "code": "E",
+     "label": "E",
+     "obligation": 10399193.02
+    }
+   ],
+   "by_contract_pricing": [
+    {
+     "code": "J",
+     "label": "Firm Fixed Price",
+     "obligation": 241353515191.83
+    },
+    {
+     "code": "U",
+     "label": "Cost Reimbursement",
+     "obligation": 87249901348.91
+    },
+    {
+     "code": "L",
+     "label": "Fixed Price with Economic Price Adjustment",
+     "obligation": 64664701668.22
+    },
+    {
+     "code": "V",
+     "label": "Cost Plus Fixed Fee",
+     "obligation": 27839363159.75
+    },
+    {
+     "code": "K",
+     "label": "Cost Plus Incentive Fee",
+     "obligation": 17531111225.92
+    },
+    {
+     "code": "S",
+     "label": "Cost Plus Award Fee",
+     "obligation": 6668024676.24
+    },
+    {
+     "code": "R",
+     "label": "Time & Materials / Labor Hour",
+     "obligation": 5108882727.16
+    },
+    {
+     "code": "Y",
+     "label": "Incentive Fixed Price",
+     "obligation": 2475764719.28
+    },
+    {
+     "code": "B",
+     "label": "Fixed Price Incentive",
+     "obligation": 1322869376.06
+    },
+    {
+     "code": "Z",
+     "label": "Not Applicable / IDV",
+     "obligation": 1306440332.68
+    },
+    {
+     "code": "M",
+     "label": "Cost Plus Fixed Fee (variant)",
+     "obligation": 910160202.18
+    },
+    {
+     "code": "A",
+     "label": "Cost Reimbursement (variant)",
+     "obligation": 313209989.39
+    }
+   ]
+  },
+  {
+   "fiscal_year": 2024,
+   "total_obligation": 446005170061.45,
+   "award_count": 4420732,
+   "simplified_commercial_awards": 30154,
+   "by_sub_agency": [
+    {
+     "name": "Department of the Navy",
+     "obligation": 134936367830.1
+    },
+    {
+     "name": "Department of the Army",
+     "obligation": 103995055988.57
+    },
+    {
+     "name": "Department of the Air Force",
+     "obligation": 99910933821.94
+    },
+    {
+     "name": "Defense Logistics Agency",
+     "obligation": 53152061547.58
+    },
+    {
+     "name": "Defense Health Agency",
+     "obligation": 18617783862.85
+    },
+    {
+     "name": "Missile Defense Agency",
+     "obligation": 8461434265.19
+    },
+    {
+     "name": "Defense Information Systems Agency",
+     "obligation": 7106176976.28
+    },
+    {
+     "name": "USTRANSCOM",
+     "obligation": 5159852974.72
+    },
+    {
+     "name": "U.S. Special Operations Command",
+     "obligation": 4926311497.66
+    },
+    {
+     "name": "Washington Headquarters Services",
+     "obligation": 2670303518.35
+    },
+    {
+     "name": "Defense Advanced Research Projects Agency",
+     "obligation": 1808311631.63
+    },
+    {
+     "name": "Defense Microelectronics Activity",
+     "obligation": 1383556116.03
+    },
+    {
+     "name": "Defense Threat Reduction Agency",
+     "obligation": 1329699724.69
+    },
+    {
+     "name": "Defense Counterintelligence and Security Agency",
+     "obligation": 925303946.55
+    },
+    {
+     "name": "Defense Commissary Agency",
+     "obligation": 419098046.48
+    }
+   ],
+   "top_recipients": [
+    {
+     "name": "LOCKHEED MARTIN CORPORATION",
+     "obligation": 39655038047.46
+    },
+    {
+     "name": "THE BOEING COMPANY",
+     "obligation": 22348448826.27
+    },
+    {
+     "name": "RAYTHEON COMPANY",
+     "obligation": 17317075862.54
+    },
+    {
+     "name": "NORTHROP GRUMMAN SYSTEMS CORPORATION",
+     "obligation": 12469943437.97
+    },
+    {
+     "name": "ELECTRIC BOAT CORPORATION",
+     "obligation": 8584959335.3
+    },
+    {
+     "name": "HUMANA GOVERNMENT BUSINESS INC",
+     "obligation": 8029206899.38
+    },
+    {
+     "name": "AMERISOURCEBERGEN DRUG CORP",
+     "obligation": 6079772491.5
+    },
+    {
+     "name": "RTX CORPORATION",
+     "obligation": 5040899480.46
+    },
+    {
+     "name": "LOCKHEED MARTIN CORP",
+     "obligation": 5020704201.35
+    },
+    {
+     "name": "SIKORSKY AIRCRAFT CORPORATION",
+     "obligation": 4732250011.96
+    },
+    {
+     "name": "ATLANTIC DIVING SUPPLY, INC.",
+     "obligation": 4650068572.02
+    },
+    {
+     "name": "NORTHROP GRUMMAN SYSTEMS CORP",
+     "obligation": 4416123081.08
+    },
+    {
+     "name": "LEIDOS, INC.",
+     "obligation": 4084693306.09
+    },
+    {
+     "name": "HUNTINGTON INGALLS INCORPORATED",
+     "obligation": 3879293686.22
+    },
+    {
+     "name": "HUNTINGTON INGALLS INC",
+     "obligation": 3581365013.35
+    },
+    {
+     "name": "HEALTH NET FEDERAL SERVICES, LLC",
+     "obligation": 3545991795.3
+    },
+    {
+     "name": "AMENTUM SERVICES, INC.",
+     "obligation": 3376052841.3
+    },
+    {
+     "name": "BAE SYSTEMS LAND & ARMAMENTS L.P.",
+     "obligation": 2830901377.6
+    },
+    {
+     "name": "BOOZ ALLEN HAMILTON INC",
+     "obligation": 2759325099.17
+    },
+    {
+     "name": "GENERAL DYNAMICS LAND SYSTEMS INC.",
+     "obligation": 2649446681.46
+    }
+   ],
+   "by_recipient_state": [
+    {
+     "state": "VA",
+     "obligation": 66292519035.0
+    },
+    {
+     "state": "TX",
+     "obligation": 44143619441.83
+    },
+    {
+     "state": "CA",
+     "obligation": 39119909928.52
+    },
+    {
+     "state": "FL",
+     "obligation": 22737018312.95
+    },
+    {
+     "state": "CT",
+     "obligation": 19676572812.21
+    },
+    {
+     "state": "PA",
+     "obligation": 18982576860.01
+    },
+    {
+     "state": "MD",
+     "obligation": 18930573306.44
+    },
+    {
+     "state": "MA",
+     "obligation": 15562620574.45
+    },
+    {
+     "state": "AZ",
+     "obligation": 14454161982.43
+    },
+    {
+     "state": "MO",
+     "obligation": 14430020265.44
+    },
+    {
+     "state": "NY",
+     "obligation": 11725014226.5
+    },
+    {
+     "state": "CO",
+     "obligation": 11011850077.83
+    },
+    {
+     "state": "AL",
+     "obligation": 10773427469.95
+    },
+    {
+     "state": "KY",
+     "obligation": 10720400103.96
+    },
+    {
+     "state": "WA",
+     "obligation": 8898338552.72
+    }
+   ],
+   "by_performance_state": [
+    {
+     "state": "VA",
+     "obligation": 50452428065.65
+    },
+    {
+     "state": "TX",
+     "obligation": 39188324648.81
+    },
+    {
+     "state": "CA",
+     "obligation": 38701815088.99
+    },
+    {
+     "state": "FL",
+     "obligation": 24579235751.0
+    },
+    {
+     "state": "PA",
+     "obligation": 21508450452.12
+    },
+    {
+     "state": "CT",
+     "obligation": 19407632334.44
+    },
+    {
+     "state": "MD",
+     "obligation": 18418618187.18
+    },
+    {
+     "state": "AZ",
+     "obligation": 15305698963.76
+    },
+    {
+     "state": "MA",
+     "obligation": 14266645168.0
+    },
+    {
+     "state": "AL",
+     "obligation": 13253983923.78
+    },
+    {
+     "state": "MO",
+     "obligation": 12817309810.5
+    },
+    {
+     "state": "KY",
+     "obligation": 11517924779.59
+    },
+    {
+     "state": "NY",
+     "obligation": 10545087543.27
+    },
+    {
+     "state": "CO",
+     "obligation": 9142689360.62
+    },
+    {
+     "state": "WA",
+     "obligation": 8909381918.31
+    }
+   ],
+   "top_naics": [
+    {
+     "code": "336411",
+     "description": "AIRCRAFT MANUFACTURING",
+     "obligation": 43392131106.31
+    },
+    {
+     "code": "541330",
+     "description": "ENGINEERING SERVICES",
+     "obligation": 39667348335.2
+    },
+    {
+     "code": "541715",
+     "description": "RESEARCH AND DEVELOPMENT IN THE PHYSICAL, ENGINEERING, AND LIFE SCIENCES (EXCEPT NANOTECHNOLOGY AND BIOTECHNOLOGY)",
+     "obligation": 30620884857.38
+    },
+    {
+     "code": "336414",
+     "description": "GUIDED MISSILE AND SPACE VEHICLE MANUFACTURING",
+     "obligation": 25032303640.17
+    },
+    {
+     "code": "336611",
+     "description": "SHIP BUILDING AND REPAIRING",
+     "obligation": 22901083177.22
+    },
+    {
+     "code": "236220",
+     "description": "COMMERCIAL AND INSTITUTIONAL BUILDING CONSTRUCTION",
+     "obligation": 20799633164.34
+    },
+    {
+     "code": "336413",
+     "description": "OTHER AIRCRAFT PARTS AND AUXILIARY EQUIPMENT MANUFACTURING",
+     "obligation": 16642253327.82
+    },
+    {
+     "code": "334511",
+     "description": "SEARCH, DETECTION, NAVIGATION, GUIDANCE, AERONAUTICAL, AND NAUTICAL SYSTEM AND INSTRUMENT MANUFACTURING",
+     "obligation": 16641450276.61
+    },
+    {
+     "code": "524114",
+     "description": "DIRECT HEALTH AND MEDICAL INSURANCE CARRIERS",
+     "obligation": 14305407874.27
+    },
+    {
+     "code": "324110",
+     "description": "PETROLEUM REFINERIES",
+     "obligation": 11691212206.37
+    },
+    {
+     "code": "561210",
+     "description": "FACILITIES SUPPORT SERVICES",
+     "obligation": 9942255744.19
+    },
+    {
+     "code": "237990",
+     "description": "OTHER HEAVY AND CIVIL ENGINEERING CONSTRUCTION",
+     "obligation": 9409016734.28
+    },
+    {
+     "code": "332993",
+     "description": "AMMUNITION (EXCEPT SMALL ARMS) MANUFACTURING",
+     "obligation": 9059539779.11
+    },
+    {
+     "code": "541519",
+     "description": "OTHER COMPUTER RELATED SERVICES",
+     "obligation": 8946638275.43
+    },
+    {
+     "code": "541512",
+     "description": "COMPUTER SYSTEMS DESIGN SERVICES",
+     "obligation": 8454340956.85
+    }
+   ],
+   "by_set_aside": [
+    {
+     "type": "NO SET ASIDE USED.",
+     "obligation": 186970676310.99
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - TOTAL",
+     "obligation": 19545830993.56
+    },
+    {
+     "type": "8(A) SOLE SOURCE",
+     "obligation": 6324483631.38
+    },
+    {
+     "type": "8A COMPETED",
+     "obligation": 1945811170.87
+    },
+    {
+     "type": "SERVICE DISABLED VETERAN OWNED SMALL BUSINESS SET-ASIDE",
+     "obligation": 1205595994.94
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS",
+     "obligation": 622661248.63
+    },
+    {
+     "type": "HUBZONE SET-ASIDE",
+     "obligation": 356997320.44
+    },
+    {
+     "type": "SDVOSB SOLE SOURCE",
+     "obligation": 54799511.1
+    },
+    {
+     "type": "HUBZONE SOLE SOURCE",
+     "obligation": 31614224.56
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS SOLE SOURCE",
+     "obligation": 26570191.57
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - PARTIAL",
+     "obligation": 23981425.66
+    },
+    {
+     "type": "ECONOMICALLY DISADVANTAGED WOMEN OWNED SMALL BUSINESS",
+     "obligation": 14294609.66
+    }
+   ],
+   "by_competition_exception": [
+    {
+     "reason": "ONLY ONE SOURCE-OTHER (FAR 6.302-1 OTHER)",
+     "obligation": 120369592934.87
+    },
+    {
+     "reason": "MOBILIZATION, ESSENTIAL R&D (FAR 6.302-3)",
+     "obligation": 17584755014.89
+    },
+    {
+     "reason": "AUTHORIZED BY STATUTE (FAR 6.302-5(A)(2)(I))",
+     "obligation": 15625514719.22
+    },
+    {
+     "reason": "FOLLOW-ON CONTRACT (FAR 6.302-1(A)(2)(II/III))",
+     "obligation": 12130859855.02
+    },
+    {
+     "reason": "INTERNATIONAL AGREEMENT (FAR 6.302-4)",
+     "obligation": 11806938242.66
+    },
+    {
+     "reason": "UNIQUE SOURCE (FAR 6.302-1(B)(1))",
+     "obligation": 10268560089.39
+    },
+    {
+     "reason": "NATIONAL SECURITY (FAR 6.302-6)",
+     "obligation": 5013630392.12
+    },
+    {
+     "reason": "SAP NON-COMPETITION (FAR 13)",
+     "obligation": 2863845839.92
+    },
+    {
+     "reason": "PUBLIC INTEREST (FAR 6.302-7)",
+     "obligation": 2582009851.33
+    },
+    {
+     "reason": "PATENT OR DATA RIGHTS (FAR 6.302-1(B)(2))",
+     "obligation": 991977890.56
+    },
+    {
+     "reason": "URGENCY (FAR 6.302-2)",
+     "obligation": 988496743.77
+    },
+    {
+     "reason": "UTILITIES (FAR 6.302-1(B)(3))",
+     "obligation": 486899298.89
+    }
+   ],
+   "by_extent_competed": [
+    {
+     "code": "A",
+     "label": "Full & Open Competition",
+     "obligation": 184641944240.06
+    },
+    {
+     "code": "C",
+     "label": "Simplified Acquisition ($250K threshold)",
+     "obligation": 152753525324.79
+    },
+    {
+     "code": "D",
+     "label": "Simplified Acquisition / Other",
+     "obligation": 62586350786.29
+    },
+    {
+     "code": "B",
+     "label": "Other Than Full & Open \u2014 Authorized by Statute",
+     "obligation": 30216210440.13
+    },
+    {
+     "code": "F",
+     "label": "Full & Open (Commercial)",
+     "obligation": 11442417437.13
+    },
+    {
+     "code": "G",
+     "label": "Other",
+     "obligation": 4359201964.03
+    },
+    {
+     "code": "E",
+     "label": "E",
+     "obligation": 5440865.78
+    }
+   ],
+   "by_contract_pricing": [
+    {
+     "code": "J",
+     "label": "Firm Fixed Price",
+     "obligation": 242239026615.39
+    },
+    {
+     "code": "U",
+     "label": "Cost Reimbursement",
+     "obligation": 94683194766.68
+    },
+    {
+     "code": "L",
+     "label": "Fixed Price with Economic Price Adjustment",
+     "obligation": 37911411177.02
+    },
+    {
+     "code": "V",
+     "label": "Cost Plus Fixed Fee",
+     "obligation": 32001031103.42
+    },
+    {
+     "code": "K",
+     "label": "Cost Plus Incentive Fee",
+     "obligation": 17364929792.97
+    },
+    {
+     "code": "S",
+     "label": "Cost Plus Award Fee",
+     "obligation": 9099389655.52
+    },
+    {
+     "code": "R",
+     "label": "Time & Materials / Labor Hour",
+     "obligation": 5451128460.42
+    },
+    {
+     "code": "Y",
+     "label": "Incentive Fixed Price",
+     "obligation": 2672368775.27
+    },
+    {
+     "code": "B",
+     "label": "Fixed Price Incentive",
+     "obligation": 1441869154.87
+    },
+    {
+     "code": "M",
+     "label": "Cost Plus Fixed Fee (variant)",
+     "obligation": 1429315564.48
+    },
+    {
+     "code": "Z",
+     "label": "Not Applicable / IDV",
+     "obligation": 1426554519.76
+    },
+    {
+     "code": "A",
+     "label": "Cost Reimbursement (variant)",
+     "obligation": 239635857.78
+    }
+   ]
+  },
+  {
+   "fiscal_year": 2025,
+   "total_obligation": 491653488852.68,
+   "award_count": 4489792,
+   "simplified_commercial_awards": 28262,
+   "by_sub_agency": [
+    {
+     "name": "Department of the Navy",
+     "obligation": 176524334240.78
+    },
+    {
+     "name": "Department of the Army",
+     "obligation": 107443845260.21
+    },
+    {
+     "name": "Department of the Air Force",
+     "obligation": 98382376997.08
+    },
+    {
+     "name": "Defense Logistics Agency",
+     "obligation": 55942018246.59
+    },
+    {
+     "name": "Defense Health Agency",
+     "obligation": 18442770375.37
+    },
+    {
+     "name": "Missile Defense Agency",
+     "obligation": 9084858592.59
+    },
+    {
+     "name": "Defense Information Systems Agency",
+     "obligation": 7160146340.37
+    },
+    {
+     "name": "USTRANSCOM",
+     "obligation": 4819407471.65
+    },
+    {
+     "name": "U.S. Special Operations Command",
+     "obligation": 4304450694.48
+    },
+    {
+     "name": "Washington Headquarters Services",
+     "obligation": 2655233522.28
+    },
+    {
+     "name": "Defense Advanced Research Projects Agency",
+     "obligation": 1817844364.43
+    },
+    {
+     "name": "Defense Microelectronics Activity",
+     "obligation": 1268796989.32
+    },
+    {
+     "name": "Defense Threat Reduction Agency",
+     "obligation": 1134942521.8
+    },
+    {
+     "name": "Defense Counterintelligence and Security Agency",
+     "obligation": 997405281.8
+    },
+    {
+     "name": "Defense Commissary Agency",
+     "obligation": 470242492.46
+    }
+   ],
+   "top_recipients": [
+    {
+     "name": "LOCKHEED MARTIN CORPORATION",
+     "obligation": 62524164594.81
+    },
+    {
+     "name": "RAYTHEON COMPANY",
+     "obligation": 22117895566.84
+    },
+    {
+     "name": "ELECTRIC BOAT CORPORATION",
+     "obligation": 21366142819.4
+    },
+    {
+     "name": "THE BOEING COMPANY",
+     "obligation": 20645456385.83
+    },
+    {
+     "name": "NORTHROP GRUMMAN SYSTEMS CORPORATION",
+     "obligation": 10183305681.95
+    },
+    {
+     "name": "AMERISOURCEBERGEN DRUG CORP",
+     "obligation": 7441520572.54
+    },
+    {
+     "name": "RTX CORPORATION",
+     "obligation": 7283628773.04
+    },
+    {
+     "name": "HUMANA GOVERNMENT BUSINESS INC",
+     "obligation": 6513706438.99
+    },
+    {
+     "name": "LOCKHEED MARTIN CORP",
+     "obligation": 6503738072.87
+    },
+    {
+     "name": "ATLANTIC DIVING SUPPLY, INC.",
+     "obligation": 5711357653.78
+    },
+    {
+     "name": "SIKORSKY AIRCRAFT CORPORATION",
+     "obligation": 4760308966.71
+    },
+    {
+     "name": "HUNTINGTON INGALLS INCORPORATED",
+     "obligation": 4628938515.34
+    },
+    {
+     "name": "HUNTINGTON INGALLS INC",
+     "obligation": 4195762708.42
+    },
+    {
+     "name": "LEIDOS, INC.",
+     "obligation": 4020937901.38
+    },
+    {
+     "name": "TRIWEST HEALTHCARE ALLIANCE CORP",
+     "obligation": 3540417158.48
+    },
+    {
+     "name": "AMENTUM SERVICES, INC.",
+     "obligation": 3070729719.67
+    },
+    {
+     "name": "BOOZ ALLEN HAMILTON INC",
+     "obligation": 3044752876.87
+    },
+    {
+     "name": "GENERAL ELECTRIC COMPANY",
+     "obligation": 2918820163.33
+    },
+    {
+     "name": "SIERRA NEVADA COMPANY, LLC",
+     "obligation": 2765598438.15
+    },
+    {
+     "name": "BAE SYSTEMS LAND & ARMAMENTS L.P.",
+     "obligation": 2576402114.4
+    }
+   ],
+   "by_recipient_state": [
+    {
+     "state": "VA",
+     "obligation": 68166044327.52
+    },
+    {
+     "state": "TX",
+     "obligation": 66674245099.93
+    },
+    {
+     "state": "CA",
+     "obligation": 39631722774.37
+    },
+    {
+     "state": "CT",
+     "obligation": 34669090710.15
+    },
+    {
+     "state": "FL",
+     "obligation": 26673347459.93
+    },
+    {
+     "state": "AZ",
+     "obligation": 19414961446.65
+    },
+    {
+     "state": "PA",
+     "obligation": 19144379732.26
+    },
+    {
+     "state": "MD",
+     "obligation": 17992828002.86
+    },
+    {
+     "state": "MA",
+     "obligation": 16621064405.37
+    },
+    {
+     "state": "MO",
+     "obligation": 13043908188.96
+    },
+    {
+     "state": "AL",
+     "obligation": 11980302162.7
+    },
+    {
+     "state": "CO",
+     "obligation": 11936162046.0
+    },
+    {
+     "state": "NY",
+     "obligation": 10102675648.57
+    },
+    {
+     "state": "KY",
+     "obligation": 8823625579.62
+    },
+    {
+     "state": "WA",
+     "obligation": 8589297162.33
+    }
+   ],
+   "by_performance_state": [
+    {
+     "state": "TX",
+     "obligation": 60836589997.31
+    },
+    {
+     "state": "VA",
+     "obligation": 53059641534.05
+    },
+    {
+     "state": "CA",
+     "obligation": 39219862258.01
+    },
+    {
+     "state": "CT",
+     "obligation": 34631512552.31
+    },
+    {
+     "state": "FL",
+     "obligation": 25452619015.97
+    },
+    {
+     "state": "PA",
+     "obligation": 22739640719.2
+    },
+    {
+     "state": "AZ",
+     "obligation": 19449306651.46
+    },
+    {
+     "state": "MD",
+     "obligation": 19221695171.88
+    },
+    {
+     "state": "MA",
+     "obligation": 16099923828.35
+    },
+    {
+     "state": "AL",
+     "obligation": 14083362818.14
+    },
+    {
+     "state": "MO",
+     "obligation": 10670728563.65
+    },
+    {
+     "state": "CO",
+     "obligation": 9727010579.64
+    },
+    {
+     "state": "KY",
+     "obligation": 9602089301.17
+    },
+    {
+     "state": "WA",
+     "obligation": 8824111935.64
+    },
+    {
+     "state": "GA",
+     "obligation": 8323965720.26
+    }
+   ],
+   "top_naics": [
+    {
+     "code": "336411",
+     "description": "AIRCRAFT MANUFACTURING",
+     "obligation": 60654949442.22
+    },
+    {
+     "code": "541330",
+     "description": "ENGINEERING SERVICES",
+     "obligation": 40106624116.11
+    },
+    {
+     "code": "336611",
+     "description": "SHIP BUILDING AND REPAIRING",
+     "obligation": 36127774677.53
+    },
+    {
+     "code": "541715",
+     "description": "RESEARCH AND DEVELOPMENT IN THE PHYSICAL, ENGINEERING, AND LIFE SCIENCES (EXCEPT NANOTECHNOLOGY AND BIOTECHNOLOGY)",
+     "obligation": 33088072528.42
+    },
+    {
+     "code": "336414",
+     "description": "GUIDED MISSILE AND SPACE VEHICLE MANUFACTURING",
+     "obligation": 29717963632.96
+    },
+    {
+     "code": "336413",
+     "description": "OTHER AIRCRAFT PARTS AND AUXILIARY EQUIPMENT MANUFACTURING",
+     "obligation": 19573133516.87
+    },
+    {
+     "code": "334511",
+     "description": "SEARCH, DETECTION, NAVIGATION, GUIDANCE, AERONAUTICAL, AND NAUTICAL SYSTEM AND INSTRUMENT MANUFACTURING",
+     "obligation": 17934435629.35
+    },
+    {
+     "code": "236220",
+     "description": "COMMERCIAL AND INSTITUTIONAL BUILDING CONSTRUCTION",
+     "obligation": 17213220904.61
+    },
+    {
+     "code": "524114",
+     "description": "DIRECT HEALTH AND MEDICAL INSURANCE CARRIERS",
+     "obligation": 14148821247.93
+    },
+    {
+     "code": "336412",
+     "description": "AIRCRAFT ENGINE AND ENGINE PARTS MANUFACTURING",
+     "obligation": 11968722542.21
+    },
+    {
+     "code": "237990",
+     "description": "OTHER HEAVY AND CIVIL ENGINEERING CONSTRUCTION",
+     "obligation": 9146243486.81
+    },
+    {
+     "code": "541512",
+     "description": "COMPUTER SYSTEMS DESIGN SERVICES",
+     "obligation": 9061005691.14
+    },
+    {
+     "code": "332993",
+     "description": "AMMUNITION (EXCEPT SMALL ARMS) MANUFACTURING",
+     "obligation": 9033186349.17
+    },
+    {
+     "code": "541519",
+     "description": "OTHER COMPUTER RELATED SERVICES",
+     "obligation": 8918608510.93
+    },
+    {
+     "code": "561210",
+     "description": "FACILITIES SUPPORT SERVICES",
+     "obligation": 8908765148.92
+    }
+   ],
+   "by_set_aside": [
+    {
+     "type": "NO SET ASIDE USED.",
+     "obligation": 224153095459.12
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - TOTAL",
+     "obligation": 19904993932.69
+    },
+    {
+     "type": "8(A) SOLE SOURCE",
+     "obligation": 6147640006.78
+    },
+    {
+     "type": "8A COMPETED",
+     "obligation": 2021421894.79
+    },
+    {
+     "type": "SERVICE DISABLED VETERAN OWNED SMALL BUSINESS SET-ASIDE",
+     "obligation": 1114013918.62
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS",
+     "obligation": 635259330.33
+    },
+    {
+     "type": "HUBZONE SET-ASIDE",
+     "obligation": 461209141.87
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - PARTIAL",
+     "obligation": 60544539.56
+    },
+    {
+     "type": "SDVOSB SOLE SOURCE",
+     "obligation": 52302011.73
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS SOLE SOURCE",
+     "obligation": 37720674.08
+    },
+    {
+     "type": "HUBZONE SOLE SOURCE",
+     "obligation": 32812692.33
+    },
+    {
+     "type": "ECONOMICALLY DISADVANTAGED WOMEN OWNED SMALL BUSINESS",
+     "obligation": 16994289.21
+    }
+   ],
+   "by_competition_exception": [
+    {
+     "reason": "ONLY ONE SOURCE-OTHER (FAR 6.302-1 OTHER)",
+     "obligation": 155507079077.38
+    },
+    {
+     "reason": "FOLLOW-ON CONTRACT (FAR 6.302-1(A)(2)(II/III))",
+     "obligation": 17286345303.47
+    },
+    {
+     "reason": "MOBILIZATION, ESSENTIAL R&D (FAR 6.302-3)",
+     "obligation": 16966790446.36
+    },
+    {
+     "reason": "AUTHORIZED BY STATUTE (FAR 6.302-5(A)(2)(I))",
+     "obligation": 16683858533.31
+    },
+    {
+     "reason": "UNIQUE SOURCE (FAR 6.302-1(B)(1))",
+     "obligation": 12419849303.77
+    },
+    {
+     "reason": "INTERNATIONAL AGREEMENT (FAR 6.302-4)",
+     "obligation": 12388992179.46
+    },
+    {
+     "reason": "NATIONAL SECURITY (FAR 6.302-6)",
+     "obligation": 4627846076.82
+    },
+    {
+     "reason": "PUBLIC INTEREST (FAR 6.302-7)",
+     "obligation": 3927932095.52
+    },
+    {
+     "reason": "SAP NON-COMPETITION (FAR 13)",
+     "obligation": 3126147833.92
+    },
+    {
+     "reason": "PATENT OR DATA RIGHTS (FAR 6.302-1(B)(2))",
+     "obligation": 1237956496.05
+    },
+    {
+     "reason": "URGENCY (FAR 6.302-2)",
+     "obligation": 917712747.49
+    },
+    {
+     "reason": "UTILITIES (FAR 6.302-1(B)(3))",
+     "obligation": 576660079.01
+    }
+   ],
+   "by_extent_competed": [
+    {
+     "code": "C",
+     "label": "Simplified Acquisition ($250K threshold)",
+     "obligation": 196269836806.34
+    },
+    {
+     "code": "A",
+     "label": "Full & Open Competition",
+     "obligation": 183227316227.09
+    },
+    {
+     "code": "D",
+     "label": "Simplified Acquisition / Other",
+     "obligation": 63273128236.06
+    },
+    {
+     "code": "B",
+     "label": "Other Than Full & Open \u2014 Authorized by Statute",
+     "obligation": 31386283063.01
+    },
+    {
+     "code": "F",
+     "label": "Full & Open (Commercial)",
+     "obligation": 12748636446.91
+    },
+    {
+     "code": "G",
+     "label": "Other",
+     "obligation": 4747969819.94
+    },
+    {
+     "code": "E",
+     "label": "E",
+     "obligation": 249250.0
+    }
+   ],
+   "by_contract_pricing": [
+    {
+     "code": "J",
+     "label": "Firm Fixed Price",
+     "obligation": 249495726883.56
+    },
+    {
+     "code": "U",
+     "label": "Cost Reimbursement",
+     "obligation": 89277958532.17
+    },
+    {
+     "code": "L",
+     "label": "Fixed Price with Economic Price Adjustment",
+     "obligation": 72630707812.77
+    },
+    {
+     "code": "V",
+     "label": "Cost Plus Fixed Fee",
+     "obligation": 33459281808.67
+    },
+    {
+     "code": "K",
+     "label": "Cost Plus Incentive Fee",
+     "obligation": 16259092824.0
+    },
+    {
+     "code": "R",
+     "label": "Time & Materials / Labor Hour",
+     "obligation": 12929275692.53
+    },
+    {
+     "code": "S",
+     "label": "Cost Plus Award Fee",
+     "obligation": 9522298249.52
+    },
+    {
+     "code": "Y",
+     "label": "Incentive Fixed Price",
+     "obligation": 2623061755.14
+    },
+    {
+     "code": "M",
+     "label": "Cost Plus Fixed Fee (variant)",
+     "obligation": 1972356290.26
+    },
+    {
+     "code": "Z",
+     "label": "Not Applicable / IDV",
+     "obligation": 1588139899.39
+    },
+    {
+     "code": "B",
+     "label": "Fixed Price Incentive",
+     "obligation": 1563106418.56
+    },
+    {
+     "code": "A",
+     "label": "Cost Reimbursement (variant)",
+     "obligation": 299099162.18
+    }
+   ]
+  },
+  {
+   "fiscal_year": 2026,
+   "total_obligation": 282172065772.82,
+   "award_count": 2529673,
+   "simplified_commercial_awards": 12705,
+   "by_sub_agency": [
+    {
+     "name": "Department of the Navy",
+     "obligation": 85407607419.62
+    },
+    {
+     "name": "Department of the Air Force",
+     "obligation": 64497272523.2
+    },
+    {
+     "name": "Department of the Army",
+     "obligation": 62128902229.39
+    },
+    {
+     "name": "Defense Logistics Agency",
+     "obligation": 33397571050.26
+    },
+    {
+     "name": "Defense Health Agency",
+     "obligation": 15448128793.71
+    },
+    {
+     "name": "Missile Defense Agency",
+     "obligation": 7271205194.44
+    },
+    {
+     "name": "Defense Information Systems Agency",
+     "obligation": 3497116312.5
+    },
+    {
+     "name": "U.S. Special Operations Command",
+     "obligation": 2728748786.76
+    },
+    {
+     "name": "USTRANSCOM",
+     "obligation": 2425009211.66
+    },
+    {
+     "name": "Washington Headquarters Services",
+     "obligation": 1191745617.37
+    },
+    {
+     "name": "Defense Advanced Research Projects Agency",
+     "obligation": 888479375.77
+    },
+    {
+     "name": "Defense Microelectronics Activity",
+     "obligation": 668088519.68
+    },
+    {
+     "name": "Defense Threat Reduction Agency",
+     "obligation": 561980312.2
+    },
+    {
+     "name": "Defense Counterintelligence and Security Agency",
+     "obligation": 465031922.32
+    },
+    {
+     "name": "Defense Finance and Accounting Service",
+     "obligation": 374653821.15
+    }
+   ],
+   "top_recipients": [
+    {
+     "name": "LOCKHEED MARTIN CORPORATION",
+     "obligation": 31534741613.74
+    },
+    {
+     "name": "THE BOEING COMPANY",
+     "obligation": 19400017295.97
+    },
+    {
+     "name": "RAYTHEON COMPANY",
+     "obligation": 14052404988.74
+    },
+    {
+     "name": "ELECTRIC BOAT CORPORATION",
+     "obligation": 8588992968.96
+    },
+    {
+     "name": "NORTHROP GRUMMAN SYSTEMS CORPORATION",
+     "obligation": 5746391394.72
+    },
+    {
+     "name": "HUMANA GOVERNMENT BUSINESS INC",
+     "obligation": 5534428596.21
+    },
+    {
+     "name": "AMERISOURCEBERGEN DRUG CORP",
+     "obligation": 4751657716.1
+    },
+    {
+     "name": "TRIWEST HEALTHCARE ALLIANCE CORP",
+     "obligation": 4749594120.2
+    },
+    {
+     "name": "RTX CORPORATION",
+     "obligation": 3766276914.56
+    },
+    {
+     "name": "HUNTINGTON INGALLS INCORPORATED",
+     "obligation": 3491143580.0
+    },
+    {
+     "name": "NORTHROP GRUMMAN SYSTEMS CORP",
+     "obligation": 3403460959.45
+    },
+    {
+     "name": "LOCKHEED MARTIN CORP",
+     "obligation": 3020158507.98
+    },
+    {
+     "name": "HUNTINGTON INGALLS INC",
+     "obligation": 2787584088.4
+    },
+    {
+     "name": "SIKORSKY AIRCRAFT CORPORATION",
+     "obligation": 2772368571.17
+    },
+    {
+     "name": "ATLANTIC DIVING SUPPLY, INC.",
+     "obligation": 2770171932.67
+    },
+    {
+     "name": "LEIDOS, INC.",
+     "obligation": 2398286777.77
+    },
+    {
+     "name": "SIERRA NEVADA COMPANY, LLC",
+     "obligation": 2143836933.46
+    },
+    {
+     "name": "BECHTEL PLANT MACHINERY, INC.",
+     "obligation": 2068310419.0
+    },
+    {
+     "name": "FLUOR MARINE PROPULSION, LLC",
+     "obligation": 2034817196.4
+    },
+    {
+     "name": "BATH IRON WORKS CORPORATION",
+     "obligation": 1988051924.98
+    }
+   ],
+   "by_recipient_state": [
+    {
+     "state": "VA",
+     "obligation": 37225481432.07
+    },
+    {
+     "state": "TX",
+     "obligation": 33762668455.68
+    },
+    {
+     "state": "CA",
+     "obligation": 21098555082.41
+    },
+    {
+     "state": "AZ",
+     "obligation": 17447040416.68
+    },
+    {
+     "state": "CT",
+     "obligation": 15948580545.68
+    },
+    {
+     "state": "PA",
+     "obligation": 12661354410.53
+    },
+    {
+     "state": "FL",
+     "obligation": 11941962488.42
+    },
+    {
+     "state": "MA",
+     "obligation": 10474466304.09
+    },
+    {
+     "state": "MD",
+     "obligation": 10254380178.37
+    },
+    {
+     "state": "WA",
+     "obligation": 8603711371.48
+    },
+    {
+     "state": "AL",
+     "obligation": 7556139996.28
+    },
+    {
+     "state": "MO",
+     "obligation": 7433578996.26
+    },
+    {
+     "state": "CO",
+     "obligation": 6964174646.45
+    },
+    {
+     "state": "KY",
+     "obligation": 6641068503.35
+    },
+    {
+     "state": "NY",
+     "obligation": 4880154472.9
+    }
+   ],
+   "by_performance_state": [
+    {
+     "state": "TX",
+     "obligation": 31598495401.18
+    },
+    {
+     "state": "VA",
+     "obligation": 29829305127.79
+    },
+    {
+     "state": "CA",
+     "obligation": 22795758043.15
+    },
+    {
+     "state": "AZ",
+     "obligation": 17455874508.76
+    },
+    {
+     "state": "CT",
+     "obligation": 15655326498.59
+    },
+    {
+     "state": "PA",
+     "obligation": 15172318590.83
+    },
+    {
+     "state": "FL",
+     "obligation": 15001651249.34
+    },
+    {
+     "state": "MA",
+     "obligation": 10783805928.16
+    },
+    {
+     "state": "MD",
+     "obligation": 10028932195.63
+    },
+    {
+     "state": "WA",
+     "obligation": 8729004614.97
+    },
+    {
+     "state": "AL",
+     "obligation": 8185761383.5
+    },
+    {
+     "state": "KY",
+     "obligation": 7367286933.04
+    },
+    {
+     "state": "MO",
+     "obligation": 6381503006.4
+    },
+    {
+     "state": "CO",
+     "obligation": 5818215434.79
+    },
+    {
+     "state": "MS",
+     "obligation": 4629900675.91
+    }
+   ],
+   "top_naics": [
+    {
+     "code": "336411",
+     "description": "AIRCRAFT MANUFACTURING",
+     "obligation": 34943103312.38
+    },
+    {
+     "code": "336414",
+     "description": "GUIDED MISSILE AND SPACE VEHICLE MANUFACTURING",
+     "obligation": 26154070827.78
+    },
+    {
+     "code": "541330",
+     "description": "ENGINEERING SERVICES",
+     "obligation": 25361896538.25
+    },
+    {
+     "code": "541715",
+     "description": "RESEARCH AND DEVELOPMENT IN THE PHYSICAL, ENGINEERING, AND LIFE SCIENCES (EXCEPT NANOTECHNOLOGY AND BIOTECHNOLOGY)",
+     "obligation": 19849647093.48
+    },
+    {
+     "code": "336611",
+     "description": "SHIP BUILDING AND REPAIRING",
+     "obligation": 14852660132.54
+    },
+    {
+     "code": "524114",
+     "description": "DIRECT HEALTH AND MEDICAL INSURANCE CARRIERS",
+     "obligation": 13001149310.8
+    },
+    {
+     "code": "336413",
+     "description": "OTHER AIRCRAFT PARTS AND AUXILIARY EQUIPMENT MANUFACTURING",
+     "obligation": 11117461177.15
+    },
+    {
+     "code": "237990",
+     "description": "OTHER HEAVY AND CIVIL ENGINEERING CONSTRUCTION",
+     "obligation": 9501188462.45
+    },
+    {
+     "code": "334511",
+     "description": "SEARCH, DETECTION, NAVIGATION, GUIDANCE, AERONAUTICAL, AND NAUTICAL SYSTEM AND INSTRUMENT MANUFACTURING",
+     "obligation": 8780188999.1
+    },
+    {
+     "code": "236220",
+     "description": "COMMERCIAL AND INSTITUTIONAL BUILDING CONSTRUCTION",
+     "obligation": 7471996311.1
+    },
+    {
+     "code": "324110",
+     "description": "PETROLEUM REFINERIES",
+     "obligation": 6775298252.76
+    },
+    {
+     "code": "561210",
+     "description": "FACILITIES SUPPORT SERVICES",
+     "obligation": 5159964462.91
+    },
+    {
+     "code": "336412",
+     "description": "AIRCRAFT ENGINE AND ENGINE PARTS MANUFACTURING",
+     "obligation": 4885697847.4
+    },
+    {
+     "code": "488190",
+     "description": "OTHER SUPPORT ACTIVITIES FOR AIR TRANSPORTATION",
+     "obligation": 4769136761.37
+    },
+    {
+     "code": "541512",
+     "description": "COMPUTER SYSTEMS DESIGN SERVICES",
+     "obligation": 4394484996.71
+    }
+   ],
+   "by_set_aside": [
+    {
+     "type": "NO SET ASIDE USED.",
+     "obligation": 145443846964.79
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - TOTAL",
+     "obligation": 9925135785.76
+    },
+    {
+     "type": "8(A) SOLE SOURCE",
+     "obligation": 2361287806.14
+    },
+    {
+     "type": "8A COMPETED",
+     "obligation": 929592728.63
+    },
+    {
+     "type": "SERVICE DISABLED VETERAN OWNED SMALL BUSINESS SET-ASIDE",
+     "obligation": 630048985.12
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS",
+     "obligation": 285507758.94
+    },
+    {
+     "type": "HUBZONE SET-ASIDE",
+     "obligation": 130189278.38
+    },
+    {
+     "type": "SMALL BUSINESS SET ASIDE - PARTIAL",
+     "obligation": 27452049.21
+    },
+    {
+     "type": "HUBZONE SOLE SOURCE",
+     "obligation": 14650564.4
+    },
+    {
+     "type": "WOMEN OWNED SMALL BUSINESS SOLE SOURCE",
+     "obligation": 14464098.9
+    },
+    {
+     "type": "SDVOSB SOLE SOURCE",
+     "obligation": 13242490.78
+    },
+    {
+     "type": "ECONOMICALLY DISADVANTAGED WOMEN OWNED SMALL BUSINESS",
+     "obligation": 5794167.82
+    }
+   ],
+   "by_competition_exception": [
+    {
+     "reason": "ONLY ONE SOURCE-OTHER (FAR 6.302-1 OTHER)",
+     "obligation": 85682205056.4
+    },
+    {
+     "reason": "UNIQUE SOURCE (FAR 6.302-1(B)(1))",
+     "obligation": 11031928831.8
+    },
+    {
+     "reason": "MOBILIZATION, ESSENTIAL R&D (FAR 6.302-3)",
+     "obligation": 10950517045.61
+    },
+    {
+     "reason": "INTERNATIONAL AGREEMENT (FAR 6.302-4)",
+     "obligation": 10570638886.9
+    },
+    {
+     "reason": "AUTHORIZED BY STATUTE (FAR 6.302-5(A)(2)(I))",
+     "obligation": 8275358960.12
+    },
+    {
+     "reason": "FOLLOW-ON CONTRACT (FAR 6.302-1(A)(2)(II/III))",
+     "obligation": 8253142417.28
+    },
+    {
+     "reason": "NATIONAL SECURITY (FAR 6.302-6)",
+     "obligation": 2154009340.57
+    },
+    {
+     "reason": "SAP NON-COMPETITION (FAR 13)",
+     "obligation": 1753028095.74
+    },
+    {
+     "reason": "URGENCY (FAR 6.302-2)",
+     "obligation": 1635585963.9
+    },
+    {
+     "reason": "PUBLIC INTEREST (FAR 6.302-7)",
+     "obligation": 985966948.6
+    },
+    {
+     "reason": "PATENT OR DATA RIGHTS (FAR 6.302-1(B)(2))",
+     "obligation": 732487664.61
+    },
+    {
+     "reason": "UTILITIES (FAR 6.302-1(B)(3))",
+     "obligation": 266232103.1
+    }
+   ],
+   "by_extent_competed": [
+    {
+     "code": "C",
+     "label": "Simplified Acquisition ($250K threshold)",
+     "obligation": 111056825091.09
+    },
+    {
+     "code": "A",
+     "label": "Full & Open Competition",
+     "obligation": 109519391893.64
+    },
+    {
+     "code": "D",
+     "label": "Simplified Acquisition / Other",
+     "obligation": 31771575792.92
+    },
+    {
+     "code": "B",
+     "label": "Other Than Full & Open \u2014 Authorized by Statute",
+     "obligation": 20356200543.74
+    },
+    {
+     "code": "F",
+     "label": "Full & Open (Commercial)",
+     "obligation": 7074332588.19
+    },
+    {
+     "code": "G",
+     "label": "Other",
+     "obligation": 2393739863.24
+    }
+   ],
+   "by_contract_pricing": [
+    {
+     "code": "J",
+     "label": "Firm Fixed Price",
+     "obligation": 144087144964.94
+    },
+    {
+     "code": "U",
+     "label": "Cost Reimbursement",
+     "obligation": 49053570263.61
+    },
+    {
+     "code": "L",
+     "label": "Fixed Price with Economic Price Adjustment",
+     "obligation": 30634740740.85
+    },
+    {
+     "code": "V",
+     "label": "Cost Plus Fixed Fee",
+     "obligation": 27512063038.67
+    },
+    {
+     "code": "R",
+     "label": "Time & Materials / Labor Hour",
+     "obligation": 14157714387.67
+    },
+    {
+     "code": "K",
+     "label": "Cost Plus Incentive Fee",
+     "obligation": 8675685981.39
+    },
+    {
+     "code": "S",
+     "label": "Cost Plus Award Fee",
+     "obligation": 3779347965.97
+    },
+    {
+     "code": "Y",
+     "label": "Incentive Fixed Price",
+     "obligation": 1431876288.46
+    },
+    {
+     "code": "B",
+     "label": "Fixed Price Incentive",
+     "obligation": 1068612016.96
+    },
+    {
+     "code": "Z",
+     "label": "Not Applicable / IDV",
+     "obligation": 1056748265.52
+    },
+    {
+     "code": "M",
+     "label": "Cost Plus Fixed Fee (variant)",
+     "obligation": 535400620.28
+    },
+    {
+     "code": "A",
+     "label": "Cost Reimbursement (variant)",
+     "obligation": 170225219.37
+    }
+   ]
+  }
+ ]
+}
