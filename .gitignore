@@ -8,6 +8,9 @@ out/
 # Build artifacts / type defs
 next-env.d.ts
 
+# Downloaded FY2027 budget source files (22MB cache from ingest_war_budget.js)
+database/war_budget_cache/
+
 # Local env / secrets
 .env.local
 .env*.local
