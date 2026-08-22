@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "program_name": "Army Procurement Program",
+    "status": "Compliant",
+    "review_date": "2026-01-15"
+  },
+  {
+    "id": 2,
+    "program_name": "Navy Acquisition Program",
+    "status": "Compliant",
+    "review_date": "2026-02-20"
+  },
+  {
+    "id": 3,
+    "program_name": "Air Force RDT&E Program",
+    "status": "Non-Compliant",
+    "review_date": "2026-03-10"
+  }
+]

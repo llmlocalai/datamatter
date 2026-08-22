@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "function_name": "Personnel",
+    "amount": 350000000000.0,
+    "fiscal_year": 2026
+  },
+  {
+    "id": 2,
+    "function_name": "Operations & Maintenance",
+    "amount": 250000000000.0,
+    "fiscal_year": 2026
+  },
+  {
+    "id": 3,
+    "function_name": "Procurement",
+    "amount": 150000000000.0,
+    "fiscal_year": 2026
+  },
+  {
+    "id": 4,
+    "function_name": "Research & Development",
+    "amount": 80000000000.0,
+    "fiscal_year": 2026
+  }
+]

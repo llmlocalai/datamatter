@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "committee": "House Armed Services Committee",
+    "request_date": "2024-02-15",
+    "response_date": "2024-03-01",
+    "status": "Closed"
+  },
+  {
+    "id": 2,
+    "committee": "Senate Appropriations Committee",
+    "request_date": "2024-02-20",
+    "response_date": "2024-03-05",
+    "status": "Closed"
+  },
+  {
+    "id": 3,
+    "committee": "House Oversight Committee",
+    "request_date": "2024-04-10",
+    "response_date": null,
+    "status": "Open"
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "finding_type": "Budget Formulation",
+    "year": 2023,
+    "description": "Issues with budget justification documentation",
+    "status": "Open"
+  },
+  {
+    "id": 2,
+    "finding_type": "Budget Execution",
+    "year": 2023,
+    "description": "Late obligation reporting",
+    "status": "Open"
+  },
+  {
+    "id": 3,
+    "finding_type": "Budget Formulation",
+    "year": 2024,
+    "description": "Inconsistent application of PPBE",
+    "status": "Open"
+  }
+]

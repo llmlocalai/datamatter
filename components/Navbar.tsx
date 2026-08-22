@@ -13,10 +13,11 @@ export default function Navbar() {
   }, []);
 
   const links = [
-    { href: "#about", label: "About" },
-    { href: "#solutions", label: "Solutions" },
-    { href: "#skills", label: "Skills" },
-    { href: "#contact", label: "Contact" },
+    { href: "/showcase", label: "Showcases" },
+    { href: "/budget", label: "Budget" },
+    { href: "/ppbe", label: "PPBE" },
+    { href: "/gao", label: "GAO" },
+    { href: "/congressional", label: "Congress" },
   ];
 
   return (
