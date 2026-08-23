@@ -27,7 +27,7 @@ interface JustificationQuality {
 export default function PPBECompliancePage() {
   const [ppbeData, setPpbeData] = useState<{
     ppbe_compliance: PPBECompliance;
-    omg30_compliance: OMB30Compliance;
+    omb30_compliance: OMB30Compliance;
     justification_quality: JustificationQuality;
   } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -148,25 +148,25 @@ export default function PPBECompliancePage() {
             <div className="glass-card rounded-xl p-6 text-center">
               <div className="text-sm text-accent-400 mb-2">Submitted</div>
               <div className="text-2xl font-bold text-navy-50">
-                {ppbeData.omg30_compliance.submitted}
+                {ppbeData.omb30_compliance.submitted}
               </div>
             </div>
             <div className="glass-card rounded-xl p-6 text-center">
               <div className="text-sm text-accent-400 mb-2">Approved</div>
               <div className="text-2xl font-bold text-green-400">
-                {ppbeData.omg30_compliance.approved}
+                {ppbeData.omb30_compliance.approved}
               </div>
             </div>
             <div className="glass-card rounded-xl p-6 text-center">
               <div className="text-sm text-accent-400 mb-2">Pending</div>
               <div className="text-2xl font-bold text-yellow-400">
-                {ppbeData.omg30_compliance.pending}
+                {ppbeData.omb30_compliance.pending}
               </div>
             </div>
             <div className="glass-card rounded-xl p-6 text-center">
               <div className="text-sm text-accent-400 mb-2">Rejected</div>
               <div className="text-2xl font-bold text-red-400">
-                {ppbeData.omg30_compliance.rejected}
+                {ppbeData.omb30_compliance.rejected}
               </div>
             </div>
           </div>
