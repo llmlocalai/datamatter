@@ -147,8 +147,8 @@ export default function BudgetDashboard() {
             </h1>
             <p className="text-lg text-navy-300 max-w-3xl mx-auto mb-8">
               Interactive analysis of the seven DoD budget display tables (C-1, M-1, O-1, P-1,
-              P-1R, R-1, RF-1), sourced directly from the Office of the Under Secretary of Defense
-              (Comptroller) and stored in Neon Postgres.
+              P-1R, R-1, RF-1), sourced directly from the official DoD budget exhibits and stored in
+              Neon Postgres.
             </p>
             <div className="inline-flex flex-col sm:flex-row items-center gap-4 px-6 py-4 glass-card rounded-2xl">
               <div className="text-left">

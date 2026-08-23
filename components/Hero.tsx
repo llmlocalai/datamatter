@@ -17,7 +17,7 @@ export default function Hero() {
       <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         <div className="animate-fade-in-up">
           <span className="inline-block px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-accent-400 bg-accent-500/10 border border-accent-500/20 rounded-full mb-6">
-            Office of the Under Secretary of Defense for Comptroller
+            Department of Defense
           </span>
 
           <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-navy-50 leading-tight">

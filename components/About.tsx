@@ -34,7 +34,7 @@ export default function About() {
               Bridging AI & Defense Budgeting
              </h2>
              <p className="mt-6 text-navy-300 leading-relaxed">
-              As a budget analyst at OUSD(C), I develop and deploy AI and data
+              As a budget analyst at the Department of Defense (DoD), I develop and deploy AI and data
               science solutions that support the Department of Defense's
               Planning, Programming, Budgeting, and Execution (PPBE) process.
               My work spans machine learning for cost estimation, NLP for

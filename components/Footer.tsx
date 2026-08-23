@@ -8,7 +8,7 @@ export default function Footer() {
               AI
               </div>
               <span className="text-navy-300 text-sm font-medium">
-              OUSD(C) AI Solutions
+              DoD AI Solutions
               </span>
             </div>
 

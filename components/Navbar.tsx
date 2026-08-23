@@ -38,7 +38,7 @@ export default function Navbar() {
               AI
             </div>
             <span className="text-navy-100 font-semibold text-sm hidden sm:block">
-              OUSD(C) AI Solutions
+              DoD AI Solutions
             </span>
           </a>
 
