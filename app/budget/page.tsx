@@ -63,6 +63,13 @@ export default function BudgetDashboard() {
       .finally(() => setLoading(false));
    }, []);
 
+    // Resolved BEFORE the early returns so the hook count is stable across
+    // renders (Rules of Hooks). Null-safe: `data` is null until the fetch lands.
+  const activeExhibit = useMemo<ExhibitSummary | undefined>(
+      () => (data?.exhibits ?? []).find((e) => e.code === active),
+      [data, active]
+    );
+
   if (loading) {
     return (
        <main className="min-h-screen bg-navy-950">
@@ -99,10 +106,6 @@ export default function BudgetDashboard() {
        : 0;
   const yoyUp = yoyPct >= 0;
 
-  const activeExhibit = useMemo<ExhibitSummary | undefined>(
-    () => exhibits.find((e) => e.code === active),
-     [exhibits, active]
-   );
 
   // Trend data for the 3-year grand total (TrendBars).
   const trendData = [
