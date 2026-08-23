@@ -1,193 +1,190 @@
 # DoD Budget & Audit Showcases
 
-Enterprise-grade production-ready showcases for senior budget analysts at the Office of the Under Secretary of Defense for Comptroller (OUSD(C)).
+Enterprise-grade, production-ready showcases for senior budget analysts at the
+Department of Defense (DoD). Every showcase is wired to **live data** — the
+USASpending warehouse and the DoD-FM knowledge bank — not hardcoded rows.
 
 ## Overview
 
-This showcase demonstrates AI and data engineering solutions for:
+This showcase set demonstrates AI and data-engineering solutions for:
 
+- **FY2027 budget analysis** (the seven "-1" display tables, de-duplicated)
 - **PPBE Process** (Planning, Programming, Budgeting, Execution)
-- **OMB 30/130** compliance tracking
+- **OMB A-30 / 130** compliance tracking
 - **GAO audit findings** management
 - **Congressional oversight** coordination
+- **Contracting & procurement intelligence** and **funds control / lapse risk**
 
-## Available Showcases
+## Available showcases
 
-### 1. Budget Analysis Dashboard (`/budget`)
+### 1. FY2027 Budget dashboard (`/budget`)
+**Purpose:** Interactive analysis of the seven DoD budget "-1" display tables
+(C-1, M-1, O-1, P-1, P-1R, R-1, RF-1), sourced from the official exhibits.
+- 3-year (FY25→FY27) totals, discretionary vs mandatory split
+- By-service / by-budget-activity breakdowns
+- Paginated, sortable, filterable **line-item explorer** per exhibit
+- Source-document download (streamed from the Neon bytea store)
+**Data source:** Neon Postgres (`war_budget_line`, `war_budget_file`,
+`war_budget_document`), loaded by `scripts/ingest_war_budget.js`.
 
-**Purpose:** Enterprise-grade budget analysis for senior budget analysts.
+### 2. Contracting & Procurement Intelligence (`/contracting`)
+**Purpose:** Where DoD procurement money goes, to whom, and how much is
+non-competitive.
+- Obligation by awarding component; top prime contractors
+- Small-business / set-aside participation (8(a), SDVOSB, WOSB, HUBZone)
+- Non-competitive / sole-source exposure (FAR 6.302 authorities)
+- FY selector across FY2021–FY2026
+**Data source:** `contracting_intelligence.json` — USASpending agency 097,
+~15–24M contract awards (ETL: `scripts/etl_contracting.py`).
 
-**Features:**
-- Budget function analysis (Personnel, O&M, Procurement, R&D)
-- Agency allocation tracking
-- Fiscal year trends
-- Real-time data from USASpending
+### 3. Budget Execution & Funds Control (`/funds-control`)
+**Purpose:** How much of the appropriated budget is obligated, how much is at
+risk of lapse, and which Treasury accounts consume the most.
+- Obligation rate & outlay rate per fiscal year
+- Unobligated balance = lapse / antideficiency exposure, with a **>25% lapse-risk flag**
+- Top obligating Treasury accounts; FY-over-FY trend
+**Data source:** `funds_control.json` — USASpending file_a at TAS granularity
+(ETL: `scripts/etl_funds_control.py`).
 
-**Data Sources:**
-- USASpending API
-- DoD Financial Management Regulations (FMR)
-- OMB Circulars
-- Congressional Research Service reports
+### 4. Regulatory Q&A (RAG) (`/regulation`)
+**Purpose:** Cited, authority-ranked answers to "what does the FMR / OMB Circular
+/ GAO Red Book say about X?"
+- Best answer + supporting sources, each with a **primary-source citation**
+- Source-authority re-ranking: regulation/statute outrank secondary summaries
+**Data source:** `knowledge_index.json` — BM25 over the curated, authority-tagged
+DoD-FM knowledge wiki (75 pages; ETL: `scripts/etl_knowledge_index.py`).
 
-### 2. PPBE Compliance Tracker (`/ppbe`)
+### 5. PPBE Compliance (`/ppbe`)
+**Purpose:** Program compliance with the Planning, Programming, Budgeting System.
+- Overall compliance rate; non-compliant programs
+- OMB Circular A-30 submitted/approved/pending/rejected
+- Budget-justification quality buckets
+**Data source:** `ppbe.json` + `ppbe_compliance.json`.
 
-**Purpose:** Track program compliance with Planning, Programming, and Budgeting System requirements.
+### 6. GAO Audit Findings (`/gao`)
+**Purpose:** GAO findings and material weaknesses across DoD financial statements.
+- Year-over-year findings & material-weakness trend
+- Finding-type distribution
+**Data source:** `gao.json`.
 
-**Features:**
-- Program compliance rates
-- OMB Circular A-30 tracking
-- Budget justification quality scoring
-- Automated alerts for non-compliance
+### 7. Congressional Oversight (`/congressional`)
+**Purpose:** Congressional requests, testimony schedules, and response rates.
+- Oversight requests by quarter (requests vs responses, per-quarter rate)
+- Upcoming testimony schedule by committee
+**Data source:** `congressional.json` + `congressional_tracking.json`.
 
-**Compliance Metrics:**
-- Overall compliance rate: 89.6%
-- Total programs tracked: 1,250
-- Non-compliant programs: 130
+## Technology stack
 
-### 3. GAO Audit Findings (`/gao`)
+### Data engineering
+- **Data sources:** USASpending, FMR, OMB Circulars, CRS Reports, GAO Reports
+- **Storage:** Parquet warehouse + **Neon (serverless Postgres)**
+- **Processing:** Python (Pandas, PyArrow) ETL scripts in `scripts/`
+- **Pattern:** pre-aggregate in ETL → bake compact JSON → thin serverless route → UI
 
-**Purpose:** Track Government Accountability Office findings and material weaknesses.
-
-**Features:**
-- Year-over-year trend analysis
-- Finding categorization
-- Material weakness tracking
-- Compliance reporting
-
-**Data Sources:**
-- GAO Red Book standards
-- DoD-wide and Service AFRs
-- Audit findings database
-
-### 4. Congressional Oversight (`/congressional`)
-
-**Purpose:** Track congressional requests, testimony schedules, and response rates.
-
-**Features:**
-- Request tracking by committee
-- Response rate metrics
-- Testimony scheduling
-- Committee coordination tools
-
-## Technology Stack
-
-### Data Engineering
-- **Data Sources:** USASpending, FMR, OMB Circulars, CRS Reports, GAO Reports
-- **Storage:** Parquet files, SQLite database
-- **Processing:** Python (Pandas, PyArrow)
-- **Pipeline:** Apache Airflow (planned)
-
-### Machine Learning & AI
-- **Models:** Scikit-learn, XGBoost
-- **NLP:** Hugging Face Transformers, LangChain
-- **Use Cases:** Budget estimation, justification analysis, compliance scoring
+### Machine learning & AI
+- **Retrieval:** BM25 lexical search with source-authority re-ranking (regulation RAG)
+- **Use cases:** budget analysis, justification analysis, compliance scoring
 
 ### Visualization
-- **Libraries:** Plotly, D3.js
-- **Dashboards:** Custom React components with Tailwind CSS
-- **Reporting:** Power BI integration (planned)
+- **Libraries:** custom React + SVG chart components (Tailwind CSS)
+- **Dashboards:** glass-morphism Next.js client components
 
 ### Infrastructure
-- **Frontend:** Next.js 14, React, TypeScript
+- **Frontend:** Next.js 14, React 18, TypeScript
 - **Styling:** Tailwind CSS
-- **Deployment:** Vercel
-- **Database:** SQLite (local), PostgreSQL (planned)
+- **Deployment:** Vercel (https://datamatter.vercel.app)
+- **Database:** Neon (serverless Postgres)
 
-## API Endpoints
+## API endpoints
 
-### Budget API
-- `GET /api/budget` - Budget overview
-- `GET /api/budget?type=functions` - Budget by function
-- `GET /api/budget?type=agencies` - Budget by agency
-- `GET /api/budget?type=fiscal-year` - Budget by fiscal year
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/budget-fy27` | FY2027 overview (totals, exhibits, by-service, by-activity, documents) |
+| `GET /api/budget-fy27/detail` | Paginated/sortable/filterable line items for one exhibit |
+| `GET /api/budget-fy27/document?id=` | Stream a stored source document from the Neon bytea store |
+| `GET /api/contracting[?fiscal-year=]` | Contracting & procurement intelligence |
+| `GET /api/funds-control[?fiscal-year=]` | Funds control / budget execution (file_a) |
+| `GET /api/regulation?q=&top=` | Regulatory Q&A (BM25 + authority) |
+| `GET /api/ppbe` | PPBE compliance + OMB A-30 + justification quality |
+| `GET /api/gao` | GAO audit findings |
+| `GET /api/congressional` | Congressional oversight requests + testimony |
 
-### PPBE API
-- `GET /api/ppbe` - PPBE compliance data
-
-### GAO API
-- `GET /api/gao` - GAO audit findings
-
-### Congressional API
-- `GET /api/congressional` - Congressional oversight data
-
-## Data Flow
+## Data flow
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   USASpending   │────▶│   Processing    │────▶│   Database      │
-│     Data        │     │     Pipeline    │     │   (SQLite)      │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-        ▲                                               │
-        │                                               ▼
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   FMR/OCB/GS    │────▶│   Knowledge     │────▶│   API Layer     │
-│   Documents     │     │   Bank          │     │   (Next.js)     │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                                                       │
-                                                       ▼
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Analytics     │◀───▶│   Dashboard     │◀───▶│   Frontend      │
-│   & ML Models   │     │   Components    │     │   (React)       │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
+USASpending warehouse (parquet)   DoD-FM knowledge bank (markdown/PDF)
+        │ 15–24M award rows              │ 75 curated wiki pages
+        ▼                                ▼
+  scripts/etl_*.py (pyarrow)      scripts/etl_knowledge_index.py (BM25+auth)
+        │  compact JSON artifacts         │ knowledge_index.json
+        └──────────────┬──────────────────┘
+                       ▼
+            app/api/data/*.json   (baked, < 500 KB each)
+                       ▼
+           app/api/* route.ts    (thin, stateless)
+                       ▼
+            app/*/page.tsx        (React UI)
+
+  FY2027 budget: scripts/ingest_war_budget.js  →  Neon Postgres  →  /api/budget-fy27
 ```
 
-## Getting Started
+**Key property:** the web app needs **no code change** to pick up refreshed data —
+it only reads the baked JSON / Neon tables.
 
-1. Clone the repository:
-   ```bash
-   git clone <repo-url>
-   cd datamatter
-   ```
+## Getting started
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+```bash
+git clone <repo-url>
+cd datamatter
+npm install
+npm run dev            # http://localhost:3000
+```
 
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
+Production build (what Vercel runs):
 
-4. Open http://localhost:3000 in your browser
+```bash
+npm run build
+npm run start
+```
 
-## Available Scripts
-
-- `npm run dev` - Start development server
-- `npm run build` - Build production
-- `npm run start` - Start production server
-- `npm run lint` - Run linter
-
-## Project Structure
+## Project structure
 
 ```
 datamatter/
 ├── app/
-│   ├── budget/           # Budget analysis page
-│   ├── ppbe/            # PPBE compliance page
-│   ├── gao/             # GAO audit findings page
-│   ├── congressional/   # Congressional oversight page
-│   ├── showcase/        # Showcase landing page
+│   ├── budget/            # FY2027 "-1" budget dashboard
+│   ├── contracting/       # Contracting & procurement intelligence
+│   ├── funds-control/     # Budget execution / lapse risk
+│   ├── regulation/        # Regulatory Q&A (RAG)
+│   ├── ppbe/              # PPBE compliance
+│   ├── gao/               # GAO audit findings
+│   ├── congressional/     # Congressional oversight
+│   ├── showcase/          # Showcase landing page
 │   ├── api/
-│   │   ├── budget/      # Budget API
-│   │   ├── ppbe/      # PPBE API
-│   │   ├── gao/       # GAO API
-│   │   └── congressional/  # Congressional API
-│   └── page.tsx       # Home page
-├── components/         # React components
-├── database/          # Database schema and scripts
-├── scripts/           # Data processing scripts
-└── public/            # Static assets
+│   │   ├── budget-fy27/  # / , /detail, /document
+│   │   ├── contracting/  # /
+│   │   ├── funds-control/
+│   │   ├── regulation/
+│   │   ├── ppbe/
+│   │   ├── gao/
+│   │   ├── congressional/
+│   │   └── data/         # baked JSON snapshots
+│   └── page.tsx          # Home / marketing
+├── components/            # React components (+ components/budget/*)
+├── lib/                   # db.ts (Neon), fy27-data.ts, data-service.ts
+├── database/              # schema + war-budget source cache
+├── scripts/              # ETL + ingest scripts (run on this Mac only)
+└── TRACKER.md           # living work tracker
 ```
 
-## Data Sources Reference
+## Data sources reference
 
 ### USASpending
 - URL: https://www.usaspending.gov
 - Agency Code: 097 (DoD)
-- Data Types: Awards, Contracts, Assistance
+- Data types: Awards, Contracts, Assistance; file_a (budget execution)
 
-### DoD Financial Management Regulations (FMR)
+### DoD Financial Management Regulation (FMR)
 - Version: DoD 7000.14-R
 - Volumes: Budget Execution, Accounting Policy, Disbursing Policy, etc.
 
@@ -196,13 +193,9 @@ datamatter/
 - A-123: Internal Controls
 - A-136: Financial Report Requirements
 
-### Congressional Research Service
-- Reports on defense budget and appropriations
-- Historical analysis and policy briefs
-
-### Government Accountability Office
-- Audit reports and findings
-- Red Book standards for financial statements
+### Congressional Research Service / GAO
+- CRS reports on the defense budget and appropriations
+- GAO audit reports and findings; Red Book standards for financial statements
 
 ## License
 
@@ -210,4 +203,4 @@ This project is for internal DoD use only.
 
 ## Contact
 
-For questions or issues, contact the AI Solutions team at OUSD(C).
+For questions or issues, contact the DoD AI Solutions team.

@@ -1,7 +1,7 @@
 # Datamatter — Enterprise Use Cases (Live Data)
 
 This document describes the **production-ready, data-driven use cases** built into the
-`datamatter` (OUSD(C) AI Solutions) Next.js/Vercel application. Unlike the original
+`datamatter` (DoD AI Solutions) Next.js/Vercel application. Unlike the original
 demo dashboards — which returned 3–4 hardcoded placeholder rows — each use case below is
 **wired to the real USASpending warehouse and the DoD-FM knowledge bank**, with a proper
 ETL → API → UI pipeline.
@@ -88,7 +88,7 @@ Aggregated by `scripts/etl_funds_control.py`.
 obligated**, **$1.29T** unobligated (50.1%) — correctly flagged as elevated lapse exposure
 for a partial-year view. FY2025 closes near 70% obligated.
 
-**Why it matters for OUSD(C):** unobligated-balance monitoring is the frontline defense
+**Why it matters for DoD:** unobligated-balance monitoring is the frontline defense
 against Antideficiency Act exposure and the raw input to apportionment decisions.
 
 **Files:** `scripts/etl_funds_control.py`, `app/api/data/funds_control.json`,

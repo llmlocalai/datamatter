@@ -7,6 +7,7 @@ out/
 
 # Build artifacts / type defs
 next-env.d.ts
+tsconfig.tsbuildinfo
 
 # Downloaded FY2027 budget source files (22MB cache from ingest_war_budget.js)
 database/war_budget_cache/

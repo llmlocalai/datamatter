@@ -1,177 +1,181 @@
-# Data Sources for DoD Budget Showcase
+# Data Sources for the DoD Budget & Audit Showcases
 
 ## Overview
 
-This document describes the data sources used in the DoD Budget & Audit Showcases, including the knowledge bank data, USASpending data, and regulatory documents.
+This document describes the data sources behind the datamatter showcases: the
+USASpending warehouse, the DoD-FM knowledge bank, the baked JSON snapshots, and
+the FY2027 budget data in Neon Postgres.
 
-## Data Sources
+## Data sources
 
-### 1. USASpending Data
+### 1. USASpending warehouse (live source of truth)
 
 **Location:** `/Volumes/AI_DATA/data/usaspending/`
 
-**Description:** Comprehensive USASpending data for Department of Defense (DoD) agency code 097.
+Comprehensive USASpending data for Department of Defense (DoD) agency code **097**.
 
-**Data Types:**
+**Data types:**
 - Account-level budget data (Parquet files)
 - Contract awards
 - Assistance transactions
 - Reference data (agency codes, CFDA, NAICS, etc.)
 
-**Files Structure:**
+**File structure:**
 ```
 warehouse/
 ├── accounts/
-│   ├── file_a/ (account-level data)
-│   │   └── fiscal_year=*/data_0.parquet
-│   ├── file_b/ (assistance data)
-│   └── file_c_contracts/ (contract data)
+│    ├── file_a/ (account-level / budget-execution data)
+│    │    └── fiscal_year=*/data_0.parquet
+│    ├── file_b/ (assistance data)
+│    └── file_c_contracts/ (contract data)
 ├── assistance/ (assistance vintage data)
 └── contracts/ (contract vintage data)
 ```
 
-**Database Location:** `/Volumes/AI_DATA/git/datamatter/database/dod_budget.db`
+> The ETL scripts read these parquet files **directly, on this Mac only** (they
+> need pyarrow). Vercel functions cannot scan them — which is why the app serves
+> baked JSON / Neon tables instead.
 
-### 2. DoD Financial Management Knowledge Bank
+### 2. DoD Financial Management knowledge bank
 
 **Location:** `/Volumes/AI_DATA/knowledge-bank/DOD-FM-Knowledge-Bank/`
 
-**Description:** Comprehensive collection of DoD financial management regulations, guidance, and documents.
+Curated DoD financial-management regulations, guidance, and documents.
 
-**Key Folders:**
-- `01-Regulations/` - FMR DoD 7000.14-R, OMB Circulars, Treasury USSGL TFM
-- `02-DoD-Guidance/` - DFAS, Army, Navy, Air Force FM Regulations
-- `08-CRS-Congressional-Research-Service/` - CRS reports on defense budget
-- `11-Budget-Justification/` - Budget justification documents and exhibits
-- `12-Oversight/` - GAO reports, DoD IG reports
-- `04-Reference-Data/` - Master data files
+**Key folders:**
+- `01-Regulations/` — FMR DoD 7000.14-R, OMB Circulars, Treasury USSGL TFM
+- `02-DoD-Guidance/` — DFAS, Army, Navy, Air Force FM Regulations
+- `08-CRS-Congressional-Research-Service/` — CRS reports on the defense budget
+- `11-Budget-Justification/` — Budget-justification documents and exhibits
+- `12-Oversight/` — GAO reports, DoD IG reports
+- `04-Reference-Data/` — Master data files
 
-### 3. Budget Data
+The curated wiki subset used by `/regulation` is `knowledge-bank/Wiki/DOD-FM`
+(75 pages), indexed by `scripts/etl_knowledge_index.py` into `knowledge_index.json`.
+
+### 3. Baked JSON snapshots (what the API serves)
 
 **Location:** `/Volumes/AI_DATA/git/datamatter/app/api/data/`
 
-**Description:** Processed JSON data files for API consumption.
+Pre-aggregated JSON produced by the ETLs and read at request time. This is a
+**frozen snapshot** of the warehouse — see `CLAUDE.md`: when a figure here and the
+live brainbank tool disagree, that is a **vintage difference**, and the fix is to
+re-run the ETL, never to hand-edit the JSON.
 
 **Files:**
-- `budget_by_function.json` - Budget allocation by function
-- `budget_by_agency.json` - Budget allocation by agency
-- `budget_by_fiscal_year.json` - Budget trends over fiscal years
-- `ppbe_compliance.json` - PPBE compliance data
-- `gao_audit.json` - GAO audit findings
-- `congressional_tracking.json` - Congressional oversight data
+- `contracting_intelligence.json` — contracting & procurement (USASpending 097)
+- `funds_control.json` — budget execution / unobligated balance (file_a)
+- `gao.json` — GAO findings (aggregated)
+- `ppbe.json` + `ppbe_compliance.json` — PPBE compliance
+- `congressional.json` + `congressional_tracking.json` — congressional oversight
+- `knowledge_index.json` — BM25 index over the DoD-FM wiki (for `/regulation`)
+- `budget_by_*.json` — **orphaned legacy** (superseded by the FY2027 dashboard;
+  still emitted by `scripts/export_to_json.py`). Tracked in `TRACKER.md`.
 
-### 4. Regulatory Documents
+### 4. FY2027 budget data — Neon (serverless Postgres)
+
+**Connection:** via `lib/db.ts` (`DATABASE_URL` in `.env.local`, gitignored).
+
+**Tables:**
+- `war_budget_line` — line items for the 7 exhibits (C-1, M-1, O-1, P-1, P-1R, R-1, RF-1), with a `values` JSONB per row and `fiscal_year`.
+- `war_budget_file` — stored source-document bytes (bytea), streamed by `/api/budget-fy27/document`.
+- `war_budget_document` — catalog of the 37 FY2027 source files.
+
+Loaded by `scripts/ingest_war_budget.js` from `comptroller.war.gov`.
+
+### 5. Regulatory reference documents
 
 **DoD Financial Management Regulation (FMR)**
 - Version: DoD 7000.14-R (2026)
-- Location: `01-Regulations/FMR-DoD-7000.14-R/`
-- Key Volumes:
-  - Vol 1: General Financial Management Information Systems
-  - Vol 2A/B: Budget Formulation and Presentation
-  - Vol 3: Budget Execution
-  - Vol 6A/B: Reporting and Audited Financial Statements
+- Key volumes: Vol 1 (General FM Information Systems), Vol 2A/B (Budget
+  Formulation & Presentation), Vol 3 (Budget Execution), Vol 6A/B (Reporting &
+  Audited Financial Statements).
 
 **OMB Circulars**
 - A-11: Budget Preparation and Execution
 - A-123: Internal Controls
 - A-136: Financial Report Requirements
 
-## Data Processing Pipeline
+## Data processing pipeline
 
-### 1. Data Ingestion
 ```
-USASpending API → Parquet Files → SQLite Database → JSON Files
-```
-
-### 2. Data Processing
-```
-Parquet Files → Python/Pandas → Analysis → JSON Export
+USASpending API  →  Parquet warehouse  →  Python ETL (pyarrow)  →  baked JSON  →  Next.js API  →  UI
+FY2027 exhibits  →  comptroller.war.gov  →  ingest_war_budget.js  →  Neon Postgres  →  /api/budget-fy27
 ```
 
-### 3. API Layer
-```
-JSON Files → Next.js API Routes → Frontend Components
-```
+All SQL in the FY2027 path is parameterized (values bound, never interpolated).
 
-## Data Dictionary
+## Data dictionary
 
-### Budget Functions
+### Budget Functions (legacy `budget_by_function.json`)
 | Field | Type | Description |
 |-------|------|-------------|
 | function_name | string | Name of the budget function |
 | amount | float | Total budget amount in USD |
 | fiscal_year | int | Fiscal year |
 
-### Budget Agencies
-| Field | Type | Description |
-|-------|------|-------------|
-| agency_name | string | Name of the agency |
-| amount | float | Total budget amount in USD |
-| fiscal_year | int | Fiscal year |
-
-### PPBE Compliance
+### PPBE Compliance (`ppbe_compliance.json`)
 | Field | Type | Description |
 |-------|------|-------------|
 | program_name | string | Name of the program |
 | status | string | Compliance status |
 | review_date | string | Date of last review |
 
-### GAO Findings
+### GAO Findings (`gao.json`)
 | Field | Type | Description |
 |-------|------|-------------|
-| finding_type | string | Type of finding |
-| year | int | Year of finding |
-| description | string | Finding description |
-| status | string | Finding status |
+| year | int | Year of the finding |
+| findings | int | Count of findings |
+| material_weaknesses | int | Count of material weaknesses |
 
-### Congressional Requests
+### Congressional Requests (`congressional_tracking.json`)
 | Field | Type | Description |
 |-------|------|-------------|
 | committee | string | Congressional committee |
-| request_date | string | Date of request |
-| response_date | string | Date of response |
+| request_date | string | Date of request (YYYY-MM-DD) |
+| response_date | string \| null | Date of response (null = not yet responded) |
 | status | string | Request status |
 
-## Usage Examples
+## Usage examples
 
-### Fetching Budget Functions
 ```bash
-curl http://localhost:3000/api/budget?type=functions
-```
+# FY2027 budget overview
+curl http://localhost:3000/api/budget-fy27
 
-### Fetching PPBE Compliance
-```bash
+# FY2027 line items for one exhibit (e.g. O-1), page 1
+curl "http://localhost:3000/api/budget-fy27/detail?exhibit=o1&sort=fy2027&order=desc&page=1"
+
+# Contracting intelligence (default = most complete fiscal year)
+curl http://localhost:3000/api/contracting
+
+# Regulatory Q&A
+curl "http://localhost:3000/api/regulation?q=antideficiency+act+violation&top=8"
+
+# PPBE / GAO / congressional
 curl http://localhost:3000/api/ppbe
-```
-
-### Fetching GAO Findings
-```bash
 curl http://localhost:3000/api/gao
-```
-
-### Fetching Congressional Requests
-```bash
 curl http://localhost:3000/api/congressional
 ```
 
-## Data Refresh
+## Data refresh
 
-To refresh data from the knowledge bank:
+ETLs run **on this Mac only** (pyarrow + `/Volumes/AI_DATA`). The Python
+interpreter with pyarrow is
+`/Volumes/AI_DATA/apps/agent-server/venv/bin/python3`.
 
-1. Run the data processor:
-   ```bash
-   python3 scripts/export_to_json.py
-   ```
+```bash
+python3 scripts/etl_contracting.py        # contracting_intelligence.json
+python3 scripts/etl_funds_control.py       # funds_control.json
+python3 scripts/etl_kb_scan.py             # gao / ppbe / congressional
+python3 scripts/etl_knowledge_index.py     # knowledge_index.json
+node scripts/ingest_war_budget.js          # FY2027 exhibits → Neon Postgres
+```
 
-2. Rebuild the database:
-   ```bash
-   sqlite3 database/dod_budget.db < database/schema.sql
-   ```
+Then rebuild and redeploy: `npm run build && vercel --prod`. The web app needs
+no code change to pick up refreshed data — it only reads the baked JSON / Neon.
 
-3. Restart the development server.
+## Compliance notes
 
-## Compliance Notes
-
-- All data handling complies with DoD data governance policies
-- No classified or PII data is stored in this system
-- Data is for internal use only at OUSD(C)
+- All data handling complies with DoD data governance policies.
+- No classified or PII data is stored in this system.
+- Data is for internal DoD use only.
