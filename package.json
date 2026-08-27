@@ -1,19 +1,22 @@
 {
-  "name": "ousdc-ai-portfolio",
+  "name": "datamatter",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "etl": "python3 scripts/etl_analytics.py --step all",
+    "load": "node scripts/load_analytics.js",
+    "refresh": "npm run etl && npm run load",
+    "verify": "tsc --noEmit && next build"
   },
   "dependencies": {
-    "next": "14.2.5",
+    "next": "14.2.35",
     "pg": "^8.23.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "exceljs": "^4.4.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
@@ -23,6 +26,10 @@
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.4",
-    "typescript": "^5.5.2"
-  }
+    "typescript": "^5.5.2",
+    "exceljs": "^4.4.0",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "14.2.35"
+  },
+  "description": "DoW budget formulation, execution, and audit analytics over the USASpending warehouse and the DoD-FM knowledge bank."
 }

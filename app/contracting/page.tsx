@@ -1,310 +1,182 @@
-'use client';
+import type { Metadata } from 'next';
+import Shell, { PageHeader, Section } from '@/components/Shell';
+import { ProvenanceBar, Caveat } from '@/components/Provenance';
+import { StatTile, BarList, DataTable } from '@/components/charts';
+import { FyPicker } from '@/components/FyPicker';
+import { fmtT, fmtB, fmtPct, fmtInt, fmtCount } from '@/components/format';
+import { getProvenance, getAwardYears, getAwardDim, getReconciliation } from '@/lib/analytics';
+import { NotLoaded } from '../execution/page';
 
-import { useState, useEffect } from 'react';
-import Navbar from '@/components/Navbar';
-import Footer from '@/components/Footer';
+export const metadata: Metadata = {
+  title: 'Contracting · datamatter',
+  description: 'Department of War contract obligations by set-aside, extent competed, recipient, and industry, from the USASpending award files.',
+};
+export const revalidate = 900;
 
-interface Row {
-  name?: string;
-  state?: string;
-  code?: string;
-  description?: string;
-  type?: string;
-  reason?: string;
-  label?: string;
-  obligation: number;
-}
+export default async function ContractingPage({ searchParams }: { searchParams: { fy?: string } }) {
+  const [prov, years, rec] = await Promise.all([
+    getProvenance('contract_awards'), getAwardYears(), getReconciliation(),
+  ]);
+  if (!years.length) return <Shell><NotLoaded /></Shell>;
 
-interface ContractingData {
-  fiscal_year: number;
-  total_obligation: number;
-  award_count: number;
-  simplified_commercial_awards: number;
-  by_sub_agency: Row[];
-  top_recipients: Row[];
-  by_recipient_state: Row[];
-  by_performance_state: Row[];
-  top_naics: Row[];
-  by_set_aside: Row[];
-  by_competition_exception: Row[];
-  by_extent_competed: Row[];
-  by_contract_pricing: Row[];
-  available_fiscal_years: number[];
-  source: string;
-  vintage: string;
-  derived: {
-     sole_source_obligation: number;
-     sole_source_pct: number;
-     no_set_aside_obligation: number;
-     no_set_aside_pct: number;
-   };
-}
+  const closed = years.filter((y) => !y.isPartialYear);
+  const requested = Number(searchParams.fy);
+  const row = years.find((y) => y.fiscalYear === requested) ?? closed[closed.length - 1] ?? years[years.length - 1];
 
-const fmtB = (n: number) => `$${(n / 1e9).toFixed(2)}B`;
-const fmtK = (n: number) => `${(n / 1e3).toFixed(1)}K`;
-const pct = (v: number, t: number) => (t ? ((v / t) * 100).toFixed(1) : '0') + '%';
+  const [setAside, competed, recipients, naics, psc, subAgency, pricing] = await Promise.all([
+    getAwardDim(row.fiscalYear, 'set_aside', 10),
+    getAwardDim(row.fiscalYear, 'extent_competed', 8),
+    getAwardDim(row.fiscalYear, 'recipient', 10),
+    getAwardDim(row.fiscalYear, 'naics', 8),
+    getAwardDim(row.fiscalYear, 'psc', 8),
+    getAwardDim(row.fiscalYear, 'sub_agency', 8),
+    getAwardDim(row.fiscalYear, 'pricing', 8),
+  ]);
+  const link = rec.find((r) => r.fiscalYear === row.fiscalYear);
 
-export default function ContractingIntelligencePage() {
-  const [data, setData] = useState<ContractingData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [fy, setFy] = useState<string>('');
+  // Match buckets by their reported key, not by inference. The previous build
+  // used a mixed ||/&& expression inside .find(), which was correct only because
+  // the array happened to be ordered that way. Extent competed arrives as FPDS
+  // single-letter codes, so filtering on spelled-out text matches nothing.
+  const bucket = (rows: { key: string; obligation: number }[], keys: string[]) =>
+    rows.filter((r) => keys.includes(r.key)).reduce((s, r) => s + r.obligation, 0);
 
-  useEffect(() => {
-    const url = fy ? `/api/contracting?fiscal-year=${fy}` : '/api/contracting';
-    setLoading(true);
-    fetch(url)
-       .then((r) => r.json())
-       .then((d) => setData(d))
-       .catch((e) => console.error(e))
-       .finally(() => setLoading(false));
-   }, [fy]);
+  const noSetAside = setAside.find((s) => s.key === 'NO SET ASIDE USED.');
+  const setAsideNotReported = setAside.find((s) => s.key === '(not reported)');
+  const smallBusiness = setAside
+    .filter((s) => s.key !== 'NO SET ASIDE USED.' && s.key !== '(not reported)')
+    .reduce((sum, s) => sum + s.obligation, 0);
 
-  if (loading) {
-    return (
-       <main className="min-h-screen bg-navy-950">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-500"></div>
-        </div>
-        <Footer />
-       </main>
-    );
-   }
-
-  if (!data) {
-    return (
-       <main className="min-h-screen bg-navy-950">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-screen text-navy-300">
-          Failed to load contracting intelligence.
-        </div>
-        <Footer />
-       </main>
-    );
-   }
-
-  const total = data.total_obligation;
-  const maxSub = data.by_sub_agency[0]?.obligation || 1;
+  // Extent competed is a different FAR concept from set-aside, in its own field.
+  const competedTotal = bucket(competed, ['A', 'D', 'F']);   // full & open, after exclusion, under SAP
+  const notCompeted   = bucket(competed, ['C', 'G']);        // not competed, not competed under SAP
+  const notAvailable  = bucket(competed, ['B']);             // not available for competition
+  const setAsideCoverage = 1 - (setAsideNotReported?.obligation ?? 0) / row.obligation;
 
   return (
-     <main className="min-h-screen bg-navy-950">
-       <Navbar />
+    <Shell>
+      <PageHeader
+        eyebrow="Execution · contract awards"
+        title="Contracting"
+        lede="Contract obligations as reported to FPDS, by set-aside status, extent competed, recipient and industry. Set-aside and competition are separate fields answering separate questions, and are reported separately here."
+      />
 
-       {/* Hero */}
-       <section className="py-20 px-4 sm:px-6 lg:px-8 border-b border-navy-800 grid-pattern">
-        <div className="max-w-6xl mx-auto text-center">
-          <div className="inline-block text-xs font-semibold text-accent-400 uppercase tracking-widest mb-4">
-            Live USASpending · Agency 097 (DoD) · Vintage {data.vintage}
-          </div>
-          <h1 className="text-4xl sm:text-5xl font-bold text-navy-50 mb-6">
-            Contracting & Procurement <span className="gradient-text">Intelligence</span>
-          </h1>
-          <p className="text-lg text-navy-300 max-w-3xl mx-auto">
-            Pre-aggregated obligations across {fmtK(data.award_count)} contract actions, streamed from
-            the full USASpending DoD warehouse. This is real award data — not a demo stub.
+      <div className="mt-6 space-y-5">
+        <ProvenanceBar p={prov} extra="Snapshot, not a live feed. The warehouse retains two vintages so that movement in closed years is measurable — see Reconciliation." />
+        <FyPicker years={years.map((y) => y.fiscalYear)} active={row.fiscalYear} base="/contracting"
+          partial={years.filter((y) => y.isPartialYear).map((y) => y.fiscalYear)} />
+      </div>
+
+      {row.isPartialYear && (
+        <div className="mt-6 border border-amber-500/40 bg-amber-500/5 rounded-lg px-4 py-3">
+          <p className="text-sm text-amber-200">
+            <strong>FY{row.fiscalYear} is in progress.</strong> {fmtInt(row.actionCount)} actions against roughly
+            4.4 million in a full year — totals and shares below are period-to-date.
           </p>
-
-          {/* Fiscal year selector */}
-          <div className="mt-8 flex items-center justify-center gap-2 flex-wrap">
-            {data.available_fiscal_years
-              .slice()
-              .reverse()
-              .map((y) => (
-                <button
-                  key={y}
-                  onClick={() => setFy(String(y))}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    String(y) === String(data.fiscal_year)
-                      ? 'bg-accent-500 text-navy-950'
-                      : 'bg-navy-800 text-navy-300 hover:bg-navy-700'
-                  }`}
-                >
-                  FY{y}
-                </button>
-              ))}
-          </div>
         </div>
-       </section>
+      )}
 
-       {/* KPI cards */}
-       <section className="py-14 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="glass-card rounded-xl p-6 text-center">
-            <div className="text-sm text-accent-400 font-semibold mb-2">FY{data.fiscal_year} Total Obligated</div>
-            <div className="text-3xl font-bold text-navy-50">{fmtB(total)}</div>
-          </div>
-          <div className="glass-card rounded-xl p-6 text-center">
-            <div className="text-sm text-accent-400 font-semibold mb-2">Contract Actions</div>
-            <div className="text-3xl font-bold text-navy-50">{fmtK(data.award_count)}</div>
-          </div>
-          <div className="glass-card rounded-xl p-6 text-center border-amber-500/20">
-            <div className="text-sm text-amber-400 font-semibold mb-2">Sole-Source / Non-Competed</div>
-            <div className="text-3xl font-bold text-amber-300">{data.derived.sole_source_pct}%</div>
-            <div className="text-xs text-navy-400 mt-1">{fmtB(data.derived.sole_source_obligation)}</div>
-          </div>
-          <div className="glass-card rounded-xl p-6 text-center">
-            <div className="text-sm text-accent-400 font-semibold mb-2">Full & Open / No Set-Aside</div>
-            <div className="text-3xl font-bold text-navy-50">{data.derived.no_set_aside_pct}%</div>
-            <div className="text-xs text-navy-400 mt-1">{fmtB(data.derived.no_set_aside_obligation)}</div>
-          </div>
+      <Section title={`FY${row.fiscalYear} obligations`}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatTile label="Obligated on contracts" value={fmtB(row.obligation)}
+            sub={`${fmtInt(row.actionCount)} contract actions · FPDS federal action obligation`} tone="accent" />
+          <StatTile label="Competed" value={fmtPct(competedTotal / row.obligation * 100)}
+            sub={`${fmtB(competedTotal)} — full and open, after exclusion of sources, or under simplified acquisition procedures`}
+            tone="good" />
+          <StatTile label="Not competed" value={fmtPct(notCompeted / row.obligation * 100)}
+            sub={`${fmtB(notCompeted)} — plus ${fmtB(notAvailable)} recorded as not available for competition`}
+            tone="warning" />
+          <StatTile label="Small-business set-asides" value={fmtPct(smallBusiness / row.obligation * 100)}
+            sub={`${fmtB(smallBusiness)} across all set-aside programmes`} />
         </div>
-       </section>
+        <Caveat>
+          These figures answer different questions and do not sum.{' '}
+          <strong className="text-navy-200">Extent competed</strong> records whether an acquisition was
+          competed; <strong className="text-navy-200">set-aside</strong> records whether it was reserved for a
+          category of business. An acquisition can be competed within a set-aside pool, or full and open with
+          no set-aside — so presenting one as the other, as a combined
+          &ldquo;full and open / no set-aside&rdquo; tile would, is a category error.
+          {setAsideNotReported && (
+            <> A further caution on the set-aside share: {fmtB(setAsideNotReported.obligation)} —{' '}
+            {fmtPct((setAsideNotReported.obligation) / row.obligation * 100)} of FY{row.fiscalYear}{' '}
+            obligations — carries no set-aside value at this vintage, so set-aside percentages describe the{' '}
+            {fmtPct(setAsideCoverage * 100)} of obligations where the field is populated and must not be read
+            as department-wide participation rates.</>
+          )}
+        </Caveat>
+      </Section>
 
-       {/* Sub-agency allocation */}
-       <section className="py-14 px-4 sm:px-6 lg:px-8 border-t border-navy-800">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-2xl font-bold text-navy-50 mb-2">Obligation by Awarding Component</h2>
-          <p className="text-sm text-navy-400 mb-8">
-            Where FY{data.fiscal_year} dollars land across DoD components.
-          </p>
-          <div className="space-y-4">
-            {data.by_sub_agency.slice(0, 10).map((s) => (
-              <div key={s.name} className="glass-card rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-navy-100 font-medium text-sm">{s.name}</span>
-                  <span className="text-navy-50 font-bold text-sm">{fmtB(s.obligation)}</span>
-                </div>
-                <div className="w-full bg-navy-800 rounded-full h-2">
-                  <div
-                    className="bg-gradient-to-r from-accent-400 to-accent-600 h-2 rounded-full"
-                    style={{ width: `${(s.obligation / maxSub) * 100}%` }}
-                  />
-                </div>
-                <div className="text-xs text-navy-400 mt-1.5">{pct(s.obligation, total)} of FY total</div>
-              </div>
-            ))}
-          </div>
-        </div>
-       </section>
-
-       {/* Top prime contractors */}
-       <section className="py-14 px-4 sm:px-6 lg:px-8 border-t border-navy-800">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-2xl font-bold text-navy-50 mb-8">Top Prime Contractors</h2>
-          <div className="overflow-x-auto glass-card rounded-xl">
-            <table className="min-w-full">
-              <thead>
-                <tr className="bg-navy-800/50">
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-accent-400 uppercase">#</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-accent-400 uppercase">Recipient</th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-accent-400 uppercase">Obligated</th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-accent-400 uppercase">Share</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.top_recipients.slice(0, 15).map((r, i) => (
-                  <tr key={r.name} className="border-t border-navy-800">
-                    <td className="px-6 py-3 text-navy-500 text-sm">{i + 1}</td>
-                    <td className="px-6 py-3 text-navy-100 font-medium text-sm">{r.name}</td>
-                    <td className="px-6 py-3 text-right text-navy-50 font-bold text-sm">{fmtB(r.obligation)}</td>
-                    <td className="px-6 py-3 text-right text-navy-300 text-sm">{pct(r.obligation, total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-       </section>
-
-       {/* Competition exceptions + set-asides */}
-       <section className="py-14 px-4 sm:px-6 lg:px-8 border-t border-navy-800">
-        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10">
+      <Section title="Competition and set-aside, side by side"
+        note="Two fields, two charts. The distinction is the point.">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
           <div>
-            <h2 className="text-xl font-bold text-navy-50 mb-2">Other Than Full & Open Competition</h2>
-            <p className="text-sm text-navy-400 mb-6">FAR 6.302 authority justifications for non-competed dollars.</p>
-            <div className="space-y-3">
-              {data.by_competition_exception.filter((c) => c.reason).slice(0, 9).map((c) => (
-                <div key={c.reason} className="flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="w-full bg-navy-800 rounded-full h-1.5">
-                      <div
-                        className="bg-amber-500/70 h-1.5 rounded-full"
-                        style={{ width: `${(c.obligation / (data.by_competition_exception[0]?.obligation || 1)) * 100}%` }}
-                      />
-                    </div>
-                    <div className="text-xs text-navy-300 mt-1">{c.reason}</div>
-                  </div>
-                  <div className="text-sm font-bold text-navy-100 w-20 text-right">{fmtB(c.obligation)}</div>
-                </div>
-              ))}
-            </div>
+            <h3 className="text-sm font-semibold text-navy-200 mb-4">Extent competed</h3>
+            <BarList colour="var(--series-2)" rows={competed.map((c) => ({
+              key: c.key, label: c.label, value: c.obligation,
+              meta: `${fmtPct(c.obligation / row.obligation * 100)} · ${fmtInt(c.actionCount)} actions`,
+            }))} />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-navy-50 mb-2">Small-Business & Set-Aside</h2>
-            <p className="text-sm text-navy-400 mb-6">8(a), SDVOSB, WOSB, HUBZone participation in obligated dollars.</p>
-            <div className="space-y-3">
-              {data.by_set_aside.filter((s) => s.type && s.type !== 'NO SET ASIDE USED.').slice(0, 9).map((s) => (
-                <div key={s.type} className="flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="w-full bg-navy-800 rounded-full h-1.5">
-                      <div
-                        className="bg-accent-500 h-1.5 rounded-full"
-                        style={{ width: `${(s.obligation / (data.by_set_aside[0]?.obligation || 1)) * 100}%` }}
-                      />
-                    </div>
-                    <div className="text-xs text-navy-300 mt-1">{s.type}</div>
-                  </div>
-                  <div className="text-sm font-bold text-navy-100 w-20 text-right">{fmtB(s.obligation)}</div>
-                </div>
-              ))}
-            </div>
+            <h3 className="text-sm font-semibold text-navy-200 mb-4">Type of set-aside</h3>
+            <BarList colour="var(--series-3)" rows={setAside.map((s) => ({
+              key: s.key, label: s.label, value: s.obligation,
+              meta: `${fmtPct(s.obligation / row.obligation * 100)} · ${fmtInt(s.actionCount)} actions`,
+            }))} />
           </div>
         </div>
-       </section>
+      </Section>
 
-       {/* NAICS + state */}
-       <section className="py-14 px-4 sm:px-6 lg:px-8 border-t border-navy-800">
-        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10">
+      <Section title="Who receives it, and for what">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
           <div>
-            <h2 className="text-xl font-bold text-navy-50 mb-6">Top NAICS Sectors</h2>
-            <div className="overflow-x-auto glass-card rounded-xl">
-              <table className="min-w-full">
-                <thead>
-                  <tr className="bg-navy-800/50">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-accent-400 uppercase">Code</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-accent-400 uppercase">Description</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-accent-400 uppercase">Obligated</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.top_naics.slice(0, 10).map((n) => (
-                    <tr key={n.code} className="border-t border-navy-800">
-                      <td className="px-4 py-3 text-navy-400 text-sm font-mono">{n.code}</td>
-                      <td className="px-4 py-3 text-navy-200 text-sm">{n.description || '—'}</td>
-                      <td className="px-4 py-3 text-right text-navy-50 font-bold text-sm">{fmtB(n.obligation)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <h3 className="text-sm font-semibold text-navy-200 mb-4">Top recipients</h3>
+            <BarList rows={recipients.map((r) => ({
+              key: r.key, label: r.label, value: r.obligation,
+              meta: `${fmtPct(r.obligation / row.obligation * 100)} of contract obligations`,
+            }))} />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-navy-50 mb-6">Top Awardee States</h2>
-            <div className="overflow-x-auto glass-card rounded-xl">
-              <table className="min-w-full">
-                <thead>
-                  <tr className="bg-navy-800/50">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-accent-400 uppercase">State</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-accent-400 uppercase">Obligated</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-accent-400 uppercase">Share</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.by_recipient_state.slice(0, 10).map((s) => (
-                    <tr key={s.state} className="border-t border-navy-800">
-                      <td className="px-4 py-3 text-navy-200 text-sm font-mono">{s.state}</td>
-                      <td className="px-4 py-3 text-right text-navy-50 font-bold text-sm">{fmtB(s.obligation)}</td>
-                      <td className="px-4 py-3 text-right text-navy-400 text-sm">{pct(s.obligation, total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <h3 className="text-sm font-semibold text-navy-200 mb-4">Awarding sub-agency</h3>
+            <BarList colour="var(--series-4)" rows={subAgency.map((r) => ({
+              key: r.key, label: r.label, value: r.obligation,
+              meta: `${fmtInt(r.actionCount)} actions`,
+            }))} />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-navy-200 mb-4">Industry (NAICS)</h3>
+            <BarList colour="var(--series-3)" rows={naics.map((r) => ({
+              key: r.key, label: `${r.key} · ${r.label}`, value: r.obligation,
+            }))} />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-navy-200 mb-4">Product or service</h3>
+            <BarList colour="var(--series-5)" rows={psc.map((r) => ({
+              key: r.key, label: `${r.key} · ${r.label}`, value: r.obligation,
+            }))} />
           </div>
         </div>
-       </section>
+      </Section>
 
-       <Footer />
-     </main>
-   );
+      <Section title="Contract pricing type"
+        note="Fixed-price versus cost-reimbursement is where contract risk allocation actually shows up.">
+        <DataTable
+          head={['Pricing type', 'Obligated', 'Share', 'Actions']}
+          rows={pricing.map((p) => [p.label, fmtB(p.obligation),
+            fmtPct(p.obligation / row.obligation * 100), fmtInt(p.actionCount)])}
+        />
+      </Section>
+
+      {link && (
+        <Section title="How this relates to account-level obligations"
+          note="The figure above is the award-file measure. It is not the same number as the account-linked obligation for the same year.">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <StatTile label="Award files" value={fmtB(link.awardObligation)} sub="FPDS federal action obligation" />
+            <StatTile label="File C (account-linked)" value={fmtB(link.filecObligation)} sub="Obligations tied to a Treasury account" />
+            <StatTile label="Linkage" value={fmtPct(link.linkagePct)} tone="critical"
+              sub="See Reconciliation for what this does and does not mean" />
+          </div>
+        </Section>
+      )}
+    </Shell>
+  );
 }

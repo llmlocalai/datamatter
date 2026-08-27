@@ -65,3 +65,49 @@ body {
 .animate-pulse-glow {
   animation: pulseGlow 4s ease-in-out infinite;
 }
+
+/* --- chart system -------------------------------------------------------- */
+/* Categorical hues are assigned in fixed order and never cycled. Validated for
+   the #0a1929 chart surface: lightness band, chroma floor, CVD separation,
+   normal-vision floor, and contrast vs surface all pass. */
+:root {
+  --series-1: #3987e5;  /* blue    */
+  --series-2: #d95926;  /* orange  */
+  --series-3: #199e70;  /* aqua    */
+  --series-4: #c98500;  /* yellow  */
+  --series-5: #d55181;  /* magenta */
+
+  /* Status is reserved for state and is never reused as a series colour. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  /* Diverging pair for signed change; neutral grey midpoint, no hue at zero. */
+  --diverge-up: #3987e5;
+  --diverge-down: #d95926;
+  --diverge-zero: #4a5b6d;
+
+  --chart-surface: #0a1929;
+  --grid-line: rgba(51, 78, 104, 0.35);
+}
+
+.tnum { font-variant-numeric: tabular-nums; }
+
+.scroll-x { overflow-x: auto; }
+.scroll-x::-webkit-scrollbar { height: 8px; }
+.scroll-x::-webkit-scrollbar-thumb { background: #243b53; border-radius: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: 2px;
+  border-radius: 3px;
+}

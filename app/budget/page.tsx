@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
+import Shell from "@/components/Shell";
 import DetailTable from "@/components/budget/DetailTable";
 import DocumentPanel from "@/components/budget/DocumentPanel";
 import {
@@ -72,27 +71,23 @@ export default function BudgetDashboard() {
 
   if (loading) {
     return (
-       <main className="min-h-screen bg-navy-950">
-        <Navbar />
+       <Shell>
         <div className="flex items-center justify-center min-h-[70vh]">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-500" />
         </div>
-        <Footer />
-      </main>
+        </Shell>
      );
    }
   if (error || !data) {
     return (
-       <main className="min-h-screen bg-navy-950">
-        <Navbar />
+       <Shell>
         <div className="flex items-center justify-center min-h-[70vh] text-navy-300">
           <div className="text-center">
             <div className="text-2xl mb-2">⚠</div>
             <div>Failed to load budget data{error ? `: ${error}` : ""}.</div>
           </div>
         </div>
-        <Footer />
-      </main>
+        </Shell>
      );
    }
 
@@ -133,8 +128,7 @@ export default function BudgetDashboard() {
    }));
 
   return (
-      <main className="min-h-screen bg-navy-950">
-        <Navbar />
+      <Shell>
 
         {/* ---------------- Hero ---------------- */}
         <section className="pt-28 pb-16 px-4 sm:px-6 lg:px-8 border-b border-navy-800 grid-pattern">
@@ -379,7 +373,6 @@ export default function BudgetDashboard() {
           </div>
         </section>
 
-        <Footer />
-      </main>
+        </Shell>
    );
 }

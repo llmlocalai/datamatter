@@ -1,90 +1,88 @@
 # datamatter — Work Tracker
 
-Living tracker for the **datamatter** (DoD AI Solutions) Next.js 14 / Vercel app.
-This is the single source of truth for "what's left in this repo." Update it on
-every review.
-
-- **Last updated:** 2026-08-23
-- **Branch / head:** `main` @ `39a9c1b`
+- **Last updated:** 2026-08-27
 - **Live site:** https://datamatter.vercel.app
-- **Build status:** `npx tsc --noEmit` passes (2026-08-23).
+- **Build status:** `tsc --noEmit` clean; `next build` prerenders all 18 routes
+  against a loaded database (verified 2026-08-27).
+- **Control status:** 85 of 87 assertions pass. The two failures are `TIE-01`
+  (File A vs File B obligations, FY2022 and FY2026) and are published as findings.
 
 ---
 
-## How to use this file (the convention)
+## Architecture
 
-- **Open** — work still to do. Add new requirements here as `- [ ] …`.
-- **Done** — completed work, checked off with `- [x] …`. Do not delete; it is the record.
-- **Changelog** — append one line per change: `YYYY-MM-DD — <what changed, why>`.
-- When a feature moves Open → Done, move its bullet and log it in the Changelog.
-- Keep the **Shipped features** table current — if a page/route/data source is added,
-  add a row; if one is removed, strike it out and log it.
+ETL (Mac only, pyarrow) → staged JSON → transactional load → **Neon** → pages (ISR 900s).
+No baked snapshots. A daily refresh reaches the live site without a redeploy.
 
----
+## Shipped
 
-## Shipped features (verified 2026-08-23)
+| # | Page | Source | Status |
+|---|------|--------|--------|
+| 1 | `/execution` — budget-to-execution chain | File A + File B | ✅ |
+| 2 | `/reconciliation` — award vs File C, vintage drift | award files + File C | ✅ |
+| 3 | `/funds-control` — TAS execution rates | File A | ✅ |
+| 4 | `/contracting` — set-aside, competition, recipients | award files | ✅ |
+| 5 | `/budget` — FY2027 "-1" exhibits | Neon `war_budget_*` | ✅ |
+| 6 | `/audit` — opinion, material weaknesses | AFR / DODIG (curated) | ✅ |
+| 7 | `/ppbe` — justification inventory | knowledge bank | ✅ |
+| 8 | `/congressional` — direction corpus, hearings | knowledge bank | ✅ |
+| 9 | `/sources` — data register | `dm_dataset` / `dm_load` | ✅ |
+| 10 | `/definitions` — 75 cited FM terms | curated wiki | ✅ |
+| 11 | `/controls` — control results | `dm_control_result` | ✅ |
+| 12 | `/regulation` — authority-ranked retrieval | BM25 index | ✅ |
 
-| # | Feature | Page | API route(s) | Data source | Status |
-|---|---------|------|--------------|-------------|--------|
-| 1 | **FY2027 Budget dashboard** | `/budget` | `/api/budget-fy27`, `/detail`, `/document` | Neon Postgres (`war_budget_line` / `war_budget_file` / `war_budget_document`) | ✅ Done |
-| 2 | **Contracting & Procurement Intelligence** | `/contracting` | `/api/contracting` | `contracting_intelligence.json` (USASpending 097, FY21–26) | ✅ Done |
-| 3 | **Funds Control / budget execution** | `/funds-control` | `/api/funds-control` | `funds_control.json` (file_a, TAS level) | ✅ Done |
-| 4 | **Regulatory Q&A (RAG, BM25 + authority)** | `/regulation` | `/api/regulation` | `knowledge_index.json` (DoD-FM wiki, 75 pages) | ✅ Done |
-| 5 | **PPBE Compliance** | `/ppbe` | `/api/ppbe` | `ppbe.json` + `ppbe_compliance.json` | ✅ Done |
-| 6 | **GAO Audit Findings** | `/gao` | `/api/gao` | `gao.json` | ✅ Done |
-| 7 | **Congressional Oversight** | `/congressional` | `/api/congressional` | `congressional.json` + `congressional_tracking.json` | ✅ Done |
-| 8 | **Showcase landing** | `/showcase` | — | — | ✅ Done |
-| 9 | **Home / marketing** | `/` | — | — | ✅ Done |
+## Done — 2026-08-27 rebuild
 
-**Data pipeline (ETL → baked JSON → thin API → UI):**
-`scripts/etl_contracting.py` · `etl_funds_control.py` · `etl_kb_scan.py` ·
-`etl_knowledge_index.py` · `ingest_war_budget.js` (loads FY2027 exhibits into Neon).
-ETLs run only on this Mac (need pyarrow + `/Volumes/AI_DATA`); never on Vercel.
-See `CLAUDE.md` for the "frozen snapshot vs live tool" rule.
+- [x] **Removed the fabricated-data pipeline.** `/api/budget` (publicly serving
+  $800B/$850B/$900B round numbers), four invented JSON files, the three-row
+  PPBE and congressional placeholder datasets, and the five SQLite-era scripts
+  that generated them.
+- [x] **Found and corrected a $108.7B scope error.** `file_a` carries five agency
+  codes; the previous total included the Executive Office of the President and
+  was labelled "agency 097 = DoD". `SCOPE-01` now blocks it.
+- [x] **Built the execution chain** from File A resources through File B USSGL
+  undelivered/delivered orders to outlay, with footing controls at each step.
+- [x] **Built the reconciliation.** Award files vs File C: linkage falls from
+  18.2% (FY2021) to 3.1% (FY2025) while contract action counts hold near 4.4M.
+- [x] **Published vintage drift.** FY2025 lost $48.9M and FY2023 lost $29.4M and
+  27 actions between the July and August warehouse vintages.
+- [x] **Replaced "Material Weaknesses: 0"** with the AFR's reported 69 financial
+  reporting and 39 operational material weaknesses, each cited.
+- [x] **Removed "OMB Circular A-30"** (does not exist) and the folder-count
+  "justification quality" score.
+- [x] **Fixed "Upcoming Testimonies"** — 12 past, mostly non-defense hearings all
+  sharing an ingest date, with a hardcoded witness count.
+- [x] **Security.** `next@14.2.35`, TLS verification restored, image-optimizer
+  wildcard removed, `exceljs` moved to devDependencies, security headers added.
+- [x] **Provenance made structural.** `ProvenanceBar` on every page; the data
+  layer cannot return a figure without its load row.
+- [x] **Control suite** of 10 controls running inside the load transaction.
+- [x] **Definitions registry** — 75 terms, every one carrying an authority.
+- [x] **Corrected FPDS code handling.** Extent competed and pricing arrive as
+  single-letter codes; page-level matching on spelled-out text silently returned
+  zero. Code books moved into the ETL.
+- [x] **IA re-cut** around the budget lifecycle; portfolio furniture removed.
+- [x] ESLint config, CI workflow, error/404/loading boundaries, robots, sitemap.
 
----
+## Open
 
-## Open — incomplete / to finish
-
-- [ ] **Remove orphaned legacy budget path** (superseded by the FY2027 `/budget`
-  dashboard; **no page or route calls it**):
-  - `app/api/budget/route.ts`
-  - `lib/data-service.ts` (unused — grep finds no importers)
-  - `app/api/data/budget_by_function.json`, `budget_by_agency.json`,
-    `budget_by_fiscal_year.json`, `budget_by_subfunction.json`
-  - `scripts/export_to_json.py`, `scripts/explore_data.py` feed only these.
-  **Needs a decision** (removing code). Tracked here, not auto-deleted.
-- [ ] *(roadmap)* Auth / RBAC in front of the API routes (Vercel Middleware).
-- [ ] *(roadmap)* Cron refresh of the ETL JSON snapshots so they stay current.
-- [ ] *(roadmap)* Semantic (vector) retrieval for `/regulation` if an embedder is provisioned on the runtime.
-- [ ] *(roadmap)* Assistance + `file_c` (grants/loans, unlinked contract detail) as additional use cases.
-
----
-
-## Done (record)
-
-- [x] **2026-08-23** — FY2027 "-1" budget dashboard: 7 exhibits, by-service / by-activity,
-  paginated/sortable line-item explorer (`components/budget/DetailTable.tsx`), and
-  document download streaming from Neon bytea (`components/budget/DocumentPanel.tsx` +
-  `/api/budget-fy27/document`).
-- [x] **2026-08-23** — OUSD(C) → DoD rebrand across the **UI** (Navbar, Footer,
-  Showcase, About, Hero, layout).
-- [x] **2026-08-23** — OUSD(C) → DoD rebrand across the **markdown docs** (the half
-  of the rebrand left unfinished by commit `39a9c1b`). Rewrote `SHOWCASE_README.md`,
-   `IMPLEMENTATION_SUMMARY.md`, `DATA_SOURCES.md` (SQLite → Neon Postgres; 4 → 9
-  showcases; real API table + pipeline) and fixed `USE_CASES.md` (2× "OUSD(C)" →
-  "DoD"). Verified: no "OUSD"/"SQLite" left in any doc.
-- [x] **2026-08-23** — `/congressional` fixed to assemble `oversight_requests`
-  (per-quarter request/response counts) + `testimony_scheduled` from the two source files.
-- [x] **2026-08-23** — GAO, PPBE, contracting, funds-control, regulation pages wired to baked JSON.
-- [x] **2026-08-23** — Full-repo audit: all 9 pages + 12 API routes reviewed; `tsc --noEmit` clean.
-
----
+- [ ] Decompose File C linkage by awarding sub-agency to separate submission lag
+  from completeness failure (the reconciliation page names this as next work).
+- [ ] Re-run linkage at successive vintages for the same FY to test the lag
+  hypothesis directly.
+- [ ] `/budget` is still a client component fetching its own API; convert to a
+  server component like the rest.
+- [ ] Investigate the File A / File B FY2026 divergence (34.9%) now that
+  submission periods are confirmed identical.
+- [ ] Assistance (grants/loans) and `file_c_unlinked` as additional use cases.
+- [ ] Rate limiting on `/api/regulation`; module-scope cache for the BM25 index.
 
 ## Changelog
 
-- **2026-08-23** — Tracker created. Audited all 9 pages, 12 API routes, and 6 ETL
-  scripts. Confirmed `tsc --noEmit` passes. **Finished the incomplete OUSD(C)→DoD
-  rebrand** — the last commit rebranded the UI but left the docs stale (OUSD(C),
-  SQLite, only 4 showcases); rewrote 3 docs + fixed 1, verified none remain. Added
-  `tsconfig.tsbuildinfo` to `.gitignore`.
+- **2026-08-27** — Full rebuild against the live warehouse and knowledge bank.
+  Moved from baked JSON snapshots to Neon with transactional loads and in-band
+  control testing; added `/execution`, `/reconciliation`, `/sources`,
+  `/definitions`, `/controls`; rebuilt `/audit` (was `/gao`), `/ppbe`,
+  `/congressional`, `/funds-control`, `/contracting` on real data; removed the
+  fabricated-data pipeline entirely.
+- **2026-08-23** — Tracker created; OUSD(C)→DoD rebrand finished in docs.

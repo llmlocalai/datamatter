@@ -1,49 +1,47 @@
 /**
- * Shared Neon (serverless Postgres) client for Datamatter.
+ * Shared Neon (serverless Postgres) client.
  *
- * Neon's pooled endpoint (…-pooler… in the connection string) is designed for
- * serverless runtimes like Vercel: connections are pooled and the DB auto-scales.
- * We keep a single module-level Pool so every request reuses it, and expose a
- * small `query` helper so API routes never touch `pg` directly.
- *
- * DATABASE_URL resolution:
- *   1. process.env.DATABASE_URL  (Next.js auto-loads .env.local for routes)
- *   2. otherwise we parse .env.local / .env ourselves (for plain-node scripts
- *      like the loader that run outside Next.js)
+ * TLS: the server certificate is verified. The previous build passed
+ * `rejectUnauthorized: false`, which encrypts the connection but authenticates
+ * nothing — the comment there claimed the opposite of what the option does.
+ * Neon presents a publicly-trusted certificate, so verification just works;
+ * local sockets (used by the schema-verification harness) have no TLS to verify.
  */
-import { Pool, PoolClient } from 'pg';
+import { Pool, PoolClient, types } from 'pg';
 import fs from 'fs';
 import path from 'path';
 
+// numeric/decimal (OID 1700) arrives as a string by default so that arbitrary
+// precision survives. Every numeric column here is money we render at $B/$T
+// scale, so parse to number once, centrally, rather than in every caller.
+types.setTypeParser(1700, (v: string) => (v === null ? null : parseFloat(v)));
+types.setTypeParser(20, (v: string) => (v === null ? null : parseInt(v, 10))); // int8
+
 function resolveDatabaseUrl(): string {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
-  // Fallback for scripts run outside Next.js.
   for (const file of ['.env.local', '.env']) {
     const p = path.join(process.cwd(), file);
     if (fs.existsSync(p)) {
-      for (const line of fs.readFileSync(p, 'utf-8').split('\n')) {
-        const m = line.match(/^\s*DATABASE_URL\s*=\s*(.+?)\s*$/);
-        if (m) return m[1].replace(/^["']|["']$/g, '');
-        }
-      }
+      const m = fs.readFileSync(p, 'utf-8').match(/^\s*DATABASE_URL\s*=\s*(.+?)\s*$/m);
+      if (m) return m[1].replace(/^["']|["']$/g, '');
     }
-  throw new Error(
-     'DATABASE_URL is not set. Put it in .env.local or the environment.'
-    );
+  }
+  throw new Error('DATABASE_URL is not set. Put it in .env.local or the environment.');
 }
 
 let pool: Pool | null = null;
 
 export function getPool(): Pool {
   if (!pool) {
+    const connectionString = resolveDatabaseUrl();
+    const isLocal = /host=\/|@(localhost|127\.0\.0\.1)[:/]/.test(connectionString);
     pool = new Pool({
-      connectionString: resolveDatabaseUrl(),
+      connectionString,
       max: 10,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 15_000,
-      // Neon requires SSL; pg treats sslmode=require as verify-full, which is fine.
-      ssl: { rejectUnauthorized: false },
-     });
+      ssl: isLocal ? false : { rejectUnauthorized: true },
+    });
   }
   return pool;
 }
@@ -54,25 +52,17 @@ export async function query<T = any>(text: string, params?: unknown[]): Promise<
   try {
     const res = await client.query(text, params);
     return res.rows as T[];
-   } finally {
+  } finally {
     client.release();
-   }
+  }
 }
 
-/** Run a whole SQL file (e.g. the schema) as a single simple-query batch. */
 export async function runSqlFile(filePath: string): Promise<void> {
   const sql = fs.readFileSync(filePath, 'utf-8');
   const client: PoolClient = await getPool().connect();
-  try {
-    await client.query(sql);
-   } finally {
-    client.release();
-   }
+  try { await client.query(sql); } finally { client.release(); }
 }
 
 export async function endPool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = null;
-   }
+  if (pool) { await pool.end(); pool = null; }
 }

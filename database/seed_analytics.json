@@ -1,0 +1,258 @@
+{
+  "_note": "Curated, citation-bearing content. Extracted measures live in .staging (produced by scripts/etl_analytics.py); this file is the editorial layer: what each dataset is, what controls must hold, and the audit facts that come from documents rather than from parquet. Every audit_posture row names its citation and whether it is a primary or secondary read.",
+  "datasets": [
+    {
+      "key": "file_a_sbr",
+      "label": "Statement of Budgetary Resources (File A)",
+      "source_system": "USASpending Account Balances (GTAS submission chain)",
+      "source_path": "data/usaspending/warehouse/accounts/file_a",
+      "grain": "Treasury Account Symbol x fiscal year",
+      "description": "Budgetary resources, obligations incurred, unobligated balance and gross outlays at TAS grain, as submitted by reporting agencies. The backbone of the execution chain.",
+      "refresh_cadence": "daily",
+      "limitations": "Carries five agency identifier codes; 011 (Executive Office of the President) is not the Department and is excluded from every DOW scope. The current fiscal year is a period-to-date submission, not a closed year.",
+      "sort_order": 10
+    },
+    {
+      "key": "file_b_obligations",
+      "label": "Object Class and Program Activity (File B)",
+      "source_system": "USASpending Account Breakdown by Program Activity and Object Class",
+      "source_path": "data/usaspending/warehouse/accounts/file_b",
+      "grain": "TAS x program activity x object class x fiscal year",
+      "description": "Obligations decomposed into USSGL undelivered orders (480100 series) and delivered orders (490100 series), plus OMB object class. Shows what stage each obligated dollar has reached.",
+      "refresh_cadence": "daily",
+      "limitations": "Object class is reported by the component; unreported and mixed classes appear as their own buckets rather than being redistributed.",
+      "sort_order": 20
+    },
+    {
+      "key": "contract_awards",
+      "label": "Contract award transactions (FPDS)",
+      "source_system": "USASpending contract award archive, agency 097",
+      "source_path": "data/usaspending/warehouse/contracts",
+      "grain": "Contract action (transaction) x fiscal year x vintage",
+      "description": "Federal action obligations for DoW contract actions. Two vintages are retained so that movement in closed fiscal years is measurable rather than assumed.",
+      "refresh_cadence": "monthly (source publishes monthly full files)",
+      "limitations": "Federal action obligation is an FPDS reporting concept and is not the same measure as an account-linked obligation; see the reconciliation. The most recent fiscal year is incomplete.",
+      "sort_order": 30
+    },
+    {
+      "key": "file_c_reconciliation",
+      "label": "Award-to-account linkage (File C)",
+      "source_system": "USASpending Account Breakdown by Award",
+      "source_path": "data/usaspending/warehouse/accounts/file_c_contracts",
+      "grain": "Award x TAS x fiscal year",
+      "description": "Contract obligations that components have linked to a Treasury account. Compared against the award files to measure linkage completeness.",
+      "refresh_cadence": "daily",
+      "limitations": "A low linkage percentage measures reporting completeness between two chains. It is not an estimate of unsupported or missing obligations, and must never be presented as one.",
+      "sort_order": 40
+    },
+    {
+      "key": "knowledge_bank",
+      "label": "DoD-FM knowledge bank and curated wiki",
+      "source_system": "Local knowledge bank; curated DoD-FM wiki pages",
+      "source_path": "knowledge-bank/",
+      "description": "Definitions with authorities, document inventory by collection, FY2027 justification exhibits, and the congressional hearing record.",
+      "grain": "Document / wiki page",
+      "refresh_cadence": "daily",
+      "limitations": "Hearing dates are the acquisition date embedded in the GPO filename, not the date the hearing was held; they are labelled as ingest dates and never as hearing dates.",
+      "sort_order": 50
+    },
+    {
+      "key": "curated_audit",
+      "label": "Audit posture (documentary)",
+      "source_system": "DoD FY2025 Agency Financial Report; DoD OIG",
+      "source_path": "knowledge-bank/DOD-FM-Knowledge-Bank/07-Financial-Statements-and-Audit-Reports",
+      "grain": "Reported metric",
+      "description": "Audit opinion, material weakness counts and scope limitations, read from the Agency Financial Report rather than inferred from file counts.",
+      "refresh_cadence": "annual",
+      "limitations": "Read via the curated wiki summary of the AFR, which is a secondary read of a primary document. Each row records which it is.",
+      "sort_order": 60
+    }
+  ],
+  "controls": [
+    {
+      "code": "SBR-01",
+      "name": "Status of budgetary resources foots",
+      "assertion": "Obligations incurred plus unobligated balance equals total budgetary resources, within 0.1%.",
+      "rationale": "The status section of the SBR must equal the resources section. A break means the extract has dropped or double-counted a TAS.",
+      "authority": "OMB Circular A-136; DoD FMR Vol 6A",
+      "severity": "critical",
+      "sort_order": 10
+    },
+    {
+      "code": "SBR-02",
+      "name": "Budgetary resources components foot",
+      "assertion": "Appropriated authority, unobligated balance brought forward, adjustments, and other budgetary resources sum to total budgetary resources, within 0.5%.",
+      "rationale": "Proves the resources waterfall shown on the execution page is complete. Note that the source's other-budgetary-resources column already rolls up borrowing authority, contract authority and spending authority from offsetting collections; adding those separately double-counts them.",
+      "authority": "OMB Circular A-136",
+      "severity": "high",
+      "sort_order": 20
+    },
+    {
+      "code": "SBR-03",
+      "name": "Outlays do not exceed resources",
+      "assertion": "Gross outlays are less than or equal to total budgetary resources.",
+      "rationale": "An outlay above available resources indicates a scope or sign error, not an Antideficiency event in this dataset.",
+      "authority": "31 U.S.C. 1341 context; DoD FMR Vol 3",
+      "severity": "high",
+      "sort_order": 30
+    },
+    {
+      "code": "TIE-01",
+      "name": "File A and File B obligations agree",
+      "assertion": "Obligations incurred per File B are within 0.5% of File A for the same scope, fiscal year and submission period.",
+      "rationale": "File A and File B are separate submissions of the same execution at different grain. A variance is a cross-system reconciliation finding to be published and explained, not a reason to withhold the data - so this control reports rather than blocks.",
+      "authority": "Treasury USSGL; OMB Circular A-136",
+      "severity": "high",
+      "sort_order": 40
+    },
+    {
+      "code": "SCOPE-01",
+      "name": "Department scope excludes non-Department agencies",
+      "assertion": "No DOW-scope figure includes agency identifier code 011.",
+      "rationale": "File A carries five agency codes. Including the Executive Office of the President in a Department total overstates it materially.",
+      "authority": "Treasury Account Symbol structure; OMB agency codes",
+      "severity": "critical",
+      "sort_order": 50
+    },
+    {
+      "code": "REC-01",
+      "name": "Linkage cannot exceed the population",
+      "assertion": "File C account-linked contract obligations do not exceed award-file obligations for the same fiscal year.",
+      "rationale": "Linkage above 100% would mean the subset is larger than the set, indicating a scope mismatch between the two chains.",
+      "authority": "USASpending DATA Act submission model",
+      "severity": "high",
+      "sort_order": 60
+    },
+    {
+      "code": "VIN-01",
+      "name": "Every load carries a vintage",
+      "assertion": "Every current dm_load row has a non-null vintage and extraction timestamp.",
+      "rationale": "A figure without a vintage cannot be defended, reproduced, or compared against a later extract.",
+      "authority": "Internal reporting standard",
+      "severity": "critical",
+      "sort_order": 70
+    },
+    {
+      "code": "PART-01",
+      "name": "Incomplete fiscal years are flagged",
+      "assertion": "Any fiscal year whose submission period is not P12 is marked as partial.",
+      "rationale": "An in-progress year shown beside closed years reads as collapsed execution unless it is labelled.",
+      "authority": "Internal reporting standard",
+      "severity": "high",
+      "sort_order": 80
+    },
+    {
+      "code": "DEF-01",
+      "name": "Every definition carries an authority",
+      "assertion": "Every published definition names at least one authoritative source.",
+      "rationale": "A definitions registry without citations is an opinion, not a standard.",
+      "authority": "Internal reporting standard",
+      "severity": "moderate",
+      "sort_order": 90
+    },
+    {
+      "code": "AWD-01",
+      "name": "Dimensional cuts do not exceed the fiscal-year total",
+      "assertion": "For each dimension, the sum of the retained top-N buckets does not exceed that fiscal year's award total.",
+      "rationale": "Guards the double-counting failure mode where a record increments more than one bucket.",
+      "authority": "Internal reporting standard",
+      "severity": "high",
+      "sort_order": 100
+    }
+  ],
+  "audit_posture": {
+    "vintage": "2026-07-26",
+    "rows": [
+      {
+        "fiscal_year": 2025,
+        "metric_key": "opinion",
+        "metric_label": "Audit opinion on the agency-wide financial statements",
+        "value_kind": "text",
+        "value_text": "Disclaimer of opinion",
+        "citation": "DoD FY2025 Agency Financial Report; DoD OIG report DODIG-2026-032",
+        "note": "Secondary read via the curated DoD-FM wiki page, last verified 2026-07-26.",
+        "sort_order": 10
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "mw_financial_reporting",
+        "metric_label": "Material weaknesses in financial reporting controls",
+        "metric_value": 69,
+        "value_kind": "count",
+        "citation": "DoD FY2025 Agency Financial Report, FMFIA assurance statement",
+        "note": "Secondary read via the curated DoD-FM wiki page, last verified 2026-07-26.",
+        "sort_order": 20
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "mw_operational",
+        "metric_label": "Material weaknesses in operational controls",
+        "metric_value": 39,
+        "value_kind": "count",
+        "citation": "DoD FY2025 Agency Financial Report, FMFIA assurance statement",
+        "note": "Secondary read via the curated DoD-FM wiki page, last verified 2026-07-26.",
+        "sort_order": 30
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "scope_assets",
+        "metric_label": "Share of total assets affected by scope limitations",
+        "metric_value": 43,
+        "value_kind": "percent",
+        "citation": "DoD OIG report DODIG-2026-032",
+        "note": "Secondary read via the curated DoD-FM wiki page, last verified 2026-07-26.",
+        "sort_order": 40
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "scope_resources",
+        "metric_label": "Share of budgetary resources affected by scope limitations",
+        "metric_value": 64,
+        "value_kind": "percent",
+        "citation": "DoD OIG report DODIG-2026-032",
+        "note": "Secondary read via the curated DoD-FM wiki page, last verified 2026-07-26.",
+        "sort_order": 50
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "bpc_error",
+        "metric_label": "Building Partner Capacity funding error identified",
+        "metric_value": 18900000000,
+        "value_kind": "dollars",
+        "citation": "DoD OIG report DODIG-2026-032",
+        "note": "Named quantified misstatement. Secondary read via the curated DoD-FM wiki page.",
+        "sort_order": 60
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "discretionary",
+        "metric_label": "Discretionary appropriations reported in the AFR",
+        "metric_value": 861500000000,
+        "value_kind": "dollars",
+        "citation": "DoD FY2025 Agency Financial Report",
+        "note": "AFR presentation basis differs from the File A extract on this site; the two are not expected to tie.",
+        "sort_order": 70
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "reconciliation_funds",
+        "metric_label": "Reconciliation funds reported in the AFR",
+        "metric_value": 153300000000,
+        "value_kind": "dollars",
+        "citation": "DoD FY2025 Agency Financial Report",
+        "note": "Secondary read via the curated DoD-FM wiki page.",
+        "sort_order": 80
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "designation",
+        "metric_label": "Departmental designation used in the FY2025 AFR",
+        "value_kind": "text",
+        "value_text": "Department of War, per Executive Order 14347",
+        "citation": "DoD FY2025 Agency Financial Report; Executive Order 14347",
+        "note": "This is why the site uses Department of War in framing while retaining DoD wherever it names a data field or source system.",
+        "sort_order": 90
+      }
+    ]
+  }
+}

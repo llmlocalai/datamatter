@@ -14,7 +14,15 @@
  *
  * All SQL is parameterized (values bound, never interpolated).
  */
-import { query } from "./db";
+import { query as rawQuery } from "./db";
+
+// The FY2027 exhibit tables may be absent in a database that has only had the
+// analytics load applied. Treat undefined_table as an empty result so the page
+// renders its own empty state instead of a 500.
+async function query<T = any>(text: string, params?: unknown[]): Promise<T[]> {
+  try { return await rawQuery<T>(text, params); }
+  catch (e: any) { if (e?.code === "42P01") return []; throw e; }
+}
 
 // doc_codes for the 7 FY2027 exhibits (in display order).
 export const EXHIBITS = ["c1", "m1", "o1", "p1", "p1r", "r1", "rf1"] as const;

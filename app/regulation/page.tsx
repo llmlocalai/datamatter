@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Navbar from '@/components/Navbar';
-import Footer from '@/components/Footer';
+import Shell from '@/components/Shell';
 
 interface Result {
   page: string;
@@ -60,8 +59,7 @@ export default function RegulationQAPage() {
   }
 
   return (
-       <main className="min-h-screen bg-navy-950">
-         <Navbar />
+       <Shell>
 
          <section className="py-20 px-4 sm:px-6 lg:px-8 border-b border-navy-800 grid-pattern">
           <div className="max-w-4xl mx-auto text-center">
@@ -192,8 +190,6 @@ export default function RegulationQAPage() {
           )}
          </div>
         </section>
-
-        <Footer />
-      </main>
+      </Shell>
     );
 }

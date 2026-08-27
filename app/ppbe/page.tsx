@@ -1,216 +1,72 @@
-'use client';
+import type { Metadata } from 'next';
+import Shell, { PageHeader, Section } from '@/components/Shell';
+import { ProvenanceBar, Caveat } from '@/components/Provenance';
+import { StatTile, BarList, DataTable } from '@/components/charts';
+import { fmtInt } from '@/components/format';
+import { getJustificationExhibits, getProvenance, getKbInventory } from '@/lib/analytics';
+import { NotLoaded } from '../execution/page';
 
-import { useState, useEffect } from 'react';
-import Navbar from '@/components/Navbar';
-import Footer from '@/components/Footer';
+export const metadata: Metadata = {
+  title: 'Budget justification · datamatter',
+  description: 'The FY2027 justification book inventory by budget activity, from the DoD-FM knowledge bank.',
+};
+export const revalidate = 900;
 
-interface PPBECompliance {
-  total_programs: number;
-  compliant_programs: number;
-  non_compliant_programs: number;
-  compliance_rate: number;
-}
-
-interface OMB30Compliance {
-  submitted: number;
-  approved: number;
-  pending: number;
-  rejected: number;
-}
-
-interface JustificationQuality {
-  high_quality: number;
-  medium_quality: number;
-  low_quality: number;
-}
-
-export default function PPBECompliancePage() {
-  const [ppbeData, setPpbeData] = useState<{
-    ppbe_compliance: PPBECompliance;
-    omb30_compliance: OMB30Compliance;
-    justification_quality: JustificationQuality;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch('/api/ppbe')
-      .then((res) => res.json())
-      .then((data) => {
-        setPpbeData(data);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error('Error fetching PPBE data:', error);
-        setLoading(false);
-      });
-  }, []);
-
-  if (loading) {
-    return (
-      <main className="min-h-screen bg-navy-950">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-500"></div>
-        </div>
-        <Footer />
-      </main>
-    );
-  }
-
-  if (!ppbeData) {
-    return (
-      <main className="min-h-screen bg-navy-950">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-screen">
-          <p className="text-navy-300">Failed to load PPBE data</p>
-        </div>
-        <Footer />
-      </main>
-    );
-  }
+export default async function JustificationPage() {
+  const [exhibits, prov, reg] = await Promise.all([
+    getJustificationExhibits(), getProvenance('knowledge_bank'), getKbInventory('justification'),
+  ]);
+  if (!exhibits.length) return <Shell><NotLoaded /></Shell>;
+  const total = exhibits.reduce((s, e) => s + e.exhibitCount, 0);
 
   return (
-    <main className="min-h-screen bg-navy-950">
-      <Navbar />
+    <Shell>
+      <PageHeader
+        eyebrow="Formulation · justification material"
+        title="Budget justification inventory"
+        lede="What justification material exists for the FY2027 request, by budget activity. This is a count of exhibits held — it is deliberately not a quality score, because nothing here reads the content of a justification."
+      />
 
-      {/* Hero Section */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8 border-b border-navy-800">
-        <div className="max-w-6xl mx-auto text-center">
-          <h1 className="text-4xl sm:text-5xl font-bold text-navy-50 mb-6">
-            PPBE Compliance Dashboard
-          </h1>
-          <p className="text-lg text-navy-300 max-w-3xl mx-auto">
-            Track program compliance with Planning, Programming, and Budgeting System requirements
-            across the Department of Defense.
-          </p>
+      <div className="mt-6"><ProvenanceBar p={prov} /></div>
+
+      <Section title="FY2027 justification books">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatTile label="Justification exhibits held" value={fmtInt(total)}
+            sub={`Across ${exhibits.length} budget activities`} tone="accent" />
+          <StatTile label="Budget activities covered" value={String(exhibits.length)}
+            sub="Top-level J-book categories present in the knowledge bank" />
+          <StatTile label="Largest activity" value={exhibits[0]?.activity ?? '—'}
+            sub={`${fmtInt(exhibits[0]?.exhibitCount ?? 0)} exhibits`} />
         </div>
-      </section>
+      </Section>
 
-      {/* Compliance Overview */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {/* Overall Compliance */}
-            <div className="glass-card rounded-xl p-6">
-              <div className="text-sm text-accent-400 font-semibold mb-2">
-                Overall Compliance Rate
-              </div>
-              <div className="text-3xl font-bold text-navy-50 mb-2">
-                {ppbeData.ppbe_compliance.compliance_rate}%
-              </div>
-              <div className="text-sm text-navy-400">
-                {ppbeData.ppbe_compliance.compliant_programs.toLocaleString()} of{' '}
-                {ppbeData.ppbe_compliance.total_programs.toLocaleString()} programs
-              </div>
-              <div className="mt-4 w-full bg-navy-800 rounded-full h-2">
-                <div
-                  className="bg-green-500 h-2 rounded-full"
-                  style={{ width: `${ppbeData.ppbe_compliance.compliance_rate}%` }}
-                />
-              </div>
-            </div>
+      <Section title="Exhibits per budget activity"
+        note="Read this as coverage of the justification corpus, nothing more.">
+        <BarList
+          format="int"
+          rows={exhibits.map((e) => ({
+            key: e.activity, label: e.activity, value: e.exhibitCount,
+            meta: `${((e.exhibitCount / total) * 100).toFixed(1)}% of the FY2027 justification corpus held`,
+          }))}
+        />
+        <Caveat>
+          The prior version of this page bucketed these same folder counts into &ldquo;High quality&rdquo;,
+          &ldquo;Medium quality&rdquo; and &ldquo;Low quality&rdquo; — an activity with five or more PDFs was
+          captioned &ldquo;clear, data-driven justifications&rdquo;. No justification text was read then and
+          none is read now, so the display says what it measures: how many exhibits are held. It also
+          displayed an &ldquo;OMB Circular A-30&rdquo; compliance section. There is no OMB Circular A-30; the
+          budget circular is A-11, internal control is A-123, and financial reporting is A-136.
+        </Caveat>
+      </Section>
 
-            {/* Non-Compliant Programs */}
-            <div className="glass-card rounded-xl p-6">
-              <div className="text-sm text-accent-400 font-semibold mb-2">
-                Non-Compliant Programs
-              </div>
-              <div className="text-3xl font-bold text-red-400 mb-2">
-                {ppbeData.ppbe_compliance.non_compliant_programs}
-              </div>
-              <div className="text-sm text-navy-400">
-                Requires immediate attention
-              </div>
-            </div>
-
-            {/* Total Programs */}
-            <div className="glass-card rounded-xl p-6">
-              <div className="text-sm text-accent-400 font-semibold mb-2">
-                Total Programs Tracked
-              </div>
-              <div className="text-3xl font-bold text-navy-50 mb-2">
-                {ppbeData.ppbe_compliance.total_programs.toLocaleString()}
-              </div>
-              <div className="text-sm text-navy-400">
-                Across all DoD components
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* OMB 30 Compliance */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 border-t border-navy-800">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-2xl font-bold text-navy-50 mb-8">OMB Circular A-30 Compliance</h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="glass-card rounded-xl p-6 text-center">
-              <div className="text-sm text-accent-400 mb-2">Submitted</div>
-              <div className="text-2xl font-bold text-navy-50">
-                {ppbeData.omb30_compliance.submitted}
-              </div>
-            </div>
-            <div className="glass-card rounded-xl p-6 text-center">
-              <div className="text-sm text-accent-400 mb-2">Approved</div>
-              <div className="text-2xl font-bold text-green-400">
-                {ppbeData.omb30_compliance.approved}
-              </div>
-            </div>
-            <div className="glass-card rounded-xl p-6 text-center">
-              <div className="text-sm text-accent-400 mb-2">Pending</div>
-              <div className="text-2xl font-bold text-yellow-400">
-                {ppbeData.omb30_compliance.pending}
-              </div>
-            </div>
-            <div className="glass-card rounded-xl p-6 text-center">
-              <div className="text-sm text-accent-400 mb-2">Rejected</div>
-              <div className="text-2xl font-bold text-red-400">
-                {ppbeData.omb30_compliance.rejected}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Justification Quality */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 border-t border-navy-800">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-2xl font-bold text-navy-50 mb-8">Budget Justification Quality</h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="glass-card rounded-xl p-6 text-center border-green-500/20">
-              <div className="text-sm text-green-400 font-semibold mb-2">High Quality</div>
-              <div className="text-3xl font-bold text-green-400 mb-2">
-                {ppbeData.justification_quality.high_quality}
-              </div>
-              <div className="text-sm text-navy-400">
-                Clear, data-driven justifications
-              </div>
-            </div>
-            <div className="glass-card rounded-xl p-6 text-center border-yellow-500/20">
-              <div className="text-sm text-yellow-400 font-semibold mb-2">Medium Quality</div>
-              <div className="text-3xl font-bold text-yellow-400 mb-2">
-                {ppbeData.justification_quality.medium_quality}
-              </div>
-              <div className="text-sm text-navy-400">
-                Needs improvement
-              </div>
-            </div>
-            <div className="glass-card rounded-xl p-6 text-center border-red-500/20">
-              <div className="text-sm text-red-400 font-semibold mb-2">Low Quality</div>
-              <div className="text-3xl font-bold text-red-400 mb-2">
-                {ppbeData.justification_quality.low_quality}
-              </div>
-              <div className="text-sm text-navy-400">
-                Requires revision
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <Footer />
-    </main>
+      <Section title="Where the request itself is analysed"
+        note="The exhibits' contents — seven '-1' display tables, de-duplicated to their canonical sheets and loaded line by line — drive the FY2027 dashboard.">
+        <DataTable
+          head={['Collection', 'Documents held']}
+          rows={reg.map((r) => [r.label, fmtInt(r.docCount)])}
+          caption="For the request figures themselves, see the FY2027 budget dashboard; for how the request becomes obligations, see Budget to execution."
+        />
+      </Section>
+    </Shell>
   );
 }

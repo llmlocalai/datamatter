@@ -1,206 +1,97 @@
-'use client';
+import type { Metadata } from 'next';
+import Shell, { PageHeader, Section } from '@/components/Shell';
+import { ProvenanceBar, Caveat } from '@/components/Provenance';
+import { StatTile, BarList, DataTable } from '@/components/charts';
+import { fmtInt, fmtPct } from '@/components/format';
+import { getKbInventory, getHearingSummary, getProvenance } from '@/lib/analytics';
+import { NotLoaded } from '../execution/page';
 
-import { useState, useEffect } from 'react';
-import Navbar from '@/components/Navbar';
-import Footer from '@/components/Footer';
+export const metadata: Metadata = {
+  title: 'Congressional direction · datamatter',
+  description: 'The congressional direction corpus: committee reports, joint explanatory statements, prints, and the hearing record.',
+};
+export const revalidate = 900;
 
-interface OversightRequest {
-  quarter: string;
-  requests: number;
-  responses: number;
-}
+export default async function CongressionalPage() {
+  const [inventory, detail, hearings, prov] = await Promise.all([
+    getKbInventory('congressional'), getKbInventory('congressional_detail'),
+    getHearingSummary(), getProvenance('knowledge_bank'),
+  ]);
+  if (!detail.length && !hearings.totals.total) return <Shell><NotLoaded /></Shell>;
 
-interface Testimony {
-  committee: string;
-  date: string;
-  witnesses: number;
-}
-
-export default function CongressionalOversightPage() {
-  const [congressionalData, setCongressionalData] = useState<{
-    oversight_requests: OversightRequest[];
-    testimony_scheduled: Testimony[];
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch('/api/congressional')
-      .then((res) => res.json())
-      .then((data) => {
-        setCongressionalData(data);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error('Error fetching congressional data:', error);
-        setLoading(false);
-      });
-  }, []);
-
-  if (loading) {
-    return (
-      <main className="min-h-screen bg-navy-950">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-500"></div>
-        </div>
-        <Footer />
-      </main>
-    );
-  }
-
-  if (!congressionalData) {
-    return (
-      <main className="min-h-screen bg-navy-950">
-        <Navbar />
-        <div className="flex items-center justify-center min-h-screen">
-          <p className="text-navy-300">Failed to load congressional oversight data</p>
-        </div>
-        <Footer />
-      </main>
-    );
-  }
-
-  // Calculate totals
-  const totalRequests = congressionalData.oversight_requests.reduce(
-    (sum, quarter) => sum + quarter.requests,
-    0
-  );
-  const totalResponses = congressionalData.oversight_requests.reduce(
-    (sum, quarter) => sum + quarter.responses,
-    0
-  );
-  const responseRate = totalRequests > 0 ? (totalResponses / totalRequests) * 100 : 0;
+  const totalDocs = detail.reduce((s, d) => s + d.docCount, 0);
+  const byCongress = Object.values(
+    hearings.byCongress.reduce((acc: Record<number, { congress: number; total: number; defense: number }>, r) => {
+      acc[r.congress] = acc[r.congress] ?? { congress: r.congress, total: 0, defense: 0 };
+      acc[r.congress].total += r.total; acc[r.congress].defense += r.defense;
+      return acc;
+    }, {})).sort((a, b) => b.congress - a.congress);
 
   return (
-    <main className="min-h-screen bg-navy-950">
-      <Navbar />
+    <Shell>
+      <PageHeader
+        eyebrow="Oversight · congressional direction"
+        title="Congressional direction"
+        lede="Report language is not statute, but it is operationally binding on execution. This is what the corpus contains — committee reports, joint explanatory statements, prints, mandated reports, and the hearing record."
+      />
 
-      {/* Hero Section */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8 border-b border-navy-800">
-        <div className="max-w-6xl mx-auto text-center">
-          <h1 className="text-4xl sm:text-5xl font-bold text-navy-50 mb-6">
-            Congressional Oversight Dashboard
-          </h1>
-          <p className="text-lg text-navy-300 max-w-3xl mx-auto">
-            Track congressional requests, testimony schedules, and response rates for
-            senior budget analyst coordination with services and defense-wide stakeholders.
-          </p>
+      <div className="mt-6">
+        <ProvenanceBar p={prov}
+          extra="Hearing dates in the source filenames are acquisition dates, not the dates hearings were held. They are labelled as ingest dates throughout and no hearing on this page is described as upcoming." />
+      </div>
+
+      <Section title="The corpus">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatTile label="Congressional direction documents" value={fmtInt(totalDocs)}
+            sub={`Across ${detail.length} document classes`} tone="accent" />
+          <StatTile label="Hearing records" value={fmtInt(hearings.totals.total)}
+            sub="Parsed from GPO hearing identifiers" />
+          <StatTile label="Defense-related hearings" value={fmtInt(hearings.totals.defense)}
+            sub={`${fmtPct(hearings.totals.defense / Math.max(1, hearings.totals.total) * 100)} of the hearing record`} />
+          <StatTile label="Congresses represented" value={String(byCongress.length)}
+            sub={byCongress.map((c) => c.congress).join(', ')} />
         </div>
-      </section>
+      </Section>
 
-      {/* Response Metrics */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="glass-card rounded-xl p-6 text-center">
-              <div className="text-sm text-accent-400 font-semibold mb-2">
-                Total Requests
-              </div>
-              <div className="text-4xl font-bold text-navy-50 mb-2">
-                {totalRequests}
-              </div>
-            </div>
-            <div className="glass-card rounded-xl p-6 text-center">
-              <div className="text-sm text-accent-400 font-semibold mb-2">
-                Total Responses
-              </div>
-              <div className="text-4xl font-bold text-navy-50 mb-2">
-                {totalResponses}
-              </div>
-            </div>
-            <div className="glass-card rounded-xl p-6 text-center border-accent-500/20">
-              <div className="text-sm text-accent-400 font-semibold mb-2">
-                Response Rate
-              </div>
-              <div className="text-4xl font-bold text-accent-400 mb-2">
-                {responseRate.toFixed(1)}%
-              </div>
-              <div className="w-full bg-navy-800 rounded-full h-2">
-                <div
-                  className="bg-accent-500 h-2 rounded-full"
-                  style={{ width: `${responseRate}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <Section title="Documents by class"
+        note="Armed Services and Appropriations committee reports are where execution-relevant direction actually lands.">
+        <BarList
+          format="int"
+          rows={detail.map((d) => ({ key: d.folder, label: d.label, value: d.docCount }))}
+        />
+      </Section>
 
-      {/* Oversight Requests by Quarter */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 border-t border-navy-800">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-2xl font-bold text-navy-50 mb-8">
-            Oversight Requests by Quarter
-          </h2>
+      <Section title="Hearing record by Congress"
+        note="Counts of hearing documents held, and how many carry defense-relevant subject matter in their title.">
+        <DataTable
+          head={['Congress', 'Hearing records held', 'Defense-related', 'Share']}
+          rows={byCongress.map((c) => [
+            `${c.congress}th`, fmtInt(c.total), fmtInt(c.defense),
+            fmtPct(c.defense / Math.max(1, c.total) * 100),
+          ])}
+        />
+        <Caveat>
+          The previous version of this page showed twelve cards under &ldquo;Upcoming Testimonies&rdquo;. All
+          twelve carried the same date — the acquisition date embedded in the filename — a chamber name where a
+          committee belonged, a hardcoded witness count of one, and titles that were mostly not defense
+          subject matter, because the extract sorted 1,092 hearings by a constant and took the first twelve.
+          Hearing dates are not available in this corpus, so no hearing date is published; what is published
+          is what the corpus can support.
+        </Caveat>
+      </Section>
 
-          <div className="glass-card rounded-xl p-6">
-            <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead>
-                  <tr className="bg-navy-800/50">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-accent-400 uppercase">
-                      Quarter
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-accent-400 uppercase">
-                      Requests
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-accent-400 uppercase">
-                      Responses
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-accent-400 uppercase">
-                      Rate
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {congressionalData.oversight_requests.map((quarter) => (
-                    <tr key={quarter.quarter} className="border-t border-navy-800">
-                      <td className="px-4 py-3 text-navy-200">{quarter.quarter}</td>
-                      <td className="px-4 py-3 text-center text-navy-50">
-                        {quarter.requests}
-                      </td>
-                      <td className="px-4 py-3 text-center text-navy-50">
-                        {quarter.responses}
-                      </td>
-                      <td className="px-4 py-3 text-center text-accent-400 font-bold">
-                        {quarter.requests > 0
-                          ? ((quarter.responses / quarter.requests) * 100).toFixed(1) + '%'
-                          : '0%'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Upcoming Testimonies */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 border-t border-navy-800">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-2xl font-bold text-navy-50 mb-8">Upcoming Testimonies</h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {congressionalData.testimony_scheduled.map((testimony, index) => (
-              <div
-                key={index}
-                className="glass-card rounded-xl p-6 hover:border-accent-500/40 transition-all"
-              >
-                <div className="text-sm text-accent-400 font-semibold mb-2">
-                  {testimony.committee}
-                </div>
-                <div className="text-navy-200 mb-4">{testimony.date}</div>
-                <div className="text-xs text-navy-400">
-                  {testimony.witnesses} witness(es) scheduled
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <Footer />
-    </main>
+      <Section title="Defense-related hearing records"
+        note="Titles matched on defense subject matter. Listed as records held, in identifier order — not as a schedule.">
+        <DataTable
+          head={['Hearing identifier', 'Congress', 'Chamber', 'Title', 'Ingested']}
+          rows={hearings.recent.map((h) => [
+            h.hearingId, `${h.congress}th`, h.chamber,
+            h.title.length > 70 ? h.title.slice(0, 70) + '…' : h.title,
+            h.ingestDate ?? '—',
+          ])}
+          caption="Ingested is the date the document entered the knowledge bank. It is not the hearing date, and is labelled that way everywhere it appears."
+        />
+      </Section>
+    </Shell>
   );
 }
