@@ -168,8 +168,14 @@ const CONTROLS = {
 
 // -------------------------------------------------------------------- main --
 (async () => {
-  const pool = new Pool({ connectionString: databaseUrl(), max: 4,
-    connectionTimeoutMillis: 20000, ssl: { rejectUnauthorized: true } });
+  const url = databaseUrl();
+  // Verify the server certificate for any real network connection. A local
+  // socket or localhost (the schema-verification harness) has no TLS to verify,
+  // so requiring it there would only break the check.
+  const isLocal = /host=\/|@(localhost|127\.0\.0\.1)[:/]/.test(url);
+  const pool = new Pool({ connectionString: url, max: 4,
+    connectionTimeoutMillis: 20000,
+    ssl: isLocal ? false : { rejectUnauthorized: true } });
   const client = await pool.connect();
   const t0 = Date.now();
   try {
