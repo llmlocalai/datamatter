@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import Shell, { PageHeader, Section } from '@/components/Shell';
 import { ProvenanceBar, Caveat } from '@/components/Provenance';
-import { StatTile, BarList, DataTable, StackedFY, Legend, LineTrend } from '@/components/charts';
+import { StatTile, BarList, DataTable, StackedFY, LineTrend } from '@/components/charts';
 import { FyPicker } from '@/components/FyPicker';
 import { fmtB, fmtT, fmtPct, fmtInt } from '@/components/format';
 import {
@@ -147,10 +147,6 @@ export default async function ProgramPage({ searchParams }:
                 { label: 'Names an account', colour: 'var(--series-1)' },
                 { label: 'Names no account', colour: 'var(--series-3)' },
               ]} />
-            <Legend series={[
-              { label: 'Names an account', colour: 'var(--series-1)' },
-              { label: 'Names no account', colour: 'var(--series-3)' },
-            ]} />
           </div>
         </div>
         <div className="mt-8">

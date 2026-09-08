@@ -138,8 +138,12 @@ export function StackedFY({ years, series, format }: {
         {years.map((y, yi) => {
           const total = totals[yi];
           return (
-            <div key={y.fy} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
+            /* The column must have a definite height and the bar must sit in a
+               flex-1 track, or the percentage height below resolves against an
+               auto-height parent and every bar collapses to nothing. */
+            <div key={y.fy} className="flex-1 flex flex-col items-center gap-1.5 min-w-0 h-full">
               <div className="text-[12px] text-navy-300 tnum">{valueFormat(total)}</div>
+              <div className="w-full flex-1 flex flex-col justify-end min-h-0">
               <div className="w-full flex flex-col-reverse justify-start"
                    style={{ height: `${(total / max) * 100}%` }}>
                 {y.parts.map((v, si) => (
@@ -152,6 +156,7 @@ export function StackedFY({ years, series, format }: {
                              borderTop: si < y.parts.length - 1 ? `2px solid ${SURFACE}` : undefined,
                              opacity: hover && !(hover.y === yi && hover.s === si) ? 0.5 : 1 }} />
                 ))}
+              </div>
               </div>
               <div className="text-[12px] text-navy-400 tnum">
                 FY{String(y.fy).slice(2)}{y.partial ? '*' : ''}

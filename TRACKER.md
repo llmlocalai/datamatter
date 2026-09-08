@@ -99,6 +99,28 @@ No baked snapshots. A daily refresh reaches the live site without a redeploy.
   it can compute and is dropped on an arbitrary `var()`. The broken-link panel had
   no tint at all. Replaced with real `.alert-critical` / `.alert-warning` classes.
 
+## Done — 2026-09-08 (fourth pass) — `/traceability` at full depth
+
+- [x] **Rebuilt `/traceability` to the depth of the analysis memo**, section by
+  section: the chain drawn as an SVG (three intact links, the third drawn broken),
+  01 Budget with a discretionary/mandatory chart, a quantity chart and the O-1
+  callout; 02 Execution with an obligations chart split by the five largest
+  actions, an action-count chart beside it, the one-contract callout, the FY
+  composition (recipient / extent competed / pricing) and the program-coverage
+  correction; 03 the traceability trend, the closed-year evidence, the account
+  sets, the SCOPE-01 blind spot, File C and the department-wide collapse; 04 the
+  audit layer with the named material weakness and remediation posture; 05 what
+  the pilot does not support; 06 the PROG controls with their live results.
+  **Every figure still queried live** — nothing transcribed.
+- [x] **Fixed a pre-existing bug in `StackedFY`** (`components/charts.tsx`). Each
+  column was `flex-1 flex flex-col` inside an `items-end` container, so it had no
+  definite height and the bars' percentage heights resolved against an auto-height
+  parent — **every bar collapsed to zero and only the labels rendered**. The column
+  now carries `h-full` with the bar in a `flex-1` track. This also repairs the
+  chart on `/execution`, where it had been silently broken.
+- [x] **Removed duplicate legends.** `StackedFY` already renders its own `<Legend>`;
+  `/traceability` and `/program` were each rendering a second copy underneath.
+
 ## Open — found while shipping `/program`
 
 - [ ] **`npm run verify` does not cover any page that reads `searchParams`.**
@@ -231,6 +253,9 @@ to actually run and verify against real numbers):
 
 ## Changelog
 
+- **2026-09-08 (fourth pass)** — `/traceability` rebuilt at memo depth (6 sections,
+  chain diagram, 6 charts). Fixed `StackedFY` bar-height collapse, which also
+  affected `/execution`, and removed duplicate legends.
 - **2026-09-08 (third pass)** — `/traceability` tab, live-queried; app-wide repaint
   to a gold accent with bright text tiers (7:1 floor) and a 12px type floor.
   Verified by build + render against a local Postgres; **not yet loaded to Neon**.
