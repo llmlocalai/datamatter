@@ -200,6 +200,50 @@ CREATE TABLE IF NOT EXISTS dm_vintage_drift (
   UNIQUE (load_id, fiscal_year, vintage_from, vintage_to)
 );
 
+-- --------------------------------------------------------- assistance -------
+-- DoD financial-assistance transactions (cooperative agreements, project
+-- grants, direct payments). Separate warehouse tree from contracts; not
+-- account-linked, not reconciled against anything. See dm_dataset for scope.
+CREATE TABLE IF NOT EXISTS dm_assistance_fy (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  vintage       date NOT NULL,
+  fiscal_year   int NOT NULL,
+  obligation    numeric(20,2) NOT NULL DEFAULT 0,
+  action_count  bigint NOT NULL DEFAULT 0,
+  is_partial_year boolean NOT NULL DEFAULT false,
+  UNIQUE (load_id, vintage, fiscal_year)
+);
+
+CREATE TABLE IF NOT EXISTS dm_assistance_dim (
+  id           bigserial PRIMARY KEY,
+  load_id      bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year  int NOT NULL,
+  dimension    text NOT NULL,  -- assistance_type | sub_agency | recipient | cfda | state
+  dim_key      text NOT NULL,
+  dim_label    text NOT NULL,
+  obligation   numeric(20,2) NOT NULL DEFAULT 0,
+  action_count bigint NOT NULL DEFAULT 0,
+  rank_in_dim  int
+);
+CREATE INDEX IF NOT EXISTS dm_assistance_dim_idx ON dm_assistance_dim (load_id, fiscal_year, dimension, rank_in_dim);
+
+CREATE TABLE IF NOT EXISTS dm_assistance_vintage_drift (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year    int NOT NULL,
+  vintage_from   date NOT NULL,
+  vintage_to     date NOT NULL,
+  obligation_from numeric(20,2) NOT NULL,
+  obligation_to   numeric(20,2) NOT NULL,
+  obligation_delta numeric(20,2) NOT NULL,
+  actions_from    bigint NOT NULL,
+  actions_to      bigint NOT NULL,
+  action_delta    bigint NOT NULL,
+  year_closed     boolean NOT NULL,
+  UNIQUE (load_id, fiscal_year, vintage_from, vintage_to)
+);
+
 -- --------------------------------------------------------- reconciliation ---
 -- Award files (FPDS federal_action_obligation) vs File C (account-linked
 -- transaction_obligated_amount). Two reporting chains, not two measurements of
@@ -233,6 +277,16 @@ CREATE TABLE IF NOT EXISTS dm_audit_posture (
   note          text,
   sort_order    int NOT NULL DEFAULT 100,
   UNIQUE (load_id, fiscal_year, metric_key)
+);
+
+CREATE TABLE IF NOT EXISTS dm_audit_mw_category (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int NOT NULL,
+  rank_in_report int NOT NULL,
+  category      text NOT NULL,
+  citation      text NOT NULL,
+  UNIQUE (load_id, fiscal_year, rank_in_report)
 );
 
 CREATE TABLE IF NOT EXISTS dm_kb_inventory (

@@ -52,9 +52,10 @@ launchctl load ~/Library/LaunchAgents/com.datamatter.refresh.plist   # daily 06:
 Individual steps, when a full run is not wanted:
 
 ```bash
-python3 scripts/etl_analytics.py --step sbr|obligations|awards|filec|knowledge
+python3 scripts/etl_analytics.py --step sbr|obligations|awards|filec|assistance|knowledge
 python3 scripts/etl_analytics.py --step awards --fy 2025   # one year's cuts
 node scripts/load_analytics.js --dry-run                   # load, test, roll back
+python3 scripts/etl_knowledge_index.py                     # rebuild the /regulation BM25 index
 ```
 
 ## Verify
@@ -75,6 +76,7 @@ non-serialisable prop fails the build rather than the deploy.
 | `/reconciliation` | Award files vs account-linked File C; vintage drift |
 | `/funds-control` | TAS-level obligation and outlay rates, unobligated balance |
 | `/contracting` | Contract obligations by set-aside, extent competed, recipient, industry |
+| `/assistance` | Financial-assistance obligations (cooperative agreements, grants, direct payments) by type, sub-agency, recipient |
 | `/budget` | FY2027 "-1" exhibits, line-item explorer, source documents |
 | `/audit` | Opinion, material weaknesses, scope limitations from the AFR |
 | `/ppbe` | FY2027 justification exhibit inventory |

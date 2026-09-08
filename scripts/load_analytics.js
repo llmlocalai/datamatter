@@ -164,6 +164,14 @@ const CONTROLS = {
     fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
     status: Number(r.observed) <= Number(r.expected) * 1.0001 ? 'pass' : 'fail',
     message: `FY${r.fiscal_year} ${r.dimension}: retained buckets total ${(r.observed / r.expected * 100).toFixed(1)}% of the fiscal-year award total.` })),
+  'ASSIST-01': async (c) => (await c.query(`
+    SELECT d.fiscal_year, d.dimension, sum(d.obligation) AS observed, max(f.obligation) AS expected
+      FROM dm_assistance_dim d JOIN dm_load l ON l.id=d.load_id AND l.is_current
+      JOIN dm_assistance_fy f ON f.fiscal_year=d.fiscal_year AND f.load_id=d.load_id
+     GROUP BY d.fiscal_year, d.dimension ORDER BY d.fiscal_year, d.dimension`)).rows.map((r) => ({
+    fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+    status: Number(r.observed) <= Number(r.expected) * 1.0001 ? 'pass' : 'fail',
+    message: `FY${r.fiscal_year} ${r.dimension}: retained buckets total ${(r.observed / r.expected * 100).toFixed(1)}% of the fiscal-year assistance total.` })),
 };
 
 // -------------------------------------------------------------------- main --
@@ -210,6 +218,7 @@ const CONTROLS = {
       ['obligations.json','file_b_obligations',    'scripts/etl_analytics.py --step obligations'],
       ['awards.json',     'contract_awards',       'scripts/etl_analytics.py --step awards'],
       ['filec.json',      'file_c_reconciliation', 'scripts/etl_analytics.py --step filec'],
+      ['assistance.json', 'assistance_awards',     'scripts/etl_analytics.py --step assistance'],
       ['knowledge.json',  'knowledge_bank',        'scripts/etl_analytics.py --step knowledge'],
     ];
     const COLS = {
@@ -228,6 +237,10 @@ const CONTROLS = {
         'obligation_delta','actions_from','actions_to','action_delta','year_closed'],
       dm_reconciliation: ['fiscal_year','award_obligation','award_actions','filec_obligation','filec_rows',
         'filec_awards','linkage_pct','unlinked_obligation','is_partial_year'],
+      dm_assistance_fy: ['vintage','fiscal_year','obligation','action_count','is_partial_year'],
+      dm_assistance_dim: ['fiscal_year','dimension','dim_key','dim_label','obligation','action_count','rank_in_dim'],
+      dm_assistance_vintage_drift: ['fiscal_year','vintage_from','vintage_to','obligation_from','obligation_to',
+        'obligation_delta','actions_from','actions_to','action_delta','year_closed'],
       dm_definition: ['slug','term','definition','why_it_matters','key_rules','authorities','related',
         'source_file','last_verified','topic'],
       dm_kb_inventory: ['collection','folder','label','doc_count','authority_tier','note','sort_order'],
@@ -258,6 +271,15 @@ const CONTROLS = {
       ['fiscal_year','metric_key','metric_label','metric_value','value_kind','value_text','citation','note','sort_order'],
       ap.rows, { load_id: apLoad });
     console.log(`· dm_audit_posture           ${String(ap.rows.length).padStart(6)} rows   vintage ${ap.vintage}`);
+
+    const mwc = seed.audit_mw_categories;
+    if (mwc && mwc.rows && mwc.rows.length) {
+      await client.query('DELETE FROM dm_audit_mw_category WHERE load_id <> $1', [apLoad]);
+      await bulk(client, 'dm_audit_mw_category',
+        ['fiscal_year','rank_in_report','category','citation'],
+        mwc.rows, { load_id: apLoad });
+      console.log(`· dm_audit_mw_category        ${String(mwc.rows.length).padStart(6)} rows   vintage ${mwc.vintage}`);
+    }
 
     // ------------------------------------------------------------ controls --
     console.log('\n· control suite');

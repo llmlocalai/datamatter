@@ -3,7 +3,7 @@ import Shell, { PageHeader, Section } from '@/components/Shell';
 import { ProvenanceBar, Caveat } from '@/components/Provenance';
 import { StatTile, DataTable, BarList } from '@/components/charts';
 import { fmtT, fmtInt, fmtPct } from '@/components/format';
-import { getAuditPosture, getProvenance, getKbInventory, getReconciliation } from '@/lib/analytics';
+import { getAuditPosture, getProvenance, getKbInventory, getReconciliation, getAuditMwCategories } from '@/lib/analytics';
 import { NotLoaded } from '../execution/page';
 
 export const metadata: Metadata = {
@@ -13,9 +13,9 @@ export const metadata: Metadata = {
 export const revalidate = 900;
 
 export default async function AuditPage() {
-  const [posture, prov, inventory, rec] = await Promise.all([
+  const [posture, prov, inventory, rec, mwCategories] = await Promise.all([
     getAuditPosture(), getProvenance('curated_audit'),
-    getKbInventory('oversight'), getReconciliation(),
+    getKbInventory('oversight'), getReconciliation(), getAuditMwCategories(2025),
   ]);
   if (!posture.length) return <Shell><NotLoaded /></Shell>;
 
@@ -26,6 +26,18 @@ export default async function AuditPage() {
   const assets = by('scope_assets');
   const resources = by('scope_resources');
   const bpc = by('bpc_error');
+  const mwAuditor = by('mw_auditor_identified');
+  const mwAuditorPrior = by('mw_auditor_identified_fy2024');
+  const sigDef = by('significant_deficiencies');
+  const entitiesDisclaimed = by('entities_disclaimed');
+  const disclaimerStreak = by('disclaimer_streak_years');
+  const nfrIssued = by('nfr_issued');
+  const nfrOpen = by('nfr_open');
+  const nfrClosed = by('nfr_closed');
+  const jtf = by('jtf_established');
+  const remediationCost = by('remediation_cost_fy2027');
+  const targetFy2027 = by('target_fy2027');
+  const targetFy2028 = by('target_fy2028');
   const closedRec = rec.filter((r) => !r.isPartialYear);
   const lastRec = closedRec[closedRec.length - 1];
 
@@ -66,6 +78,57 @@ export default async function AuditPage() {
           That figure was a literal zero written by the extract for every year, and it contradicted both the
           disclaimer of opinion carried in the same file and the Department&rsquo;s own reporting. It has been
           replaced with what the Agency Financial Report actually states.
+        </Caveat>
+      </Section>
+
+      <Section title="The independent auditor's FY2025 report"
+        note="A separate framework from the FMFIA self-assessment above: these are the material weaknesses the DoD OIG's independent auditor identified in testing the FY2025 statements (DODIG-2026-032), not the Department's own FMFIA count. The two are not comparable and are shown separately for that reason.">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatTile label="Material weaknesses (independent auditor)" value={fmtValue(mwAuditor)} tone="critical"
+            sub={mwAuditorPrior ? `Down from ${fmtValue(mwAuditorPrior)} in FY2024` : undefined} />
+          <StatTile label="Significant deficiencies" value={fmtValue(sigDef)} tone="warning"
+            sub="Below the material-weakness threshold, still reported" />
+          <StatTile label="Reporting entities disclaimed" value={fmtValue(entitiesDisclaimed)} tone="warning"
+            sub="Of the Department's standalone reporting entities" />
+          <StatTile label="Consecutive years disclaimed" value={fmtValue(disclaimerStreak)} tone="critical"
+            sub="FY2018 through FY2025" />
+        </div>
+      </Section>
+
+      <Section title="The 26 material weaknesses named in the FY2025 audit"
+        note="As categorized by the independent auditor's report, in the order given there. A category is not a dollar figure or an estimate of misstatement — it names where the auditor could not obtain sufficient evidence.">
+        <DataTable
+          head={['#', 'Material weakness', 'Citation']}
+          rows={mwCategories.map((m) => [m.rank, m.category, m.citation])}
+        />
+      </Section>
+
+      <Section title="The 2027-2028 strategy shift"
+        note="In 2026 the Department moved from decentralized FIAR control-remediation toward a centralized, substantive-testing effort. GAO's report on the change (GAO-26-109115) is the citation for this section.">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatTile label="Joint Task Force Audit" value={fmtValue(jtf)} tone="accent" />
+          <StatTile label="FY2027 opinion target" value={fmtValue(targetFy2027)} />
+          <StatTile label="FY2028 opinion target" value={fmtValue(targetFy2028)} />
+          <StatTile label="Projected FY2027 remediation cost" value={fmtValue(remediationCost)} />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+          <StatTile label="NFRs issued, FY2025" value={fmtValue(nfrIssued)}
+            sub="Notices of Findings and Recommendations" />
+          <StatTile label="NFRs open at year-end" value={fmtValue(nfrOpen)} tone="warning" />
+          <StatTile label="NFRs closed in FY2025" value={fmtValue(nfrClosed)} tone="warning"
+            sub={nfrOpen && nfrClosed ? `${fmtPct((Number(nfrClosed.metricValue ?? 0) / Number(nfrOpen.metricValue ?? 1)) * 100)} of the open total` : undefined} />
+        </div>
+        <Caveat>
+          The new approach validates account balances directly with supporting documentation rather than
+          working primarily through remediated internal controls, and reduces the number of standalone
+          financial statements produced department-wide. GAO's own review of the shift raises open questions
+          it has not resolved: whether fewer standalone statements narrow oversight, whether deprioritizing
+          the scope-limiting material weaknesses above for multiple years delays the root-cause fixes those
+          weaknesses represent, whether fraud-risk controls keep pace under compressed timelines, and whether
+          the substantive-testing approach that produced a clean opinion for the Marine Corps — a component
+          holding roughly one percent of Department assets — scales to the much larger Army, Navy, and Air
+          Force. None of that is resolved by this page; it is recorded here because it is the citation-bearing
+          context for the FY2027 and FY2028 targets above.
         </Caveat>
       </Section>
 

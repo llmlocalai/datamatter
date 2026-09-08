@@ -35,6 +35,17 @@
       "sort_order": 30
     },
     {
+      "key": "assistance_awards",
+      "label": "Financial assistance transactions (cooperative agreements, grants, direct payments)",
+      "source_system": "USASpending financial assistance archive, Department of War / Department of Defense awarding agency",
+      "source_path": "data/usaspending/warehouse/assistance",
+      "grain": "Assistance transaction x fiscal year x vintage",
+      "description": "Federal action obligations for DoW financial-assistance awards — cooperative agreements, project and formula grants, and direct payments. A separate warehouse tree and reporting chain from contracts and File C; not account-linked and not reconciled against anything.",
+      "refresh_cadence": "as vintaged (two vintages currently retained)",
+      "limitations": "Rows are filtered to awarding-agency name ‘Department of Defense’ or ‘Department of War’ rather than an agency-identifier code, because this warehouse cut carries no code column. The assistance-type codes present are cooperative agreements, grants and direct payments — no loan or loan-guarantee type codes appear in this cut, so it is not a credit-programs picture and must not be described as one. Only two vintages are retained so far; vintage drift is measurable but thin.",
+      "sort_order": 35
+    },
+    {
       "key": "file_c_reconciliation",
       "label": "Award-to-account linkage (File C)",
       "source_system": "USASpending Account Breakdown by Award",
@@ -158,10 +169,19 @@
       "authority": "Internal reporting standard",
       "severity": "high",
       "sort_order": 100
+    },
+    {
+      "code": "ASSIST-01",
+      "name": "Assistance dimensional cuts do not exceed the fiscal-year total",
+      "assertion": "For each dimension, the sum of the retained top-N buckets does not exceed that fiscal year's assistance total.",
+      "rationale": "Same double-counting guard as AWD-01 (contract awards), applied to the assistance dimension cuts.",
+      "authority": "Internal reporting standard",
+      "severity": "high",
+      "sort_order": 110
     }
   ],
   "audit_posture": {
-    "vintage": "2026-07-26",
+    "vintage": "2026-09-08",
     "rows": [
       {
         "fiscal_year": 2025,
@@ -252,6 +272,287 @@
         "citation": "DoD FY2025 Agency Financial Report; Executive Order 14347",
         "note": "This is why the site uses Department of War in framing while retaining DoD wherever it names a data field or source system.",
         "sort_order": 90
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "mw_auditor_identified",
+        "metric_label": "Material weaknesses identified by the independent auditor",
+        "metric_value": 26,
+        "value_kind": "count",
+        "citation": "DoD OIG report DODIG-2026-032 (independent auditor's report on the FY2025 financial statements)",
+        "note": "Distinct from the FMFIA self-assessed counts above (mw_financial_reporting, mw_operational): this is the auditor's own material-weakness count from the FY2025 financial-statement audit, down from 28 in FY2024. The two frameworks are not comparable and must not be summed or substituted for one another. Secondary read of DODIG-2026-032, verified 2026-09-08.",
+        "sort_order": 95
+      },
+      {
+        "fiscal_year": 2024,
+        "metric_key": "mw_auditor_identified_fy2024",
+        "metric_label": "Material weaknesses identified by the independent auditor (FY2024, for comparison)",
+        "metric_value": 28,
+        "value_kind": "count",
+        "citation": "DoD OIG report DODIG-2026-032, prior-year comparison as reported",
+        "note": "Carried here only to show the FY2025 auditor-identified count moved by −2 year over year. Verified 2026-09-08.",
+        "sort_order": 96
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "significant_deficiencies",
+        "metric_label": "Significant deficiencies identified by the independent auditor",
+        "metric_value": 2,
+        "value_kind": "count",
+        "citation": "DoD OIG report DODIG-2026-032",
+        "note": "Below the material-weakness threshold but still reported by the auditor. Verified 2026-09-08.",
+        "sort_order": 97
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "entities_disclaimed",
+        "metric_label": "Standalone reporting entities receiving a disclaimer of opinion",
+        "metric_value": 11,
+        "value_kind": "count",
+        "citation": "DoD OIG report DODIG-2026-032",
+        "note": "Of the Department's standalone reporting entities. See scope_assets and scope_resources above for their combined share of total assets and budgetary resources. Verified 2026-09-08.",
+        "sort_order": 98
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "disclaimer_streak_years",
+        "metric_label": "Consecutive fiscal years with a disclaimer of opinion",
+        "metric_value": 8,
+        "value_kind": "count",
+        "citation": "GAO-26-109115, DOD Financial Management: Questions Associated with New Financial Audit Approach",
+        "note": "FY2018 through FY2025. Read via GAO's report on DoD's revised audit approach, verified 2026-09-08.",
+        "sort_order": 99
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "nfr_issued",
+        "metric_label": "Notices of Findings and Recommendations (NFRs) issued in FY2025",
+        "metric_value": 2473,
+        "value_kind": "count",
+        "citation": "GAO-26-109115",
+        "note": "NFRs are the auditor's formal findings mechanism, issued against specific control or evidentiary gaps. Verified 2026-09-08.",
+        "sort_order": 100
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "nfr_open",
+        "metric_label": "NFRs open at fiscal year-end",
+        "metric_value": 2972,
+        "value_kind": "count",
+        "citation": "GAO-26-109115",
+        "note": "Cumulative open items, not limited to FY2025 issuances; only 1,004 of these were closed by auditors during FY2025 (see nfr_closed). Verified 2026-09-08.",
+        "sort_order": 101
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "nfr_closed",
+        "metric_label": "NFRs closed by auditors during FY2025",
+        "metric_value": 1004,
+        "value_kind": "count",
+        "citation": "GAO-26-109115",
+        "note": "Of 2,972 open items. A closure rate under 35% in the year the count is drawn from. Verified 2026-09-08.",
+        "sort_order": 102
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "jtf_established",
+        "metric_label": "Joint Task Force Audit",
+        "value_kind": "text",
+        "value_text": "Established March 2026",
+        "citation": "GAO-26-109115",
+        "note": "A centralized, substantive-testing effort — validating account balances directly rather than relying primarily on remediated internal controls — that supersedes the prior decentralized FIAR remediation approach for this push toward a clean opinion. GAO's report raises open questions about this approach; see the strategy section on this page. Verified 2026-09-08.",
+        "sort_order": 103
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "remediation_cost_fy2027",
+        "metric_label": "Projected FY2027 audit remediation cost",
+        "metric_value": 1700000000,
+        "value_kind": "dollars",
+        "citation": "GAO-26-109115",
+        "note": "Verified 2026-09-08.",
+        "sort_order": 104
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "target_fy2027",
+        "metric_label": "FY2027 opinion target",
+        "value_kind": "text",
+        "value_text": "Consolidated Defense Working Capital Fund",
+        "citation": "GAO-26-109115",
+        "note": "Verified 2026-09-08.",
+        "sort_order": 105
+      },
+      {
+        "fiscal_year": 2025,
+        "metric_key": "target_fy2028",
+        "metric_label": "FY2028 opinion target",
+        "value_kind": "text",
+        "value_text": "DoD-wide consolidated financial statements",
+        "citation": "GAO-26-109115",
+        "note": "Verified 2026-09-08.",
+        "sort_order": 106
+      }
+    ]
+  },
+  "audit_mw_categories": {
+    "vintage": "2026-09-08",
+    "rows": [
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 1,
+        "category": "Financial Management Systems Modernization",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 2,
+        "category": "Configuration Management",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 3,
+        "category": "Security Management",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 4,
+        "category": "Access Controls",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 5,
+        "category": "Segregation of Duties",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 6,
+        "category": "Interface Controls",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 7,
+        "category": "Universe of Transactions",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 8,
+        "category": "Fund Balance with Treasury",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 9,
+        "category": "Inventory and Stockpile Materials",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 10,
+        "category": "Operating Materials and Supplies",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 11,
+        "category": "General Property, Plant, and Equipment",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 12,
+        "category": "Real Property",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 13,
+        "category": "Government Property in the Possession of Contractors",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 14,
+        "category": "Joint Strike Fighter Program",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 15,
+        "category": "Accounts Payable",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 16,
+        "category": "Environmental and Disposal Liabilities",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 17,
+        "category": "Leases",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 18,
+        "category": "Unsupported Accounting Adjustments",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 19,
+        "category": "Intragovernmental Transactions and Intradepartmental Eliminations",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 20,
+        "category": "Gross Costs",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 21,
+        "category": "Earned Revenue",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 22,
+        "category": "Reconciliation of Net Cost of Operations to Outlays",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 23,
+        "category": "Budgetary Resources",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 24,
+        "category": "Service Organizations",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 25,
+        "category": "Component Entity-Level Controls",
+        "citation": "DoD OIG report DODIG-2026-032"
+      },
+      {
+        "fiscal_year": 2025,
+        "rank_in_report": 26,
+        "category": "DoD-Wide Oversight and Monitoring",
+        "citation": "DoD OIG report DODIG-2026-032"
       }
     ]
   }

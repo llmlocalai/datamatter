@@ -14,8 +14,44 @@ import path from 'path';
  * scripts/etl_knowledge_index.py, so scoring at request time is O(query · top-k).
  */
 
+/**
+ * The index is cached at module scope so a warm serverless instance parses
+ * the ~400KB JSON once, not on every request. This does not survive a cold
+ * start or a new instance -- Vercel does not guarantee a shared cache across
+ * instances -- but most traffic hits a warm instance, so this removes the
+ * dominant cost path without adding an external cache dependency.
+ *
+ * Rate limiting below is an in-memory token count, scoped to one serverless
+ * instance. It throttles abusive traffic to a single warm instance; it is not
+ * a distributed rate limit and must not be relied on as one under multi-
+ * instance load. A real limit belongs in front of Vercel (e.g. at the edge or
+ * in a shared store) if this endpoint is ever exposed beyond the site's own UI.
+ */
+
 const DATA_PATH = path.join(process.cwd(), 'app', 'api', 'data');
 const INDEX_FILE = 'knowledge_index.json';
+
+let cachedIndex: Index | null = null;
+function loadIndex(): Index {
+  if (cachedIndex) return cachedIndex;
+  const raw = fs.readFileSync(path.join(DATA_PATH, INDEX_FILE), 'utf-8');
+  cachedIndex = JSON.parse(raw) as Index;
+  return cachedIndex;
+}
+
+const RATE_LIMIT = 30;            // requests
+const RATE_WINDOW_MS = 60_000;    // per minute, per instance
+const hits = new Map<string, { count: number; resetAt: number }>();
+function rateLimited(key: string): boolean {
+  const now = Date.now();
+  const entry = hits.get(key);
+  if (!entry || now > entry.resetAt) {
+    hits.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > RATE_LIMIT;
+}
 
 interface Doc {
   id: string;
@@ -78,6 +114,14 @@ export async function GET(request: Request) {
   const q = (searchParams.get('q') || '').trim();
   const topK = Math.min(20, Math.max(1, Number(searchParams.get('top') || 8)));
 
+  const client = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  if (rateLimited(client)) {
+    return NextResponse.json(
+       { error: 'Too many requests. Try again in a moment.' },
+       { status: 429, headers: { 'Retry-After': '60' } }
+     );
+   }
+
   if (!q) {
     return NextResponse.json(
        { error: 'Provide a query, e.g. /api/regulation?q=antideficiency+act' },
@@ -86,8 +130,7 @@ export async function GET(request: Request) {
    }
 
   try {
-    const raw = fs.readFileSync(path.join(DATA_PATH, INDEX_FILE), 'utf-8');
-    const index: Index = JSON.parse(raw);
+    const index = loadIndex();
     const { k1, b } = index.params;
     const qterms = tokenize(q);
 

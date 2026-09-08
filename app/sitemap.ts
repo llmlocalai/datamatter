@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next';
 const ROUTES = ['', '/execution', '/reconciliation', '/funds-control', '/contracting',
-  '/budget', '/audit', '/ppbe', '/congressional', '/sources', '/definitions',
+  '/assistance', '/budget', '/audit', '/ppbe', '/congressional', '/sources', '/definitions',
   '/controls', '/regulation'];
 export default function sitemap(): MetadataRoute.Sitemap {
   const site = process.env.NEXT_PUBLIC_SITE_URL || 'https://datamatter.vercel.app';

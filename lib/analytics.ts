@@ -170,6 +170,37 @@ export async function getAwardDim(fy: number, dimension: string, limit = 10) {
     [fy, dimension, limit]);
 }
 
+// -------------------------------------------------------------- assistance --
+export async function getAssistanceYears() {
+  return query<{ fiscalYear: number; obligation: number; actionCount: number;
+                 isPartialYear: boolean; vintage: string }>(
+    `SELECT a.fiscal_year AS "fiscalYear", a.obligation, a.action_count AS "actionCount",
+            a.is_partial_year AS "isPartialYear", to_char(a.vintage,'YYYY-MM-DD') AS vintage
+       FROM dm_assistance_fy a JOIN dm_load l ON l.id = a.load_id AND l.is_current
+      ORDER BY fiscal_year`);
+}
+
+export async function getAssistanceDim(fy: number, dimension: string, limit = 10) {
+  return query<{ key: string; label: string; obligation: number; actionCount: number }>(
+    `SELECT dim_key AS key, dim_label AS label, obligation, action_count AS "actionCount"
+       FROM dm_assistance_dim d JOIN dm_load l ON l.id = d.load_id AND l.is_current
+      WHERE fiscal_year = $1 AND dimension = $2 ORDER BY rank_in_dim LIMIT $3`,
+    [fy, dimension, limit]);
+}
+
+export async function getAssistanceVintageDrift() {
+  return query<{ fiscalYear: number; vintageFrom: string; vintageTo: string;
+    obligationFrom: number; obligationTo: number; obligationDelta: number;
+    actionsFrom: number; actionsTo: number; actionDelta: number; yearClosed: boolean }>(
+    `SELECT fiscal_year AS "fiscalYear", to_char(vintage_from,'YYYY-MM-DD') AS "vintageFrom",
+            to_char(vintage_to,'YYYY-MM-DD') AS "vintageTo",
+            obligation_from AS "obligationFrom", obligation_to AS "obligationTo",
+            obligation_delta AS "obligationDelta", actions_from AS "actionsFrom",
+            actions_to AS "actionsTo", action_delta AS "actionDelta", year_closed AS "yearClosed"
+       FROM dm_assistance_vintage_drift d JOIN dm_load l ON l.id = d.load_id AND l.is_current
+      ORDER BY fiscal_year`);
+}
+
 // ---------------------------------------------------------- reconciliation --
 export async function getReconciliation() {
   return query<{ fiscalYear: number; awardObligation: number; awardActions: number;
@@ -252,6 +283,13 @@ export async function getAuditPosture() {
             value_kind AS "valueKind", value_text AS "valueText", citation, note
        FROM dm_audit_posture a JOIN dm_load l ON l.id = a.load_id AND l.is_current
       ORDER BY sort_order`);
+}
+
+export async function getAuditMwCategories(fiscalYear = 2025) {
+  return query<{ fiscalYear: number; rank: number; category: string; citation: string }>(
+    `SELECT fiscal_year AS "fiscalYear", rank_in_report AS rank, category, citation
+       FROM dm_audit_mw_category m JOIN dm_load l ON l.id = m.load_id AND l.is_current
+      WHERE fiscal_year = $1 ORDER BY rank_in_report`, [fiscalYear]);
 }
 
 export async function getKbInventory(collection?: string) {

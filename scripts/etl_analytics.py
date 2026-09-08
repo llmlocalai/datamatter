@@ -15,6 +15,7 @@ Steps (run all with --step all):
   obligations File B  -> USSGL undelivered/delivered orders + object class
   awards      contracts warehouse -> FY totals, dimensions, vintage drift
   filec       File C  -> account-linked contract obligations + reconciliation
+  assistance  DoD financial-assistance warehouse -> FY totals, dimensions, vintage drift
   knowledge   wiki + knowledge-bank folders -> definitions, inventory, hearings
   controls    control tests over everything already staged
 
@@ -336,6 +337,99 @@ def step_filec(out):
     write(out, "filec.json", payload("file_c_reconciliation", vintage,
           {"dm_reconciliation": rec}, source_path="accounts/file_c_contracts"))
 
+DOW_AGENCY_NAMES = {"Department of Defense", "Department of War"}
+ASSISTANCE_DIMS = [("assistance_type", "assistance_type_description"),
+                    ("sub_agency", "awarding_sub_agency_name"),
+                    ("recipient", "recipient_name"),
+                    ("cfda", "cfda_number"),
+                    ("state", "recipient_state_code")]
+ASSIST_DIM_LABEL = {"cfda": "cfda_title"}
+
+# ----------------------------------------------------------------- Assistance ---
+def step_assistance(out, only_fy=None):
+    """DoD financial-assistance transactions (cooperative agreements, project
+    grants, direct payments) -- the File D2 equivalent. Separate warehouse tree
+    from contracts/File C; not account-linked and not reconciled against
+    anything yet. Rows are explicitly filtered to DOW-named awarding agencies
+    rather than trusted to already be scoped, because unlike the contracts and
+    File C trees this one is not gated by an agency-identifier-code column."""
+    import pyarrow.dataset as ds
+    base = os.path.join(WAREHOUSE, "assistance")
+    if not os.path.isdir(base):
+        print("  no assistance warehouse found, skipping"); return
+    vs = sorted(d.split("=", 1)[1] for d in os.listdir(base) if d.startswith("vintage="))
+    if not vs:
+        print("  no assistance vintages found, skipping"); return
+    current = vs[-1]
+    fy_rows, dim_rows, drift_rows = [], [], []
+    totals = {v: {} for v in vs}
+
+    def scoped_total(t):
+        names = t["awarding_agency_name"].to_pylist()
+        amt = t["federal_action_obligation"].to_pylist()
+        tot = 0.0; n = 0
+        for nm, a_ in zip(names, amt):
+            if nm not in DOW_AGENCY_NAMES: continue
+            tot += (a_ or 0.0); n += 1
+        return round(tot, 2), n
+
+    for v in vs:
+        for fy in FY_RANGE:
+            p = os.path.join(base, f"vintage={v}/fy={fy}")
+            if not os.path.isdir(p): continue
+            t = ds.dataset(p, format="parquet").to_table(
+                columns=["awarding_agency_name", "federal_action_obligation"])
+            totals[v][fy] = scoped_total(t)
+    if not totals[current]:
+        print("  no fiscal years in current assistance vintage, skipping"); return
+    maxfy = max(totals[current])
+    for fy, (ob, n) in sorted(totals[current].items()):
+        fy_rows.append({"vintage": current, "fiscal_year": fy, "obligation": ob,
+                        "action_count": n, "is_partial_year": fy == maxfy})
+    for a, b in zip(vs, vs[1:]):
+        for fy in sorted(set(totals[a]) & set(totals[b])):
+            oa, na = totals[a][fy]; ob_, nb = totals[b][fy]
+            drift_rows.append({"fiscal_year": fy, "vintage_from": a, "vintage_to": b,
+              "obligation_from": oa, "obligation_to": ob_, "obligation_delta": round(ob_ - oa, 2),
+              "actions_from": na, "actions_to": nb, "action_delta": nb - na,
+              "year_closed": fy < maxfy})
+
+    for fy in ([only_fy] if only_fy else sorted(totals[current])):
+        p = os.path.join(base, f"vintage={current}/fy={fy}")
+        if not os.path.isdir(p): continue
+        cols = sorted({c for _, c in ASSISTANCE_DIMS} | set(ASSIST_DIM_LABEL.values())
+                       | {"federal_action_obligation", "awarding_agency_name"})
+        t = ds.dataset(p, format="parquet").to_table(columns=cols)
+        names = t["awarding_agency_name"].to_pylist()
+        keep = [i for i, nm in enumerate(names) if nm in DOW_AGENCY_NAMES]
+        if len(keep) != t.num_rows:
+            t = t.take(keep)
+        for dim, col in ASSISTANCE_DIMS:
+            lab = ASSIST_DIM_LABEL.get(dim)
+            g = t.group_by([col] + ([lab] if lab else [])).aggregate(
+                [("federal_action_obligation", "sum"), ("federal_action_obligation", "count")])
+            recs = g.to_pylist()
+            recs.sort(key=lambda r: -(r["federal_action_obligation_sum"] or 0))
+            for rank, r in enumerate(recs[:25], 1):
+                k = r[col]
+                if k in (None, ""): k = "(not reported)"
+                label = str(r.get(lab) or k) if lab else str(k)
+                dim_rows.append({"fiscal_year": fy, "dimension": dim, "dim_key": str(k),
+                    "dim_label": label, "rank_in_dim": rank,
+                    "obligation": round(r["federal_action_obligation_sum"] or 0.0, 2),
+                    "action_count": r["federal_action_obligation_count"]})
+        print(f"  FY{fy} assistance dims done")
+
+    prior = os.path.join(out, "assistance.json")
+    if only_fy and os.path.exists(prior):
+        old_dims = json.load(open(prior))["rows"].get("dm_assistance_dim", [])
+        dim_rows = [r for r in old_dims if r["fiscal_year"] != only_fy] + dim_rows
+    dim_rows.sort(key=lambda r: (r["fiscal_year"], r["dimension"], r["rank_in_dim"]))
+    write(out, "assistance.json", payload("assistance_awards", current,
+          {"dm_assistance_fy": fy_rows, "dm_assistance_dim": dim_rows,
+           "dm_assistance_vintage_drift": drift_rows},
+          source_path="assistance", vintages=vs))
+
 # --------------------------------------------------------------- knowledge --
 FIELD_RE = {
  "definition": re.compile(r"\*\*One-line definition:\*\*\s*(.*?)(?=\n\*\*|\Z)", re.S|re.I),
@@ -441,7 +535,7 @@ def step_knowledge(out):
 
 # ------------------------------------------------------------------- main ---
 STEPS = {"sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
-         "filec": step_filec, "knowledge": step_knowledge}
+         "filec": step_filec, "assistance": step_assistance, "knowledge": step_knowledge}
 
 def main():
     ap = argparse.ArgumentParser()
@@ -454,7 +548,7 @@ def main():
     for nm in names:
         print(f"[{nm}]")
         fn = STEPS[nm]
-        fn(a.out, a.fy) if nm == "awards" else fn(a.out)
+        fn(a.out, a.fy) if nm in ("awards", "assistance") else fn(a.out)
     print("done.")
 
 if __name__ == "__main__":
