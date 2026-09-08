@@ -179,7 +179,7 @@ export default async function ProgramPage({ searchParams }:
           <p className="text-xs text-navy-400 mt-4 leading-relaxed">
             <span className="text-navy-500">Largest action on {awards[0].awardIdPiid}</span>
             {awards[0].largestActionDate ? ` (${awards[0].largestActionDate})` : ''} —{' '}
-            <span className="font-mono text-[11px] text-navy-300">{awards[0].description}</span>
+            <span className="font-mono text-[12px] text-navy-300">{awards[0].description}</span>
           </p>
         )}
       </Section>

@@ -17,7 +17,7 @@ const fmt = (k: FormatKey = 'money') => FORMATTERS[k] ?? fmtT;
    separated by a 2px surface gap, grid and axes are recessive, and every plotted
    form carries a hover tooltip. Values wear text tokens, never the series hue. */
 
-const SURFACE = '#0a1929';
+const SURFACE = '#0a1929';  // page ground — the 2px gap colour between fills
 
 export function StatTile({ label, value, sub, tone = 'default', title }: {
   label: string; value: string; sub?: string; title?: string;
@@ -31,7 +31,7 @@ export function StatTile({ label, value, sub, tone = 'default', title }: {
   }[tone];
   return (
     <div className="glass-card rounded-lg p-5" title={title}>
-      <div className="text-[11px] uppercase tracking-wider text-navy-400 font-semibold">{label}</div>
+      <div className="text-[12px] uppercase tracking-wider text-navy-400 font-semibold">{label}</div>
       <div className={`text-2xl sm:text-3xl font-bold mt-2 tnum ${toneCls}`}>{value}</div>
       {sub && <div className="text-xs text-navy-400 mt-1.5 leading-relaxed">{sub}</div>}
     </div>
@@ -65,7 +65,7 @@ export function BarList({ rows, format, colour = 'var(--series-1)', caption }: {
                             opacity: hover && hover !== r.key ? 0.45 : 1 }} />
             </div>
             {r.meta && (
-              <div className={`text-[11px] mt-1 tnum transition-colors ${hover === r.key ? 'text-navy-300' : 'text-navy-500'}`}>
+              <div className={`text-[12px] mt-1 tnum transition-colors ${hover === r.key ? 'text-navy-300' : 'text-navy-500'}`}>
                 {r.meta}
               </div>
             )}
@@ -114,7 +114,7 @@ export function Waterfall({ steps }: { steps: WaterfallStep[] }) {
             </div>
           </div>
           {(hover === i || s.kind === 'total') && s.note && (
-            <p className="ml-0 sm:ml-[15rem] mr-28 text-[11px] text-navy-400 mt-1 leading-relaxed">{s.note}</p>
+            <p className="ml-0 sm:ml-[15rem] mr-28 text-[12px] text-navy-400 mt-1 leading-relaxed">{s.note}</p>
           )}
         </div>
       ))}
@@ -139,7 +139,7 @@ export function StackedFY({ years, series, format }: {
           const total = totals[yi];
           return (
             <div key={y.fy} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
-              <div className="text-[11px] text-navy-300 tnum">{valueFormat(total)}</div>
+              <div className="text-[12px] text-navy-300 tnum">{valueFormat(total)}</div>
               <div className="w-full flex flex-col-reverse justify-start"
                    style={{ height: `${(total / max) * 100}%` }}>
                 {y.parts.map((v, si) => (
@@ -153,7 +153,7 @@ export function StackedFY({ years, series, format }: {
                              opacity: hover && !(hover.y === yi && hover.s === si) ? 0.5 : 1 }} />
                 ))}
               </div>
-              <div className="text-[11px] text-navy-400 tnum">
+              <div className="text-[12px] text-navy-400 tnum">
                 FY{String(y.fy).slice(2)}{y.partial ? '*' : ''}
               </div>
             </div>
@@ -169,7 +169,7 @@ export function StackedFY({ years, series, format }: {
         </p>
       )}
       {years.some((y) => y.partial) && (
-        <p className="text-[11px] text-navy-500 mt-2">* fiscal year in progress — period-to-date, not a closed year.</p>
+        <p className="text-[12px] text-navy-500 mt-2">* fiscal year in progress — period-to-date, not a closed year.</p>
       )}
     </div>
   );
@@ -228,13 +228,13 @@ export function LineTrend({ points, format = 'pct0', label, reference }: {
         ))}
         {[0, 0.5, 1].map((t) => (
           <text key={t} x={PL - 8} y={sy(maxY * t) + 3} textAnchor="end"
-                className="tnum" fill="#627d98" fontSize="10">{valueFormat(maxY * t)}</text>
+                className="tnum" fill="#e8c88a" fontSize="12">{valueFormat(maxY * t)}</text>
         ))}
         {reference && (
           <>
             <line x1={PL} x2={W - PR} y1={sy(reference.y)} y2={sy(reference.y)}
-                  stroke="#829ab1" strokeWidth="1" strokeDasharray="4 4" />
-            <text x={W - PR} y={sy(reference.y) - 5} textAnchor="end" fill="#829ab1" fontSize="10">
+                  stroke="#c4d4e6" strokeWidth="1" strokeDasharray="4 4" />
+            <text x={W - PR} y={sy(reference.y) - 5} textAnchor="end" fill="#c4d4e6" fontSize="12">
               {reference.label}
             </text>
           </>
@@ -247,12 +247,12 @@ export function LineTrend({ points, format = 'pct0', label, reference }: {
                   fill="var(--series-1)" stroke={SURFACE} strokeWidth="2" />
         ))}
         {idx !== null && (
-          <line x1={sx(idx)} x2={sx(idx)} y1={PT} y2={H - PB} stroke="#829ab1"
+          <line x1={sx(idx)} x2={sx(idx)} y1={PT} y2={H - PB} stroke="#c4d4e6"
                 strokeWidth="1" strokeDasharray="3 3" />
         )}
         {points.map((p, i) => (
           <text key={i} x={sx(i)} y={H - 8} textAnchor="middle" className="tnum"
-                fill={i === idx ? '#d9e2ec' : '#627d98'} fontSize="10">
+                fill={i === idx ? '#f2f6fb' : '#e8c88a'} fontSize="12">
             FY{String(p.x).slice(2)}{p.partial ? '*' : ''}
           </text>
         ))}
@@ -319,7 +319,7 @@ export function DataTable({ head, rows, caption }: {
             <tr className="bg-navy-900/70">
               {head.map((h, i) => (
                 <th key={h} scope="col"
-                    className={`px-4 py-2.5 text-[11px] uppercase tracking-wider font-semibold text-navy-400 ${i ? 'text-right' : 'text-left'}`}>
+                    className={`px-4 py-2.5 text-[12px] uppercase tracking-wider font-semibold text-navy-400 ${i ? 'text-right' : 'text-left'}`}>
                   {h}
                 </th>
               ))}

@@ -55,7 +55,7 @@ export default function DefinitionBrowser({ defs }: { defs: Definition[] }) {
                   </div>
                   <span className="shrink-0 flex flex-col items-end gap-1.5">
                     {d.topic && (
-                      <span className="text-[10px] uppercase tracking-wider text-navy-400 bg-navy-800/70 px-2 py-0.5 rounded">
+                      <span className="text-[12px] uppercase tracking-wider text-navy-400 bg-navy-800/70 px-2 py-0.5 rounded">
                         {d.topic}
                       </span>
                     )}
@@ -67,25 +67,25 @@ export default function DefinitionBrowser({ defs }: { defs: Definition[] }) {
                 <div className="px-5 pb-5 pt-1 space-y-4 border-t border-navy-800/60">
                   {d.whyItMatters && (
                     <div>
-                      <h4 className="text-[10px] uppercase tracking-wider text-accent-400 font-semibold mb-1.5">Why it matters</h4>
+                      <h4 className="text-[12px] uppercase tracking-wider text-accent-400 font-semibold mb-1.5">Why it matters</h4>
                       <p className="text-sm text-navy-300 leading-relaxed">{d.whyItMatters}</p>
                     </div>
                   )}
                   {d.keyRules && (
                     <div>
-                      <h4 className="text-[10px] uppercase tracking-wider text-accent-400 font-semibold mb-1.5">Key rules</h4>
+                      <h4 className="text-[12px] uppercase tracking-wider text-accent-400 font-semibold mb-1.5">Key rules</h4>
                       <p className="text-sm text-navy-300 leading-relaxed whitespace-pre-line">{d.keyRules}</p>
                     </div>
                   )}
                   <div>
-                    <h4 className="text-[10px] uppercase tracking-wider text-accent-400 font-semibold mb-1.5">Authoritative sources</h4>
+                    <h4 className="text-[12px] uppercase tracking-wider text-accent-400 font-semibold mb-1.5">Authoritative sources</h4>
                     <ul className="space-y-1">
                       {d.authorities.map((a, i) => (
                         <li key={i} className="text-xs text-navy-300 font-mono leading-relaxed">· {a}</li>
                       ))}
                     </ul>
                   </div>
-                  <p className="text-[11px] text-navy-500 font-mono">
+                  <p className="text-[12px] text-navy-500 font-mono">
                     source {d.sourceFile}{d.lastVerified ? ` · last verified ${d.lastVerified}` : ''}
                   </p>
                 </div>

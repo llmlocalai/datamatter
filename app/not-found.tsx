@@ -4,7 +4,7 @@ export default function NotFound() {
   return (
     <main className="min-h-screen bg-navy-950 flex items-center justify-center px-6">
       <div className="max-w-lg">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent-400 mb-3">404</p>
+        <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-accent-400 mb-3">404</p>
         <h1 className="text-2xl font-bold text-navy-50">No page here</h1>
         <p className="text-navy-300 mt-3 leading-relaxed text-sm">
           Some routes moved when the site was reorganised around the budget lifecycle:{' '}

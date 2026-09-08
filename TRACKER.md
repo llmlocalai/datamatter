@@ -36,6 +36,7 @@ No baked snapshots. A daily refresh reaches the live site without a redeploy.
 | 12 | `/regulation` — authority-ranked retrieval | BM25 index | ✅ |
 | 13 | `/assistance` — grants, cooperative agreements, direct payments | financial-assistance warehouse | 🆕 code shipped, unverified — needs `npm run refresh` |
 | 14 | `/program` — execution by acquisition program, account traceability | contracts + File C | 🆕 code shipped; ETL, load and controls verified against a local Postgres, **not yet loaded to Neon** |
+| 15 | `/traceability` — the F-35 budget → execution → accounts → audit chain | program tables + File C + audit register + `war_budget_line` | 🆕 code shipped, prerendered against a local Postgres, **not yet loaded to Neon** |
 
 ## Done — 2026-09-08 (second pass) — `/program` and the F-35 pilot
 
@@ -65,6 +66,38 @@ No baked snapshots. A daily refresh reaches the live site without a redeploy.
   **fail** on deliberately corrupted rows. `next build` passes and the page was
   fetched from a running production build (four program/FY combinations, 200,
   zero errors).
+
+## Done — 2026-09-08 (third pass) — `/traceability` and the theme repaint
+
+- [x] **Shipped `/traceability`** as its own Oversight tab: the F-35 chain from the
+  FY2027 exhibits through obligation into the account records and out to
+  DODIG-2026-032. **Every figure is queried live**, not transcribed from the memo —
+  `war_budget_line` for the P-1/R-1 lines, `dm_program_*` for execution and
+  traceability, `dm_reconciliation` for File C, `dm_audit_*` for the audit layer.
+  Hardcoding the memo's numbers would have violated the provenance rule, so the
+  page withholds the budget layer entirely when the exhibit tables are not loaded.
+- [x] **The budget layer's provenance exception is stated on the page.**
+  `war_budget_line` predates `dm_load` and carries only `ingested_at`; the page
+  shows that vintage explicitly rather than letting those figures look like the
+  rest of the site's measures.
+- [x] **Repainted the whole app.** Gold replaces the cyan accent
+  (`accent-400 #e8b54a`, `500 #d9a227`, `600 #c08a10`); the text tiers were raised
+  to a bright set. The codebase uses `navy-50..500` for text only and `600..950`
+  for surfaces only, so every text tier could be brightened without touching a
+  single background. Charts keep their CVD-validated series colours — gold would
+  collide with the existing yellow series.
+- [x] **Contrast floor raised to 7:1 for text.** Previously `navy-400` was 6.1:1
+  and `navy-500` 4.1:1 (the latter failing AA outright). Now 11.8:1 and 11.0:1.
+  `--status-critical` was **3.69:1** while carrying the most important number on
+  a page; it is now 7.0:1. Every status step clears 7:1.
+- [x] **No type below 12px.** All 36 uses of `text-[10px]`/`text-[11px]` raised to
+  `text-[12px]`, plus the three raw SVG `fontSize="10"` axis labels in
+  `charts.tsx` and the hardcoded dim hexes they used (`#627d98`, `#829ab1`) that
+  bypassed the palette entirely.
+- [x] **Fixed a silent Tailwind failure.** `bg-[color:var(--status-critical)]/5`
+  and `border-…/60` render *nothing* — the opacity modifier needs a colour channel
+  it can compute and is dropped on an arbitrary `var()`. The broken-link panel had
+  no tint at all. Replaced with real `.alert-critical` / `.alert-warning` classes.
 
 ## Open — found while shipping `/program`
 
@@ -198,6 +231,9 @@ to actually run and verify against real numbers):
 
 ## Changelog
 
+- **2026-09-08 (third pass)** — `/traceability` tab, live-queried; app-wide repaint
+  to a gold accent with bright text tiers (7:1 floor) and a 12px type floor.
+  Verified by build + render against a local Postgres; **not yet loaded to Neon**.
 - **2026-09-08 (second pass)** — F-35 pilot analysis and `/program`. New ETL step,
   six tables, PROG-01…PROG-06, page and nav entry. Corrected the memo's claim that
   FPDS program tagging is dense (code 000 = NONE is a sentinel, not a null).

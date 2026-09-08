@@ -18,6 +18,7 @@ const GROUPS: { label: string; items: { href: string; label: string }[] }[] = [
       { href: '/program', label: 'By program' },
       { href: '/assistance', label: 'Assistance' } ] },
   { label: 'Oversight', items: [
+      { href: '/traceability', label: 'Traceability break' },
       { href: '/reconciliation', label: 'Reconciliation' },
       { href: '/audit', label: 'Audit posture' },
       { href: '/congressional', label: 'Congressional' } ] },
@@ -37,7 +38,7 @@ export default function Nav() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14">
           <Link href="/" className="flex items-center gap-2.5 shrink-0">
-            <div className="w-7 h-7 rounded bg-gradient-to-br from-accent-400 to-accent-600 flex items-center justify-center text-navy-950 font-bold text-[11px]">
+            <div className="w-7 h-7 rounded bg-gradient-to-br from-accent-400 to-accent-600 flex items-center justify-center text-navy-950 font-bold text-[12px]">
               dm
             </div>
             <span className="text-navy-100 font-semibold text-sm hidden sm:block">datamatter</span>
@@ -77,7 +78,7 @@ export default function Nav() {
         <div className="lg:hidden border-t border-navy-800/60 bg-navy-950 px-4 py-3 space-y-3 max-h-[70vh] overflow-y-auto">
           {GROUPS.map((g) => (
             <div key={g.label}>
-              <div className="text-[10px] uppercase tracking-wider text-navy-500 font-semibold mb-1">{g.label}</div>
+              <div className="text-[12px] uppercase tracking-wider text-navy-500 font-semibold mb-1">{g.label}</div>
               <div className="grid grid-cols-2 gap-1">
                 {g.items.map((i) => (
                   <Link key={i.href} href={i.href} onClick={() => setOpen(false)}

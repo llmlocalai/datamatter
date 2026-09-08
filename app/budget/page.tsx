@@ -111,7 +111,7 @@ export default function BudgetDashboard() {
 
   // Discretionary vs mandatory donut segments.
   const discMandSegments = [
-     { label: "Discretionary", value: discretionaryTotal, color: "#38bdf8" },
+     { label: "Discretionary", value: discretionaryTotal, color: "#e8b54a" },
      { label: "Mandatory", value: mandatoryTotal, color: "#fbbf24" },
    ];
   const discPct =
@@ -201,7 +201,7 @@ export default function BudgetDashboard() {
               />
               <div className="flex gap-6 mt-5">
                 <div className="flex items-center gap-2 text-sm">
-                  <span className="w-3 h-3 rounded-full" style={{ background: "#38bdf8" }} />
+                  <span className="w-3 h-3 rounded-full" style={{ background: "#e8b54a" }} />
                   <span className="text-navy-200">Discretionary</span>
                   <span className="text-navy-50 font-semibold ml-1">{fmtT(discretionaryTotal)}</span>
                 </div>
@@ -329,7 +329,7 @@ export default function BudgetDashboard() {
                       </div>
                       <Donut
                        segments={[
-                          { label: "Discretionary", value: activeExhibit.discretionary, color: "#38bdf8" },
+                          { label: "Discretionary", value: activeExhibit.discretionary, color: "#e8b54a" },
                           { label: "Mandatory", value: activeExhibit.mandatory, color: "#fbbf24" },
                        ]}
                        size={180}
@@ -338,7 +338,7 @@ export default function BudgetDashboard() {
                       />
                       <div className="flex gap-6 mt-4">
                         <div className="flex items-center gap-2 text-sm">
-                          <span className="w-3 h-3 rounded-full" style={{ background: "#38bdf8" }} />
+                          <span className="w-3 h-3 rounded-full" style={{ background: "#e8b54a" }} />
                           <span className="text-navy-200">Discretionary</span>
                           <span className="text-navy-50 font-semibold ml-1">{fmtT(activeExhibit.discretionary)}</span>
                         </div>

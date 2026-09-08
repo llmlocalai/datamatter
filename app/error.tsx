@@ -6,7 +6,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
   return (
     <main className="min-h-screen bg-navy-950 flex items-center justify-center px-6">
       <div className="max-w-lg">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent-400 mb-3">Error</p>
+        <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-accent-400 mb-3">Error</p>
         <h1 className="text-2xl font-bold text-navy-50">This page could not be rendered</h1>
         <p className="text-navy-300 mt-3 leading-relaxed text-sm">
           The data layer returned an error rather than an incomplete figure. Nothing partial is shown,

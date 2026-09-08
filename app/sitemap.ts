@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next';
-const ROUTES = ['', '/execution', '/reconciliation', '/funds-control', '/contracting',
+const ROUTES = ['', '/execution', '/program', '/traceability', '/reconciliation', '/funds-control', '/contracting',
   '/assistance', '/budget', '/audit', '/ppbe', '/congressional', '/sources', '/definitions',
   '/controls', '/regulation'];
 export default function sitemap(): MetadataRoute.Sitemap {

@@ -27,7 +27,7 @@ export function fmtBytes(n: number): string {
 
 // A stable color palette (accent blue + complementary hues) for charts.
 const PALETTE = [
-  "#38bdf8", // accent-400
+  "#e8b54a", // accent-400
   "#818cf8", // indigo
   "#34d399", // emerald
   "#fbbf24", // amber
@@ -139,7 +139,7 @@ export function Donut({
 // ---------------------------------------------------------------------------
 export function MiniSpark({
   points,
-  color = "#38bdf8",
+  color = "#e8b54a",
   width = 120,
   height = 34,
 }: {

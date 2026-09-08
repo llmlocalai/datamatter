@@ -166,13 +166,13 @@ export default function RegulationQAPage() {
                               <div className="text-navy-100 font-medium text-sm">{r.page}</div>
                               <div className="text-xs text-navy-500 mt-0.5 truncate max-w-md">{r.section}</div>
                             </div>
-                            <span className={`shrink-0 text-[10px] font-semibold uppercase px-2 py-0.5 rounded ${auth.cls}`}>
+                            <span className={`shrink-0 text-[12px] font-semibold uppercase px-2 py-0.5 rounded ${auth.cls}`}>
                               {auth.label}
                             </span>
                           </div>
                           <p className="text-navy-300 text-xs leading-relaxed mt-2 line-clamp-3">{r.text}</p>
                           {r.source && (
-                            <div className="text-[10px] text-navy-500 mt-2 font-mono">📄 {r.source}</div>
+                            <div className="text-[12px] text-navy-500 mt-2 font-mono">📄 {r.source}</div>
                           )}
                         </div>
                       );

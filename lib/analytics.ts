@@ -330,6 +330,83 @@ export async function getProgramFilec(programCode: string) {
       WHERE f.program_code = $1 ORDER BY f.fiscal_year`, [programCode]);
 }
 
+// --------------------------------------------------- traceability narrative --
+/**
+ * The F-35 budget lines, read live from the FY2027 "-1" exhibits in Neon rather
+ * than transcribed from the memo. Amounts in the exhibit tables are $ THOUSANDS.
+ *
+ * Add rows only: weapon system cost, less prior-year advance procurement, plus
+ * current-year AP. The Non-Add rows are the AP detail and would double count.
+ * R-1 has no Add/Non-Add column, so every matching row counts once.
+ *
+ * "Joint Strike Missile" is a different program and is excluded deliberately.
+ */
+const F35_TITLE = `(
+     upper(coalesce(values->>'Budget Line Item (BLI) Title','')) LIKE '%F-35%'
+  OR upper(coalesce(values->>'Budget Line Item (BLI) Title','')) LIKE 'JSF%'
+  OR upper(coalesce(values->>'Budget Line Item (BLI) Title','')) LIKE '%JOINT STRIKE FIGHTER%'
+  OR upper(coalesce(values->>'Program Element/Budget Line Item (BLI) Title','')) LIKE '%F-35%'
+  OR upper(coalesce(values->>'Program Element/Budget Line Item (BLI) Title','')) LIKE 'JSF%'
+  OR upper(coalesce(values->>'Program Element/Budget Line Item (BLI) Title','')) LIKE '%JOINT STRIKE FIGHTER%'
+)`;
+const NUM = (k: string) => `coalesce(nullif(regexp_replace(coalesce(values->>'${k}',''),'[^0-9.-]','','g'),'')::numeric,0)`;
+
+export interface F35BudgetLine {
+  docCode: string; account: string; accountTitle: string; bli: string; title: string;
+  fy25: number; fy26disc: number; fy26mand: number; fy27disc: number; fy27mand: number;
+  qty25: number; qty26: number; qty27: number;
+}
+
+export async function getF35BudgetLines(): Promise<F35BudgetLine[]> {
+  return query<F35BudgetLine>(
+    `SELECT doc_code AS "docCode", coalesce(account,'') AS account,
+            coalesce(account_title,'') AS "accountTitle",
+            coalesce(values->>'Budget Line Item', values->>'PE/BLI', '') AS bli,
+            coalesce(nullif(values->>'Budget Line Item (BLI) Title',''),
+                     values->>'Program Element/Budget Line Item (BLI) Title','') AS title,
+            sum(CASE WHEN doc_code='p1' THEN ${NUM('FY 2025 Total Amount')}
+                     ELSE ${NUM('FY 2025 Total')} END) AS fy25,
+            sum(CASE WHEN doc_code='p1' THEN ${NUM('FY 2026 Discretionary Enacted Amount')}
+                     ELSE ${NUM('FY 2026 Discretionary Enacted')} END) AS fy26disc,
+            sum(CASE WHEN doc_code='p1' THEN ${NUM('FY 2026 PL 119-21 Spend Plan Amount')}
+                     ELSE ${NUM('FY 2026 PL 119-21 Spend Plan')} END) AS fy26mand,
+            sum(CASE WHEN doc_code='p1' THEN ${NUM('FY 2027 Discretionary Request Amount')}
+                     ELSE ${NUM('FY 2027 Discretionary Request')} END) AS fy27disc,
+            sum(CASE WHEN doc_code='p1' THEN ${NUM('FY 2027 Mandatory Amount')}
+                     ELSE ${NUM('FY 2027 Mandatory Request')} END) AS fy27mand,
+            sum(CASE WHEN doc_code='p1' AND coalesce(values->>'Cost Type','')='A'
+                     THEN ${NUM('FY 2025 Total Quantity')} ELSE 0 END) AS qty25,
+            sum(CASE WHEN doc_code='p1' AND coalesce(values->>'Cost Type','')='A'
+                     THEN ${NUM('FY 2026 Total Quantity')} ELSE 0 END) AS qty26,
+            sum(CASE WHEN doc_code='p1' AND coalesce(values->>'Cost Type','')='A'
+                     THEN ${NUM('FY 2027 Total Quantity')} ELSE 0 END) AS qty27
+       FROM war_budget_line
+      WHERE fiscal_year = 2027
+        AND doc_code IN ('p1','r1')
+        AND (doc_code = 'r1' OR coalesce(values->>'Add/Non-Add','Add') = 'Add')
+        AND ${F35_TITLE}
+      GROUP BY 1,2,3,4,5
+      HAVING sum(CASE WHEN doc_code='p1' THEN ${NUM('FY 2025 Total Amount')}
+                      ELSE ${NUM('FY 2025 Total')} END) <> 0
+          OR sum(CASE WHEN doc_code='p1' THEN ${NUM('FY 2027 Discretionary Request Amount')}
+                      ELSE ${NUM('FY 2027 Discretionary Request')} END) <> 0
+          OR sum(CASE WHEN doc_code='p1' THEN ${NUM('FY 2027 Mandatory Amount')}
+                      ELSE ${NUM('FY 2027 Mandatory Request')} END) <> 0
+      ORDER BY doc_code, account, bli`);
+}
+
+/**
+ * The exhibit tables predate the dm_load provenance system and carry their own
+ * ingest stamp instead. The traceability page says so rather than implying the
+ * budget figures hang off a dm_load row like every other measure on the site.
+ */
+export async function getWarBudgetVintage() {
+  const r = await query<{ ingestedAt: string | null; lineCount: number }>(
+    `SELECT to_char(max(ingested_at),'YYYY-MM-DD') AS "ingestedAt", count(*)::int AS "lineCount"
+       FROM war_budget_line WHERE fiscal_year = 2027 AND doc_code IN ('p1','r1')`);
+  return r[0] ?? { ingestedAt: null, lineCount: 0 };
+}
+
 // ---------------------------------------------------------- reconciliation --
 export async function getReconciliation() {
   return query<{ fiscalYear: number; awardObligation: number; awardActions: number;

@@ -21,7 +21,7 @@ const STATUS = {
 function Badge({ status }: { status: string }) {
   const s = STATUS[status as keyof typeof STATUS] ?? STATUS.not_applicable;
   return (
-    <span className={`inline-flex items-center gap-1.5 text-[10px] font-mono font-semibold uppercase tracking-wider px-2 py-0.5 rounded border ${s.cls}`}>
+    <span className={`inline-flex items-center gap-1.5 text-[12px] font-mono font-semibold uppercase tracking-wider px-2 py-0.5 rounded border ${s.cls}`}>
       <span aria-hidden>{s.icon}</span>{s.label}
     </span>
   );
@@ -63,16 +63,16 @@ export default async function ControlsPage() {
               <article key={c.code} className="glass-card rounded-lg overflow-hidden">
                 <div className="p-5">
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2 mb-3">
-                    <code className="text-[11px] font-mono font-semibold text-accent-400">{c.code}</code>
+                    <code className="text-[12px] font-mono font-semibold text-accent-400">{c.code}</code>
                     <h3 className="text-navy-50 font-semibold flex-1 min-w-[12rem]">{c.name}</h3>
-                    <span className={`text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded border ${
+                    <span className={`text-[12px] font-mono uppercase tracking-wider px-2 py-0.5 rounded border ${
                       c.severity === 'critical' ? 'text-[color:var(--status-critical)] border-[color:var(--status-critical)]'
                       : c.severity === 'high' ? 'text-[color:var(--status-serious)] border-[color:var(--status-serious)]'
                       : 'text-navy-400 border-navy-600'}`}>
                       {c.severity}{c.severity === 'critical' ? ' · blocks load' : ''}
                     </span>
                     <Badge status={worst} />
-                    <span className="text-[11px] text-navy-400 tnum">{c.pass}/{c.total} pass</span>
+                    <span className="text-[12px] text-navy-400 tnum">{c.pass}/{c.total} pass</span>
                   </div>
                   <p className="text-sm text-navy-200 leading-relaxed"><strong className="text-navy-400 font-medium">Asserts. </strong>{c.assertion}</p>
                   <p className="text-sm text-navy-400 leading-relaxed mt-2"><strong className="text-navy-500 font-medium">Why. </strong>{c.rationale}</p>

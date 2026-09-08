@@ -68,7 +68,7 @@ export default function DocumentPanel({
                  <div>
                    <div className="flex items-start justify-between gap-2 mb-2">
                      <span
-                      className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${chip.cls}`}
+                      className={`inline-block px-2 py-0.5 rounded text-[12px] font-bold ${chip.cls}`}
                      >
                        {chip.label}
                      </span>

@@ -19,7 +19,7 @@ export function FyPicker({ years, active, base, partial }: {
         );
       })}
       {partial?.length ? (
-        <span className="text-[11px] text-navy-500 ml-1">* in progress</span>
+        <span className="text-[12px] text-navy-500 ml-1">* in progress</span>
       ) : null}
     </div>
   );

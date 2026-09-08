@@ -4,7 +4,7 @@ import Link from 'next/link';
 export function PageHeader({ eyebrow, title, lede }: { eyebrow: string; title: React.ReactNode; lede: string }) {
   return (
     <header className="pt-12 pb-8 border-b border-navy-800/60">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent-400 mb-3">{eyebrow}</p>
+      <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-accent-400 mb-3">{eyebrow}</p>
       <h1 className="text-3xl sm:text-4xl font-bold text-navy-50 leading-tight text-balance max-w-3xl">{title}</h1>
       <p className="mt-4 text-navy-300 leading-relaxed max-w-2xl">{lede}</p>
     </header>

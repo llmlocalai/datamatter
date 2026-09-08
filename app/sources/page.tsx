@@ -31,11 +31,11 @@ export default async function SourcesPage() {
               <div className="flex flex-wrap items-baseline justify-between gap-3 mb-3">
                 <h3 className="text-navy-50 font-semibold">{d.label}</h3>
                 {d.vintage ? (
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-navy-800 text-accent-400">
+                  <span className="text-[12px] font-mono px-2 py-0.5 rounded bg-navy-800 text-accent-400">
                     vintage {d.vintage} · {fmtInt(d.rowCount ?? 0)} rows
                   </span>
                 ) : (
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300">
+                  <span className="text-[12px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300">
                     not loaded
                   </span>
                 )}
@@ -45,8 +45,8 @@ export default async function SourcesPage() {
                 {[['Source system', d.sourceSystem], ['Grain', d.grain],
                   ['Path', d.sourcePath], ['Refresh', d.refreshCadence]].map(([k, v]) => (
                   <div key={k}>
-                    <dt className="text-navy-500 uppercase tracking-wider text-[10px] font-semibold">{k}</dt>
-                    <dd className="text-navy-200 mt-0.5 font-mono text-[11px] break-words">{v}</dd>
+                    <dt className="text-navy-500 uppercase tracking-wider text-[12px] font-semibold">{k}</dt>
+                    <dd className="text-navy-200 mt-0.5 font-mono text-[12px] break-words">{v}</dd>
                   </div>
                 ))}
               </dl>
@@ -68,7 +68,7 @@ export default async function SourcesPage() {
             ['Serve', 'Pages read only through the data layer, which joins every measure to its load row. A figure without provenance cannot be returned by construction.'],
           ].map(([h, b], i) => (
             <li key={h} className="glass-card rounded-lg p-4">
-              <span className="text-[11px] font-mono text-accent-400">0{i + 1}</span>
+              <span className="text-[12px] font-mono text-accent-400">0{i + 1}</span>
               <h3 className="text-navy-100 font-semibold text-sm mt-1.5">{h}</h3>
               <p className="text-xs text-navy-400 mt-1.5 leading-relaxed">{b}</p>
             </li>

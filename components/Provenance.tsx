@@ -26,7 +26,7 @@ export function ProvenanceBar({ p, extra }: { p: Provenance | null; extra?: stri
           ['Rows loaded', p.rowCount.toLocaleString('en-US')],
         ].map(([k, v]) => (
           <div key={k} className="bg-navy-900/70 px-4 py-2.5">
-            <dt className="text-[10px] uppercase tracking-wider text-navy-500 font-semibold">{k}</dt>
+            <dt className="text-[12px] uppercase tracking-wider text-navy-500 font-semibold">{k}</dt>
             <dd className="text-navy-100 text-xs mt-0.5 tnum">{v}</dd>
           </div>
         ))}
@@ -34,7 +34,7 @@ export function ProvenanceBar({ p, extra }: { p: Provenance | null; extra?: stri
       <div className="px-4 py-3 space-y-1.5">
         <p className="text-xs text-navy-400">
           <span className="text-navy-500">Path</span>{' '}
-          <code className="font-mono text-[11px] text-accent-400">{p.sourcePath}</code>
+          <code className="font-mono text-[12px] text-accent-400">{p.sourcePath}</code>
           <span className="text-navy-600"> · extracted {p.extractedAt.slice(0, 16).replace('T', ' ')}</span>
           <span className="text-navy-600"> · refresh {p.refreshCadence}</span>
         </p>
@@ -50,7 +50,7 @@ export function ProvenanceBar({ p, extra }: { p: Provenance | null; extra?: stri
 /** Inline vintage chip for a single figure that sits away from the main bar. */
 export function VintageChip({ vintage, source }: { vintage: string; source: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[10px] font-mono text-navy-500">
+    <span className="inline-flex items-center gap-1.5 text-[12px] font-mono text-navy-500">
       <span className="w-1 h-1 rounded-full bg-accent-500/70" />
       {source} · {vintage}
     </span>

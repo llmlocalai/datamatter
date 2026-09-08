@@ -57,7 +57,7 @@ export default async function Home() {
   return (
     <Shell>
       <section className="pt-16 pb-12 border-b border-navy-800/60">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent-400 mb-4">
+        <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-accent-400 mb-4">
           Department of War · budget, execution and audit analytics
         </p>
         <h1 className="text-4xl sm:text-5xl font-bold text-navy-50 leading-[1.08] max-w-4xl text-balance">
@@ -103,7 +103,7 @@ export default async function Home() {
           {PRODUCTS.map((p) => (
             <Link key={p.href} href={p.href}
               className="glass-card rounded-lg p-5 hover:border-accent-500/40 transition-colors group">
-              <span className="text-[10px] uppercase tracking-wider text-accent-400 font-semibold">{p.tag}</span>
+              <span className="text-[12px] uppercase tracking-wider text-accent-400 font-semibold">{p.tag}</span>
               <h3 className="text-navy-50 font-semibold mt-2 group-hover:text-accent-400 transition-colors">{p.title}</h3>
               <p className="text-sm text-navy-400 mt-2 leading-relaxed">{p.desc}</p>
             </Link>
