@@ -16,6 +16,7 @@ Steps (run all with --step all):
   awards      contracts warehouse -> FY totals, dimensions, vintage drift
   filec       File C  -> account-linked contract obligations + reconciliation
   assistance  DoD financial-assistance warehouse -> FY totals, dimensions, vintage drift
+  program     contracts + File C -> program-level execution and account traceability
   knowledge   wiki + knowledge-bank folders -> definitions, inventory, hearings
   controls    control tests over everything already staged
 
@@ -533,9 +534,265 @@ def step_knowledge(out):
         {"dm_definition": defs, "dm_kb_inventory": inv,
          "dm_justification_exhibit": jrows, "dm_hearing": hrows}, source_path="knowledge-bank"))
 
+# ------------------------------------------------------------------ program ---
+# The only field on this warehouse that ties execution to a BUDGET LINE rather
+# than to an account. Everything else here is account-shaped: File A and File B
+# have no program dimension at all, and File C -- the sole bridge between an
+# award and a Treasury account -- is the thing this step measures the absence of.
+#
+# The measure that matters is not the obligation total. It is the share of that
+# total whose funding account is actually named. A program obligation published
+# without it looks reconciled and is not; PROG-03 exists to stop that.
+PROGRAM_DIMS = [("recipient", "recipient_parent_name"),
+                ("extent_competed", "extent_competed"),
+                ("pricing", "type_of_contract_pricing"),
+                ("psc", "product_or_service_code"),
+                ("awarding_office", "awarding_office_name"),
+                ("sub_agency", "awarding_sub_agency_name")]
+PROGRAM_DIM_LABEL = {"psc": "product_or_service_code_description"}
+FEATURED_N = 12          # programs carried at full depth
+REGISTRY_N = 40          # programs listed in the picker
+TOP_AWARDS = 10
+TOP_ACCOUNT_SETS = 12
+PIN_PROGRAMS = {"198"}   # F-35: the pilot this page was built for
+# FPDS records "no acquisition program" as the explicit code 000 / description
+# NONE, not as a null. Testing for null alone finds almost nothing and makes the
+# tagging look complete; it is not. 000 carries roughly three quarters of DoD
+# contract dollars and 99.5% of actions, so it is reported as a coverage measure
+# in its own right rather than dropped silently.
+SENTINEL_CODES = {"000", "", None}
+
+def _untraced_expr():
+    import pyarrow.dataset as ds
+    f = ds.field("treasury_accounts_funding_this_award")
+    return f.is_null() | (f == "")
+
+def _acct_set(raw):
+    """federal_accounts_funding_this_award is a ;-separated list of EVERY account
+    funding the award, with no apportionment. Never sum an obligation by account
+    from it -- PROG-02 asserts we do not."""
+    return sorted({a.strip() for a in (raw or "").split(";") if a.strip()})
+
+def step_program(out, only_fy=None):
+    import pyarrow.dataset as ds, pyarrow.compute as pc
+    base = os.path.join(WAREHOUSE, "contracts")
+    if not os.path.isdir(base):
+        print("  no contracts warehouse found, skipping"); return
+    vs = vintages(); current = vs[-1]
+    years = [fy for fy in FY_RANGE
+             if os.path.isdir(os.path.join(base, f"vintage={current}/fy={fy}"))]
+    if not years:
+        print("  no fiscal years in current contract vintage, skipping"); return
+    maxfy = max(years)
+
+    # -- pass 1: every program, obligation and traced/untraced split ----------
+    tot = collections.defaultdict(lambda: collections.defaultdict(float))
+    cnt = collections.defaultdict(lambda: collections.Counter())
+    names, spans, cov_rows = {}, collections.defaultdict(set), []
+    for fy in years:
+        p = os.path.join(base, f"vintage={current}/fy={fy}")
+        t = ds.dataset(p, format="parquet").to_table(columns={
+            "code": ds.field("dod_acquisition_program_code"),
+            "name": ds.field("dod_acquisition_program_description"),
+            "ob":   ds.field("federal_action_obligation"),
+            "untraced": _untraced_expr()})
+        g = t.group_by(["code", "name", "untraced"]).aggregate([("ob", "sum"), ("ob", "count")])
+        all_ob, all_n, un_ob, un_n = 0.0, 0, 0.0, 0
+        seen = set()
+        for r in g.to_pylist():
+            code, amt, n = r["code"], (r["ob_sum"] or 0.0), r["ob_count"]
+            all_ob += amt; all_n += n
+            if code in SENTINEL_CODES:
+                un_ob += amt; un_n += n
+                continue
+            seen.add(code)
+            tot[code][fy] += amt
+            tot[code][("untraced", fy)] += amt if r["untraced"] else 0.0
+            cnt[code][fy] += n
+            if r["name"]: names.setdefault(code, r["name"])
+            spans[code].add(fy)
+        cov_rows.append({"fiscal_year": fy, "vintage": current,
+            "total_obligation": round(all_ob, 2), "total_actions": all_n,
+            "attributed_obligation": round(all_ob - un_ob, 2), "attributed_actions": all_n - un_n,
+            "unattributed_obligation": round(un_ob, 2), "unattributed_actions": un_n,
+            "attributed_pct": round((all_ob - un_ob) / all_ob * 100, 4) if all_ob else 0.0,
+            "program_count": len(seen), "is_partial_year": fy == maxfy})
+        print(f"  FY{fy}: {len(seen)} program codes; "
+              f"{cov_rows[-1]['attributed_pct']:.1f}% of ${all_ob/1e9:.0f}B attributed to a program")
+
+    ranked = sorted(tot, key=lambda c: -sum(v for k, v in tot[c].items() if isinstance(k, int)))
+    featured = list(dict.fromkeys(list(PIN_PROGRAMS & set(ranked)) + ranked))[:max(FEATURED_N, len(PIN_PROGRAMS))]
+    featured_set = set(featured)
+
+    dim_rows_all = {}
+    reg_rows, fy_rows, dim_rows, award_rows, acct_rows = [], [], [], [], []
+    for code in ranked[:REGISTRY_N] + [c for c in featured if c not in ranked[:REGISTRY_N]]:
+        yrs = sorted(spans[code])
+        reg_rows.append({"program_code": code, "program_name": names.get(code) or code,
+            "total_obligation": round(sum(v for k, v in tot[code].items() if isinstance(k, int)), 2),
+            "first_fiscal_year": yrs[0], "last_fiscal_year": yrs[-1],
+            "is_featured": code in featured_set,
+            "rank_by_obligation": ranked.index(code) + 1})
+
+    # -- pass 2: featured programs only, at depth -----------------------------
+    piids = collections.defaultdict(set)
+    cols = sorted({c for _, c in PROGRAM_DIMS} | set(PROGRAM_DIM_LABEL.values()) | {
+        "dod_acquisition_program_code", "federal_action_obligation", "award_id_piid",
+        "treasury_accounts_funding_this_award", "federal_accounts_funding_this_award",
+        "action_date", "recipient_name", "transaction_description", "modification_number"})
+    for fy in ([only_fy] if only_fy else years):
+        p = os.path.join(base, f"vintage={current}/fy={fy}")
+        if not os.path.isdir(p): continue
+        t = ds.dataset(p, format="parquet").to_table(
+            columns=cols, filter=ds.field("dod_acquisition_program_code").isin(featured))
+        code_c = t["dod_acquisition_program_code"].to_pylist()
+        ob_c   = t["federal_action_obligation"].to_pylist()
+        piid_c = t["award_id_piid"].to_pylist()
+        tas_c  = t["treasury_accounts_funding_this_award"].to_pylist()
+        fa_c   = t["federal_accounts_funding_this_award"].to_pylist()
+        date_c = t["action_date"].to_pylist()
+        dim_cols = {c: t[c].to_pylist()
+                    for c in {c for _, c in PROGRAM_DIMS} | set(PROGRAM_DIM_LABEL.values())}
+        recip = dim_cols.get("recipient_name") or t["recipient_name"].to_pylist()
+        desc  = t["transaction_description"].to_pylist()
+        by = collections.defaultdict(list)
+        for i, code in enumerate(code_c):
+            by[code].append(i)
+        for code in featured:
+            idx = by.get(code, [])
+            if not idx: continue
+            total = sum(ob_c[i] or 0.0 for i in idx)
+            untraced = sum(ob_c[i] or 0.0 for i in idx
+                           if tas_c[i] is None or tas_c[i] == "")
+            late = sum(ob_c[i] or 0.0 for i in idx
+                       if date_c[i] is not None and date_c[i].month in (8, 9))
+            top5 = sum(sorted((ob_c[i] or 0.0 for i in idx), reverse=True)[:5])
+            pset = {piid_c[i] for i in idx if piid_c[i]}
+            piids[code] |= pset
+            fy_rows.append({"program_code": code, "fiscal_year": fy, "vintage": current,
+                "obligation": round(total, 2),
+                "traceable_obligation": round(total - untraced, 2),
+                "untraceable_obligation": round(untraced, 2),
+                "traceable_pct": round((total - untraced) / total * 100, 4) if total else 0.0,
+                "action_count": len(idx), "award_count": len(pset),
+                "top5_obligation": round(top5, 2),
+                "top5_pct": round(top5 / total * 100, 4) if total else 0.0,
+                "late_quarter_obligation": round(late, 2),
+                "late_quarter_pct": round(late / total * 100, 4) if total else 0.0,
+                "is_partial_year": fy == maxfy})
+            # dimensions
+            for dim, col in PROGRAM_DIMS:
+                vals = dim_cols[col]; labs = dim_cols.get(PROGRAM_DIM_LABEL.get(dim) or "")
+                agg = collections.defaultdict(lambda: [0.0, 0, None])
+                for i in idx:
+                    k = vals[i]
+                    if k in (None, ""): k = "(not reported)"
+                    a = agg[str(k)]
+                    a[0] += ob_c[i] or 0.0; a[1] += 1
+                    if a[2] is None and labs: a[2] = labs[i]
+                recs = sorted(agg.items(), key=lambda kv: -kv[1][0])[:15]
+                for rank, (k, (amt, n, lb)) in enumerate(recs, 1):
+                    book = CODE_BOOKS.get(dim, {})
+                    label = book.get(k) or str(lb or k)
+                    if dim in CODE_BOOKS and k in book: label = f"{k} · {label}"
+                    dim_rows.append({"program_code": code, "fiscal_year": fy, "dimension": dim,
+                        "dim_key": k, "dim_label": label, "rank_in_dim": rank,
+                        "obligation": round(amt, 2), "action_count": n})
+            # top awards, by contract rather than by action -- the concentration
+            # this page is about lives at the PIID level, not the modification level
+            byp, biggest = collections.defaultdict(lambda: [0.0, 0, False]), {}
+            for i in idx:
+                k = piid_c[i] or "(no PIID)"
+                a = byp[k]
+                a[0] += ob_c[i] or 0.0
+                a[1] += 1
+                if tas_c[i]: a[2] = True     # any action on the award named an account
+                if k not in biggest or (ob_c[i] or 0.0) > (ob_c[biggest[k]] or 0.0):
+                    biggest[k] = i
+            for rank, (k, a) in enumerate(sorted(byp.items(), key=lambda kv: -kv[1][0])[:TOP_AWARDS], 1):
+                i = biggest[k]
+                award_rows.append({"program_code": code, "fiscal_year": fy, "award_id_piid": k,
+                    "recipient_name": recip[i] or "(not reported)", "obligation": round(a[0], 2),
+                    "action_count": a[1], "rank_in_fy": rank,
+                    "share_of_fy_pct": round(a[0] / total * 100, 4) if total else 0.0,
+                    "has_account_link": a[2],
+                    "largest_action_date": date_c[i].isoformat() if date_c[i] else None,
+                    "description": (desc[i] or "")[:240] or None})
+            # account combinations -- named, never apportioned
+            byacct = collections.defaultdict(lambda: [0.0, 0])
+            for i in idx:
+                accts = _acct_set(fa_c[i])
+                if not accts: continue
+                a = byacct[";".join(accts)]
+                a[0] += ob_c[i] or 0.0; a[1] += 1
+            for rank, (k, a) in enumerate(sorted(byacct.items(), key=lambda kv: -abs(kv[1][0]))[:TOP_ACCOUNT_SETS], 1):
+                accts = k.split(";")
+                outs = sorted({x for x in accts if x.split("-")[0] not in DOW_CODES})
+                acct_rows.append({"program_code": code, "fiscal_year": fy, "account_set": k,
+                    "account_count": len(accts), "obligation": round(a[0], 2), "action_count": a[1],
+                    "rank_in_fy": rank, "out_of_scope_accounts": outs or None,
+                    "has_out_of_scope": bool(outs)})
+        print(f"  FY{fy}: {len(featured)} featured programs at depth")
+
+    # -- File C tie-out, by PIID ---------------------------------------------
+    fc_base = os.path.join(WAREHOUSE, "accounts/file_c_contracts")
+    fc_rows = []
+    if os.path.isdir(fc_base) and piids:
+        want = {}
+        for code, s in piids.items():
+            for k in s: want.setdefault(k, []).append(code)
+        for fy in years:
+            p = os.path.join(fc_base, f"fiscal_year={fy}")
+            if not os.path.isdir(p): continue
+            t = ds.dataset(p, format="parquet").to_table(
+                columns=["agency_identifier_code", "award_id_piid",
+                         "transaction_obligated_amount", "submission_period"])
+            code_c = t["agency_identifier_code"].to_pylist()
+            pi = t["award_id_piid"].to_pylist()
+            am = t["transaction_obligated_amount"].to_pylist()
+            sp = t["submission_period"].to_pylist()
+            acc = collections.defaultdict(lambda: [0.0, 0, set()])
+            latest = max((s for s in sp if s), default=None)
+            for c_, k_, a_ in zip(code_c, pi, am):
+                if c_ not in DOW_CODES or not k_: continue
+                for prog in want.get(k_, ()):
+                    e = acc[prog]
+                    e[0] += a_ or 0.0; e[1] += 1; e[2].add(k_)
+            for code in featured:
+                e = acc.get(code, [0.0, 0, set()])
+                award = next((r["obligation"] for r in fy_rows
+                              if r["program_code"] == code and r["fiscal_year"] == fy), 0.0)
+                fc_rows.append({"program_code": code, "fiscal_year": fy,
+                    "filec_obligation": round(e[0], 2), "filec_rows": e[1],
+                    "filec_awards": len(e[2]),
+                    "award_obligation": award,
+                    "linkage_pct": round(e[0] / award * 100, 4) if award else 0.0,
+                    "submission_period": latest,
+                    "is_partial_year": fy == maxfy})
+            print(f"  FY{fy}: File C matched {sum(v[1] for v in acc.values()):,} rows"
+                  f" for {len(featured)} programs (latest {latest})")
+
+    prior = os.path.join(out, "program.json")
+    if only_fy and os.path.exists(prior):
+        old = json.load(open(prior))["rows"]
+        keep = lambda rs: [r for r in rs if r["fiscal_year"] != only_fy]
+        fy_rows    = keep(old.get("dm_program_fy", []))      + fy_rows
+        dim_rows   = keep(old.get("dm_program_dim_fy", []))  + dim_rows
+        award_rows = keep(old.get("dm_program_award", []))   + award_rows
+        acct_rows  = keep(old.get("dm_program_account", [])) + acct_rows
+        cov_rows   = keep(old.get("dm_program_coverage", []))  + cov_rows
+        if not fc_rows: fc_rows = old.get("dm_program_filec", [])
+    write(out, "program.json", payload("program_execution", current,
+        {"dm_program_dim": reg_rows, "dm_program_coverage": cov_rows, "dm_program_fy": fy_rows,
+         "dm_program_dim_fy": dim_rows, "dm_program_award": award_rows,
+         "dm_program_account": acct_rows, "dm_program_filec": fc_rows},
+        source_path="contracts + accounts/file_c_contracts", vintages=vs,
+        featured=featured))
+
 # ------------------------------------------------------------------- main ---
 STEPS = {"sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
-         "filec": step_filec, "assistance": step_assistance, "knowledge": step_knowledge}
+         "filec": step_filec, "assistance": step_assistance, "program": step_program,
+         "knowledge": step_knowledge}
 
 def main():
     ap = argparse.ArgumentParser()
@@ -548,7 +805,7 @@ def main():
     for nm in names:
         print(f"[{nm}]")
         fn = STEPS[nm]
-        fn(a.out, a.fy) if nm in ("awards", "assistance") else fn(a.out)
+        fn(a.out, a.fy) if nm in ("awards", "assistance", "program") else fn(a.out)
     print("done.")
 
 if __name__ == "__main__":

@@ -40,9 +40,9 @@
       "source_system": "USASpending financial assistance archive, Department of War / Department of Defense awarding agency",
       "source_path": "data/usaspending/warehouse/assistance",
       "grain": "Assistance transaction x fiscal year x vintage",
-      "description": "Federal action obligations for DoW financial-assistance awards — cooperative agreements, project and formula grants, and direct payments. A separate warehouse tree and reporting chain from contracts and File C; not account-linked and not reconciled against anything.",
+      "description": "Federal action obligations for DoW financial-assistance awards \u2014 cooperative agreements, project and formula grants, and direct payments. A separate warehouse tree and reporting chain from contracts and File C; not account-linked and not reconciled against anything.",
       "refresh_cadence": "as vintaged (two vintages currently retained)",
-      "limitations": "Rows are filtered to awarding-agency name ‘Department of Defense’ or ‘Department of War’ rather than an agency-identifier code, because this warehouse cut carries no code column. The assistance-type codes present are cooperative agreements, grants and direct payments — no loan or loan-guarantee type codes appear in this cut, so it is not a credit-programs picture and must not be described as one. Only two vintages are retained so far; vintage drift is measurable but thin.",
+      "limitations": "Rows are filtered to awarding-agency name \u2018Department of Defense\u2019 or \u2018Department of War\u2019 rather than an agency-identifier code, because this warehouse cut carries no code column. The assistance-type codes present are cooperative agreements, grants and direct payments \u2014 no loan or loan-guarantee type codes appear in this cut, so it is not a credit-programs picture and must not be described as one. Only two vintages are retained so far; vintage drift is measurable but thin.",
       "sort_order": 35
     },
     {
@@ -77,6 +77,17 @@
       "refresh_cadence": "annual",
       "limitations": "Read via the curated wiki summary of the AFR, which is a secondary read of a primary document. Each row records which it is.",
       "sort_order": 60
+    },
+    {
+      "key": "program_execution",
+      "label": "Program execution and account traceability",
+      "source_system": "USASpending contract award archive; USASpending File C",
+      "source_path": "data/usaspending/warehouse/contracts + accounts/file_c_contracts",
+      "grain": "Acquisition program code x fiscal year",
+      "description": "Contract obligations cut by FPDS dod_acquisition_program_code -- the only field in this warehouse keyed to a budget line rather than to an account -- with the share of each total whose funding Treasury account is actually named, the accounts named on those actions, contract-level concentration, and the File C tie-out for the same contracts.",
+      "refresh_cadence": "daily",
+      "limitations": "FPDS records 'no acquisition program' as code 000 / description NONE, and roughly three quarters of DoD contract dollars carry that code, so this covers only the program-attributable quarter of the file -- dm_program_coverage states how much per year. federal_accounts_funding_this_award lists every account funding an award without apportioning the obligation across them, so no figure here is split by account. A program obligation total is not comparable to that program's appropriation: it draws on prior-year balances this cut cannot age, and Foreign Military Sales trust dollars (011-8242) sit on the same contract actions as Department appropriations.",
+      "sort_order": 45
     }
   ],
   "controls": [
@@ -178,6 +189,60 @@
       "authority": "Internal reporting standard",
       "severity": "high",
       "sort_order": 110
+    },
+    {
+      "code": "PROG-01",
+      "name": "Every program measure names a program and a vintage",
+      "assertion": "Every row in dm_program_fy carries a non-empty program_code that exists in dm_program_dim, and hangs off a dm_load row with a vintage.",
+      "rationale": "A program-level figure with no program identity or no vintage cannot be cited, corrected, or reproduced. This is the same provenance rule the rest of the site enforces by shape, asserted here because the program tables are the first cut keyed to a budget line rather than an account.",
+      "authority": "Internal reporting standard",
+      "severity": "critical",
+      "sort_order": 120
+    },
+    {
+      "code": "PROG-02",
+      "name": "No program obligation is apportioned across the accounts named on it",
+      "assertion": "For every fiscal year, the sum of dm_program_account.obligation for a program does not exceed that program's fiscal-year obligation.",
+      "rationale": "federal_accounts_funding_this_award lists every account funding an award and states no split. Summing a program's obligations by account would fabricate an apportionment the source does not contain -- the specific error this table exists to make impossible.",
+      "authority": "Internal reporting standard",
+      "severity": "critical",
+      "sort_order": 130
+    },
+    {
+      "code": "PROG-03",
+      "name": "Account-traceable share travels with every program obligation total",
+      "assertion": "Every dm_program_fy row carries traceable_obligation and untraceable_obligation summing to its obligation, with traceable_pct consistent with them.",
+      "rationale": "A program obligation published without the share of it that names a funding account reads as reconciled when it is not. In FY2025 only 7.6% of F-35 obligations name an account, so the total alone is the misleading figure and the pair is the honest one.",
+      "authority": "Internal reporting standard",
+      "severity": "high",
+      "sort_order": 140
+    },
+    {
+      "code": "PROG-04",
+      "name": "Accounts outside Department scope are disclosed, not dropped",
+      "assertion": "Where an account outside agency codes 097/021/017/057 is named on a program's obligations, dm_program_account records it in out_of_scope_accounts rather than omitting the row.",
+      "rationale": "SCOPE-01 keeps agency 011 out of Department budgetary totals, and that is right for budget. On the execution side, Foreign Military Sales trust dollars (011-8242) sit on the same F-35 contract actions as Department appropriations. Dropping those rows would hide why a program's obligations are not comparable to its appropriation.",
+      "authority": "Internal reporting standard",
+      "severity": "high",
+      "sort_order": 150
+    },
+    {
+      "code": "PROG-05",
+      "name": "In-progress program years are flagged period-to-date",
+      "assertion": "A program fiscal year is flagged partial exactly when it is the newest fiscal year in the current contract vintage.",
+      "rationale": "The newest year in the warehouse is always period-to-date. An unflagged partial year reads as a collapse in program spending rather than a year still being reported.",
+      "authority": "Internal reporting standard",
+      "severity": "moderate",
+      "sort_order": 160
+    },
+    {
+      "code": "PROG-06",
+      "name": "Program-dimension coverage of the contract file is published",
+      "assertion": "dm_program_coverage carries one row per fiscal year in which attributed and unattributed obligations sum to the fiscal-year total, and attributed_pct is consistent with them.",
+      "rationale": "FPDS records 'no acquisition program' as the explicit code 000 with description NONE rather than as a null, so a null test finds almost nothing and makes program tagging look complete. It is not: roughly three quarters of DoD contract dollars carry no program at all. Publishing the coverage denominator stops the program pages from implying they cover the file.",
+      "authority": "Internal reporting standard",
+      "severity": "high",
+      "sort_order": 170
     }
   ],
   "audit_posture": {
@@ -290,7 +355,7 @@
         "metric_value": 28,
         "value_kind": "count",
         "citation": "DoD OIG report DODIG-2026-032, prior-year comparison as reported",
-        "note": "Carried here only to show the FY2025 auditor-identified count moved by −2 year over year. Verified 2026-09-08.",
+        "note": "Carried here only to show the FY2025 auditor-identified count moved by \u22122 year over year. Verified 2026-09-08.",
         "sort_order": 96
       },
       {
@@ -360,7 +425,7 @@
         "value_kind": "text",
         "value_text": "Established March 2026",
         "citation": "GAO-26-109115",
-        "note": "A centralized, substantive-testing effort — validating account balances directly rather than relying primarily on remediated internal controls — that supersedes the prior decentralized FIAR remediation approach for this push toward a clean opinion. GAO's report raises open questions about this approach; see the strategy section on this page. Verified 2026-09-08.",
+        "note": "A centralized, substantive-testing effort \u2014 validating account balances directly rather than relying primarily on remediated internal controls \u2014 that supersedes the prior decentralized FIAR remediation approach for this push toward a clean opinion. GAO's report raises open questions about this approach; see the strategy section on this page. Verified 2026-09-08.",
         "sort_order": 103
       },
       {

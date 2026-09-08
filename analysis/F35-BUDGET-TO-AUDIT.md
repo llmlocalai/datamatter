@@ -107,8 +107,9 @@ Air Force service books).
 ## 2. Execution: what was obligated
 
 FPDS tags F-35 transactions with `dod_acquisition_program_code = '198'`
-(`dod_acquisition_program_description = 'F-35'`). Tagging is dense — DoD-wide,
-untagged actions carry a net $0.0B in FY2025 — so this is a usable key.
+(`dod_acquisition_program_description = 'F-35'`). The key is **precise where it
+is present and absent for most of the file**, and the second half of that took a
+correction to see — see the box below.
 
 | FY | actions | distinct awards | obligations |
 |---|---:|---:|---:|
@@ -118,6 +119,35 @@ untagged actions carry a net $0.0B in FY2025 — so this is a usable key.
 | 2024 | 867 | 336 | $12.44B |
 | 2025 | 850 | 320 | $36.28B |
 | 2026 *(PTD)* | 430 | 196 | $10.36B |
+
+> **Correction, 2026-09-08.** An earlier version of this memo said "tagging is
+> dense — DoD-wide, untagged actions carry a net $0.0B in FY2025 — so this is a
+> usable key." That was wrong, and wrong in the way this memo is otherwise about.
+> FPDS records "no acquisition program" as the **explicit code `000` with
+> description `NONE`**, not as a null. Testing for null finds ~90k actions worth
+> approximately nothing; testing for the sentinel finds the real picture:
+>
+> | FY | Contract obligations | Carrying a program code | Share | Actions carrying one |
+> |---|---:|---:|---:|---:|
+> | 2021 | $387.0B | $71.2B | 18.4% | 25,290 of 4,339,370 (0.58%) |
+> | 2022 | $414.4B | $79.7B | 19.2% | 24,421 of 4,351,900 (0.56%) |
+> | 2023 | $456.8B | $113.5B | 24.8% | 23,465 of 4,404,726 (0.53%) |
+> | 2024 | $446.0B | $88.7B | 19.9% | 23,726 of 4,420,732 (0.54%) |
+> | 2025 | $491.7B | $124.4B | 25.3% | 22,936 of 4,489,792 (0.51%) |
+> | 2026 *(PTD)* | $282.2B | $69.8B | 24.7% | 10,923 of 2,529,673 (0.43%) |
+>
+> **Roughly three quarters of DoD contract dollars, and 99.5% of actions, carry
+> no acquisition program at all.** This strengthens the memo's thesis rather than
+> weakening it — the program dimension is thinner than claimed — but the original
+> sentence was false and is corrected here rather than quietly edited away. It is
+> now published as control `PROG-06` and as the closing section of `/program`,
+> so the coverage denominator travels with the program figures.
+>
+> The error is instructive: it is the same failure mode as the FPDS
+> single-letter-code problem this repo already documents. A sentinel value in a
+> code field is not a null, and testing for the null is testing for the wrong
+> thing.
+
 
 Action counts are flat within ±8%. Dollars vary by a factor of three. Obligation
 volume on this program is not an activity measure — it is a definitization
@@ -364,10 +394,12 @@ Both are past hearings. Neither is upcoming.
 
 ## 6. What this changes
 
-1. **A program dimension is reachable and worth publishing.**
-   `dod_acquisition_program_code` is densely populated and gives a real
-   program-level cut of execution — the first thing on this site that ties to a
-   budget line rather than to an account.
+1. **A program dimension is reachable and worth publishing — with its
+   denominator.** `dod_acquisition_program_code` gives the first cut on this site
+   that ties to a budget line rather than to an account. It is also sparse: about
+   a quarter of contract dollars and half a percent of actions carry one (see the
+   correction in §2). Both halves are true, and only one of them is visible from
+   a program page, so the coverage measure is published beside it.
 2. **Account traceability of award obligations is a publishable measure in its
    own right**, DoD-wide and by program. The 26.5% → 68.3% series in §3a is a
    new finding, and F-35's 14.2% → 92.4% shows it is far worse for concentrated
@@ -397,7 +429,33 @@ its traceable share is a figure that looks reconciled and is not.
 
 ---
 
-## 7. Next
+## 7. A gap in the build guarantee, found while shipping this
+
+`README` and `CLAUDE.md` state that `next build` prerenders every page against
+the database, "so a broken query or a non-serialisable prop fails the build
+rather than the deploy." **That does not hold for any page that reads
+`searchParams`** — `/contracting`, `/funds-control`, `/assistance` and now
+`/program`. Reading `searchParams` opts a route out of static generation, so its
+queries are never executed at build time.
+
+This is not theoretical. The first working version of `lib/analytics.ts` for
+this page contained `to_char(vintage,…)` against a query joining `dm_program_fy`
+to `dm_load`, both of which have a `vintage` column. Postgres rejects it as
+`column reference "vintage" is ambiguous`. `tsc --noEmit` passed. `next build`
+passed and reported 20/20 pages generated. The page 500s at request time. It was
+caught only by starting the built app against a loaded database and fetching the
+route.
+
+Those four pages appear as `○ (Static)` in a build run against an *empty*
+database, because they return their not-loaded branch before touching
+`searchParams`. Against a loaded database they become `ƒ (Dynamic)` and their
+queries stop being build-tested — the guarantee is weakest exactly when there is
+data to get wrong.
+
+Worth adding to `npm run verify`: start the built app and fetch each route,
+failing on any non-200. That is the check that would have caught this.
+
+## 8. Next
 
 - Extend the traceability series (§3a) to the ten largest acquisition program
   codes, to see whether F-35's 92.4% is typical of large programs or specific to

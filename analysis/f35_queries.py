@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse, collections, os, sys
 
 PROGRAM_CODE = "198"                      # dod_acquisition_program_code -> 'F-35'
+PROGRAM_SENTINEL = "000"                  # FPDS "no acquisition program" (description NONE)
 CONTRACT_VINTAGE = "2026-08-06"
 PRIOR_VINTAGE    = "2026-07-06"
 # The appropriation accounts the P-1 and R-1 F-35 lines sit in.
@@ -267,7 +268,38 @@ def section_3e():
         print(f"    {r[0]}  {str(r[1])[:40]:<42}{r[2]}  resources ${r[3]:7.2f}B  oblig ${r[4]:7.2f}B  outlay ${r[5]:7.2f}B")
     print("  These are account totals. Nothing in File A says which part is F-35.")
 
-SECTIONS = {"1":section_1, "2":section_2, "3a":section_3a, "3b":section_3b,
+# ---------------------------------------------------------------- section 0 --
+def section_0():
+    """Program-dimension coverage of the contract file.
+
+    FPDS records "no acquisition program" as the explicit code 000 with
+    description NONE, not as a null. An earlier version of the memo tested for
+    the null, found ~nothing, and concluded tagging was dense. It is not: this
+    is the correction, and the denominator every program figure needs."""
+    c = con()
+    head("0. How much of the contract file carries an acquisition program at all")
+    for r in c.execute(f"""SELECT fy,
+      sum(federal_action_obligation)/1e9 total_b, count(*) total_n,
+      sum(CASE WHEN dod_acquisition_program_code NOT IN ('{PROGRAM_SENTINEL}')
+                AND dod_acquisition_program_code IS NOT NULL
+               THEN federal_action_obligation ELSE 0 END)/1e9 att_b,
+      sum(CASE WHEN dod_acquisition_program_code NOT IN ('{PROGRAM_SENTINEL}')
+                AND dod_acquisition_program_code IS NOT NULL
+               THEN 1 ELSE 0 END) att_n
+      FROM read_parquet('{G()}') GROUP BY 1 ORDER BY 1""").fetchall():
+        fy, tb, tn, ab, an = r
+        ptd = "  (PTD)" if fy >= 2026 else ""
+        print(f"  FY{fy}  ${tb:7.1f}B total   ${ab:7.1f}B carries a program code "
+              f"({ab/tb*100:5.1f}% of $, {an/tn*100:5.2f}% of {tn:,} actions){ptd}")
+    print("\n  The sentinel is code 000 / description NONE. Testing for a null instead")
+    print("  finds ~90k actions worth approximately nothing and reads as full coverage.")
+    for r in c.execute(f"""SELECT dod_acquisition_program_code, dod_acquisition_program_description,
+      count(*) n, sum(federal_action_obligation)/1e9 b FROM read_parquet('{G()}')
+      WHERE fy=2025 AND (dod_acquisition_program_code IS NULL OR dod_acquisition_program_code='{PROGRAM_SENTINEL}')
+      GROUP BY 1,2""").fetchall():
+        print(f"    code={r[0]!r} desc={r[1]!r}  {r[2]:,} actions  ${r[3]:.2f}B")
+
+SECTIONS = {"0":section_0, "1":section_1, "2":section_2, "3a":section_3a, "3b":section_3b,
             "3c":section_3c, "3d":section_3d, "3e":section_3e}
 
 if __name__ == "__main__":

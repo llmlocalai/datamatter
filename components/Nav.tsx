@@ -15,6 +15,7 @@ const GROUPS: { label: string; items: { href: string; label: string }[] }[] = [
       { href: '/execution', label: 'Budget to execution' },
       { href: '/funds-control', label: 'Funds control' },
       { href: '/contracting', label: 'Contracting' },
+      { href: '/program', label: 'By program' },
       { href: '/assistance', label: 'Assistance' } ] },
   { label: 'Oversight', items: [
       { href: '/reconciliation', label: 'Reconciliation' },

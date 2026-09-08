@@ -201,6 +201,135 @@ export async function getAssistanceVintageDrift() {
       ORDER BY fiscal_year`);
 }
 
+// -------------------------------------------------------------- program ----
+/**
+ * The program cut is the only one on this site keyed to a budget line rather
+ * than to an account, and it is the one most able to mislead: an obligation
+ * total here draws on prior-year balances, can carry Foreign Military Sales
+ * dollars, and in recent years mostly does not name the Treasury account it
+ * came from. So ProgramYear carries traceableObligation and traceablePct on the
+ * same row as obligation — a caller cannot render the total without having the
+ * share in hand. PROG-03 asserts the pair; this type is what makes obeying it
+ * the path of least resistance.
+ */
+export interface ProgramYear {
+  programCode: string; fiscalYear: number; vintage: string;
+  obligation: number; traceableObligation: number; untraceableObligation: number;
+  traceablePct: number; actionCount: number; awardCount: number;
+  top5Obligation: number; top5Pct: number;
+  lateQuarterObligation: number; lateQuarterPct: number;
+  isPartialYear: boolean;
+}
+// Every column is table-qualified: dm_load also carries `vintage`, and an
+// unqualified reference here is ambiguous. The page that surfaced this is
+// server-rendered on demand, so the build did not catch it — which is why
+// generateStaticParams below matters as much as the fix.
+const PROGRAM_FY_COLS = `
+  f.program_code AS "programCode", f.fiscal_year AS "fiscalYear",
+  to_char(f.vintage,'YYYY-MM-DD') AS vintage, f.obligation,
+  f.traceable_obligation AS "traceableObligation",
+  f.untraceable_obligation AS "untraceableObligation",
+  f.traceable_pct AS "traceablePct", f.action_count AS "actionCount",
+  f.award_count AS "awardCount", f.top5_obligation AS "top5Obligation",
+  f.top5_pct AS "top5Pct", f.late_quarter_obligation AS "lateQuarterObligation",
+  f.late_quarter_pct AS "lateQuarterPct", f.is_partial_year AS "isPartialYear"`;
+
+export interface ProgramRef {
+  programCode: string; programName: string; totalObligation: number;
+  firstFiscalYear: number; lastFiscalYear: number; isFeatured: boolean;
+  rankByObligation: number;
+}
+
+/** Programs carried at full depth, for the picker. */
+export async function getPrograms(): Promise<ProgramRef[]> {
+  return query<ProgramRef>(
+    `SELECT d.program_code AS "programCode", d.program_name AS "programName",
+            d.total_obligation AS "totalObligation", d.first_fiscal_year AS "firstFiscalYear",
+            d.last_fiscal_year AS "lastFiscalYear", d.is_featured AS "isFeatured",
+            d.rank_by_obligation AS "rankByObligation"
+       FROM dm_program_dim d JOIN dm_load l ON l.id = d.load_id AND l.is_current
+      WHERE d.is_featured ORDER BY d.total_obligation DESC`);
+}
+
+export async function getProgramYears(programCode: string): Promise<ProgramYear[]> {
+  return query<ProgramYear>(
+    `SELECT ${PROGRAM_FY_COLS}
+       FROM dm_program_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      WHERE f.program_code = $1 ORDER BY f.fiscal_year`, [programCode]);
+}
+
+/**
+ * Program-dimension coverage of the contract file. FPDS records "no acquisition
+ * program" as code 000 / description NONE rather than as a null, so this is the
+ * denominator that stops a program page implying it covers the file: roughly
+ * three quarters of DoD contract dollars carry no program at all.
+ */
+export async function getProgramCoverage() {
+  return query<{ fiscalYear: number; totalObligation: number; totalActions: number;
+    attributedObligation: number; attributedActions: number;
+    unattributedObligation: number; unattributedActions: number;
+    attributedPct: number; programCount: number; isPartialYear: boolean }>(
+    `SELECT p.fiscal_year AS "fiscalYear", p.total_obligation AS "totalObligation",
+            p.total_actions AS "totalActions", p.attributed_obligation AS "attributedObligation",
+            p.attributed_actions AS "attributedActions",
+            p.unattributed_obligation AS "unattributedObligation",
+            p.unattributed_actions AS "unattributedActions",
+            p.attributed_pct AS "attributedPct", p.program_count AS "programCount",
+            p.is_partial_year AS "isPartialYear"
+       FROM dm_program_coverage p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+      ORDER BY p.fiscal_year`);
+}
+
+export async function getProgramDim(programCode: string, fy: number, dimension: string, limit = 10) {
+  return query<{ key: string; label: string; obligation: number; actionCount: number }>(
+    `SELECT d.dim_key AS key, d.dim_label AS label, d.obligation, d.action_count AS "actionCount"
+       FROM dm_program_dim_fy d JOIN dm_load l ON l.id = d.load_id AND l.is_current
+      WHERE d.program_code = $1 AND d.fiscal_year = $2 AND d.dimension = $3
+      ORDER BY d.rank_in_dim LIMIT $4`, [programCode, fy, dimension, limit]);
+}
+
+export async function getProgramAwards(programCode: string, fy: number, limit = 10) {
+  return query<{ awardIdPiid: string; recipientName: string; obligation: number;
+    actionCount: number; shareOfFyPct: number; hasAccountLink: boolean;
+    largestActionDate: string | null; description: string | null }>(
+    `SELECT a.award_id_piid AS "awardIdPiid", a.recipient_name AS "recipientName", a.obligation,
+            a.action_count AS "actionCount", a.share_of_fy_pct AS "shareOfFyPct",
+            a.has_account_link AS "hasAccountLink",
+            to_char(a.largest_action_date,'YYYY-MM-DD') AS "largestActionDate", a.description
+       FROM dm_program_award a JOIN dm_load l ON l.id = a.load_id AND l.is_current
+      WHERE a.program_code = $1 AND a.fiscal_year = $2 ORDER BY a.rank_in_fy LIMIT $3`,
+    [programCode, fy, limit]);
+}
+
+/**
+ * The exact account sets NAMED on a program's actions. The obligation is not
+ * apportioned across the accounts in a set and must never be summed by account
+ * — PROG-02 asserts we do not, and the shape of this row (one string, not one
+ * account) is what keeps a caller from trying.
+ */
+export async function getProgramAccounts(programCode: string, fy: number, limit = 8) {
+  return query<{ accountSet: string; accountCount: number; obligation: number;
+    actionCount: number; outOfScopeAccounts: string[] | null; hasOutOfScope: boolean }>(
+    `SELECT a.account_set AS "accountSet", a.account_count AS "accountCount", a.obligation,
+            a.action_count AS "actionCount", a.out_of_scope_accounts AS "outOfScopeAccounts",
+            a.has_out_of_scope AS "hasOutOfScope"
+       FROM dm_program_account a JOIN dm_load l ON l.id = a.load_id AND l.is_current
+      WHERE a.program_code = $1 AND a.fiscal_year = $2 ORDER BY a.rank_in_fy LIMIT $3`,
+    [programCode, fy, limit]);
+}
+
+export async function getProgramFilec(programCode: string) {
+  return query<{ fiscalYear: number; filecObligation: number; filecRows: number;
+    filecAwards: number; awardObligation: number; linkagePct: number;
+    submissionPeriod: string | null; isPartialYear: boolean }>(
+    `SELECT fiscal_year AS "fiscalYear", filec_obligation AS "filecObligation",
+            filec_rows AS "filecRows", filec_awards AS "filecAwards",
+            award_obligation AS "awardObligation", linkage_pct AS "linkagePct",
+            submission_period AS "submissionPeriod", is_partial_year AS "isPartialYear"
+       FROM dm_program_filec f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      WHERE f.program_code = $1 ORDER BY f.fiscal_year`, [programCode]);
+}
+
 // ---------------------------------------------------------- reconciliation --
 export async function getReconciliation() {
   return query<{ fiscalYear: number; awardObligation: number; awardActions: number;

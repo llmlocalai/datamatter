@@ -1,6 +1,6 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-08
+- **Last updated:** 2026-09-08 (second pass: `/program`)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (as of 2026-08-27):** `tsc --noEmit` clean; `next build`
   prerenders all 18 routes against a loaded database. The 2026-09-08 changes
@@ -35,6 +35,56 @@ No baked snapshots. A daily refresh reaches the live site without a redeploy.
 | 11 | `/controls` — control results | `dm_control_result` | ✅ |
 | 12 | `/regulation` — authority-ranked retrieval | BM25 index | ✅ |
 | 13 | `/assistance` — grants, cooperative agreements, direct payments | financial-assistance warehouse | 🆕 code shipped, unverified — needs `npm run refresh` |
+| 14 | `/program` — execution by acquisition program, account traceability | contracts + File C | 🆕 code shipped; ETL, load and controls verified against a local Postgres, **not yet loaded to Neon** |
+
+## Done — 2026-09-08 (second pass) — `/program` and the F-35 pilot
+
+- [x] **F-35 budget-to-audit pilot analysis.** `analysis/F35-BUDGET-TO-AUDIT.md`
+  (the findings) and `analysis/f35_queries.py` (re-derives every figure from the
+  warehouse). Traces the FY2027 P-1/R-1 lines → FPDS program-198 obligations →
+  File A/File C accounts → DODIG-2026-032, and locates where the chain breaks.
+- [x] **Shipped `/program`** end to end: `etl_analytics.py --step program`, six
+  tables (`dm_program_dim`, `dm_program_coverage`, `dm_program_fy`,
+  `dm_program_dim_fy`, `dm_program_award`, `dm_program_account`,
+  `dm_program_filec`), loader wiring, controls **PROG-01…PROG-06**, query
+  functions in `lib/analytics.ts`, the page, and a nav entry. 12 featured
+  programs, F-35 pinned.
+- [x] **PROG-03 is the design, not a check.** `dm_program_fy` carries
+  `traceable_obligation` beside `obligation` and `ProgramYear` returns them on
+  one row, so a page cannot render a program obligation total without the share
+  of it that names a funding Treasury account. F-35 FY2025: 7.6%.
+- [x] **Corrected a real error in the pilot memo.** It claimed FPDS program
+  tagging was dense because a null test found nothing. FPDS records "no
+  acquisition program" as the explicit code `000` / description `NONE`: about
+  **three quarters of DoD contract dollars and 99.5% of actions carry no
+  program at all**. Now published as `dm_program_coverage` and `PROG-06`, and
+  the correction is recorded in the memo rather than edited away.
+- [x] **Verified without Neon.** The sandbox has no network route to Neon, so
+  the schema, loader and full control suite were run against a local Postgres
+  loaded from the real staged extract; each PROG control was then confirmed to
+  **fail** on deliberately corrupted rows. `next build` passes and the page was
+  fetched from a running production build (four program/FY combinations, 200,
+  zero errors).
+
+## Open — found while shipping `/program`
+
+- [ ] **`npm run verify` does not cover any page that reads `searchParams`.**
+  Reading `searchParams` opts a route out of static generation, so `/contracting`,
+  `/funds-control`, `/assistance` and `/program` never execute their queries at
+  build time. This is not theoretical: `lib/analytics.ts` shipped a
+  `to_char(vintage,…)` against a `dm_program_fy`/`dm_load` join where both carry
+  `vintage`. `tsc --noEmit` passed, `next build` reported 20/20 pages generated,
+  and the page 500s at request time. Caught only by starting the built app and
+  fetching the route. Those pages show as `○ (Static)` in a build against an
+  **empty** database because they return the not-loaded branch before touching
+  `searchParams` — the guarantee is weakest exactly when there is data to get
+  wrong. Fix: add a route smoke check (start the build, fetch every route, fail
+  on non-200) to `npm run verify`.
+- [ ] Extend the traceability series to the other 11 featured programs on the
+  page and see whether F-35's collapse from 85.8% (FY2021) to 7.6% (FY2025) is
+  typical of large joint programs or specific to its lot structure.
+- [ ] `/program` is server-rendered on demand. Consider `/program/[code]` with
+  `generateStaticParams` if per-program ISR is wanted.
 
 ## Done — 2026-09-08 knowledge refresh + new offering
 
@@ -148,6 +198,11 @@ to actually run and verify against real numbers):
 
 ## Changelog
 
+- **2026-09-08 (second pass)** — F-35 pilot analysis and `/program`. New ETL step,
+  six tables, PROG-01…PROG-06, page and nav entry. Corrected the memo's claim that
+  FPDS program tagging is dense (code 000 = NONE is a sentinel, not a null).
+  Verified against a local Postgres and a running production build; **not yet
+  loaded to Neon** — run `npm run refresh && npm run verify` on the Mac.
 - **2026-09-08** — Knowledge refresh + `/assistance`. Pulled DODIG-2026-032,
   DOWIG-2026-081, and GAO-26-109115; added the independent-auditor and
   audit-strategy sections to `/audit`; added 3 wiki pages + 2 addenda and

@@ -172,6 +172,107 @@ const CONTROLS = {
     fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
     status: Number(r.observed) <= Number(r.expected) * 1.0001 ? 'pass' : 'fail',
     message: `FY${r.fiscal_year} ${r.dimension}: retained buckets total ${(r.observed / r.expected * 100).toFixed(1)}% of the fiscal-year assistance total.` })),
+
+  // ------------------------------------------------------------- program --
+  // PROG-01 and PROG-02 are critical: the first makes a program figure
+  // citable, the second stops the one fabrication this data invites.
+  'PROG-01': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS n FROM dm_program_fy f
+        JOIN dm_load l ON l.id = f.load_id AND l.is_current
+       WHERE coalesce(f.program_code,'') = ''
+          OR f.vintage IS NULL
+          OR NOT EXISTS (SELECT 1 FROM dm_program_dim d
+                          WHERE d.load_id = f.load_id AND d.program_code = f.program_code)`);
+    return [{ observed: rows[0].n, expected: 0, status: rows[0].n === 0 ? 'pass' : 'fail',
+      message: rows[0].n === 0
+        ? 'Every program measure names a program that exists in the registry, and carries a vintage.'
+        : `${rows[0].n} program rows have no program identity, no vintage, or no registry entry.` }];
+  },
+  'PROG-02': async (c) => (await c.query(`
+    SELECT f.fiscal_year, f.program_code,
+           f.obligation AS expected,
+           coalesce(sum(a.obligation), 0) AS observed
+      FROM dm_program_fy f
+      JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      LEFT JOIN dm_program_account a
+             ON a.load_id = f.load_id AND a.program_code = f.program_code
+            AND a.fiscal_year = f.fiscal_year
+     GROUP BY f.fiscal_year, f.program_code, f.obligation
+     ORDER BY f.fiscal_year, f.program_code`)).rows.map((r) => {
+    // Retained account sets are a top-N subset of a program's actions, and the
+    // obligation is never split across the accounts in a set, so the retained
+    // total must sit at or below the program's own fiscal-year total.
+    const ok = Math.abs(Number(r.observed)) <= Math.abs(Number(r.expected)) * 1.0001 + 1;
+    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      status: ok ? 'pass' : 'fail',
+      message: `FY${r.fiscal_year} program ${r.program_code}: named account sets total `
+        + `${(Math.abs(r.observed) / Math.max(1, Math.abs(r.expected)) * 100).toFixed(1)}% of the program's obligations.` };
+  }),
+  'PROG-03': async (c) => (await c.query(`
+    SELECT fiscal_year, program_code, obligation,
+           traceable_obligation, untraceable_obligation, traceable_pct
+      FROM dm_program_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+     ORDER BY fiscal_year, program_code`)).rows.map((r) => {
+    const parts = Number(r.traceable_obligation) + Number(r.untraceable_obligation);
+    const foots = Math.abs(parts - Number(r.obligation)) <= Math.max(1, Math.abs(Number(r.obligation)) * 1e-6);
+    const pct = Number(r.obligation) ? Number(r.traceable_obligation) / Number(r.obligation) * 100 : 0;
+    const pctOk = Math.abs(pct - Number(r.traceable_pct)) <= 0.01;
+    const why = !foots
+      ? `traceable + untraceable (${(parts / 1e9).toFixed(3)}B) does not foot to the obligation `
+        + `(${(Number(r.obligation) / 1e9).toFixed(3)}B)`
+      : !pctOk
+      ? `traceable_pct is ${Number(r.traceable_pct).toFixed(2)}% but the components give ${pct.toFixed(2)}%`
+      : null;
+    return { fiscal_year: r.fiscal_year, observed: parts, expected: r.obligation,
+      variance_pct: Number(r.traceable_pct),
+      status: why ? 'fail' : 'pass',
+      message: why
+        ? `FY${r.fiscal_year} program ${r.program_code}: ${why} — the traceable share cannot be published beside this total.`
+        : `FY${r.fiscal_year} program ${r.program_code}: `
+          + `${Number(r.traceable_pct).toFixed(1)}% of obligations name a funding Treasury account.` };
+  }),
+  'PROG-04': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS n FROM dm_program_account a
+        JOIN dm_load l ON l.id = a.load_id AND l.is_current
+       WHERE a.has_out_of_scope
+         AND coalesce(array_length(a.out_of_scope_accounts, 1), 0) = 0`);
+    const { rows: found } = await c.query(`
+      SELECT count(*)::int AS n, coalesce(sum(a.obligation),0) AS ob
+        FROM dm_program_account a JOIN dm_load l ON l.id = a.load_id AND l.is_current
+       WHERE a.has_out_of_scope`);
+    return [{ observed: rows[0].n, expected: 0, status: rows[0].n === 0 ? 'pass' : 'fail',
+      message: rows[0].n === 0
+        ? `${found[0].n} account sets naming an out-of-scope account (${(found[0].ob / 1e9).toFixed(2)}B) are disclosed with the accounts named.`
+        : `${rows[0].n} rows are flagged out-of-scope without naming which account.` }];
+  },
+  'PROG-05': async (c) => {
+    const { rows } = await c.query(`
+      SELECT f.fiscal_year, bool_or(f.is_partial_year) AS flagged
+        FROM dm_program_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+       GROUP BY f.fiscal_year ORDER BY f.fiscal_year`);
+    const newest = Math.max(...rows.map((r) => r.fiscal_year));
+    return rows.map((r) => ({ fiscal_year: r.fiscal_year,
+      status: r.flagged === (r.fiscal_year === newest) ? 'pass' : 'fail',
+      message: `FY${r.fiscal_year} is ${r.flagged ? '' : 'not '}flagged period-to-date`
+        + ` (newest year in the current contract vintage is FY${newest}).` }));
+  },
+  'PROG-06': async (c) => (await c.query(`
+    SELECT fiscal_year, total_obligation, attributed_obligation, unattributed_obligation,
+           attributed_pct, program_count
+      FROM dm_program_coverage p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+     ORDER BY fiscal_year`)).rows.map((r) => {
+    const parts = Number(r.attributed_obligation) + Number(r.unattributed_obligation);
+    const foots = Math.abs(parts - Number(r.total_obligation)) <= Math.max(1, Math.abs(Number(r.total_obligation)) * 1e-6);
+    return { fiscal_year: r.fiscal_year, observed: r.attributed_obligation, expected: r.total_obligation,
+      variance_pct: Number(r.attributed_pct), status: foots ? 'pass' : 'fail',
+      message: foots
+        ? `FY${r.fiscal_year}: ${Number(r.attributed_pct).toFixed(1)}% of contract obligations `
+          + `carry an acquisition program code across ${r.program_count} programs; the rest are FPDS code 000 (NONE).`
+        : `FY${r.fiscal_year}: attributed + unattributed (${(parts / 1e9).toFixed(2)}B) does not foot to the `
+          + `fiscal-year total (${(Number(r.total_obligation) / 1e9).toFixed(2)}B), so the coverage denominator is not trustworthy.` };
+  }),
 };
 
 // -------------------------------------------------------------------- main --
@@ -219,6 +320,7 @@ const CONTROLS = {
       ['awards.json',     'contract_awards',       'scripts/etl_analytics.py --step awards'],
       ['filec.json',      'file_c_reconciliation', 'scripts/etl_analytics.py --step filec'],
       ['assistance.json', 'assistance_awards',     'scripts/etl_analytics.py --step assistance'],
+      ['program.json',    'program_execution',     'scripts/etl_analytics.py --step program'],
       ['knowledge.json',  'knowledge_bank',        'scripts/etl_analytics.py --step knowledge'],
     ];
     const COLS = {
@@ -241,6 +343,22 @@ const CONTROLS = {
       dm_assistance_dim: ['fiscal_year','dimension','dim_key','dim_label','obligation','action_count','rank_in_dim'],
       dm_assistance_vintage_drift: ['fiscal_year','vintage_from','vintage_to','obligation_from','obligation_to',
         'obligation_delta','actions_from','actions_to','action_delta','year_closed'],
+      dm_program_dim: ['program_code','program_name','total_obligation','first_fiscal_year',
+        'last_fiscal_year','is_featured','rank_by_obligation'],
+      dm_program_coverage: ['vintage','fiscal_year','total_obligation','total_actions',
+        'attributed_obligation','attributed_actions','unattributed_obligation','unattributed_actions',
+        'attributed_pct','program_count','is_partial_year'],
+      dm_program_fy: ['vintage','program_code','fiscal_year','obligation','traceable_obligation',
+        'untraceable_obligation','traceable_pct','action_count','award_count','top5_obligation',
+        'top5_pct','late_quarter_obligation','late_quarter_pct','is_partial_year'],
+      dm_program_dim_fy: ['program_code','fiscal_year','dimension','dim_key','dim_label',
+        'obligation','action_count','rank_in_dim'],
+      dm_program_award: ['program_code','fiscal_year','award_id_piid','recipient_name','obligation',
+        'action_count','share_of_fy_pct','has_account_link','largest_action_date','description','rank_in_fy'],
+      dm_program_account: ['program_code','fiscal_year','account_set','account_count','obligation',
+        'action_count','out_of_scope_accounts','has_out_of_scope','rank_in_fy'],
+      dm_program_filec: ['program_code','fiscal_year','filec_obligation','filec_rows','filec_awards',
+        'award_obligation','linkage_pct','submission_period','is_partial_year'],
       dm_definition: ['slug','term','definition','why_it_matters','key_rules','authorities','related',
         'source_file','last_verified','topic'],
       dm_kb_inventory: ['collection','folder','label','doc_count','authority_tier','note','sort_order'],

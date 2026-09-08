@@ -248,6 +248,134 @@ CREATE TABLE IF NOT EXISTS dm_assistance_vintage_drift (
 -- Award files (FPDS federal_action_obligation) vs File C (account-linked
 -- transaction_obligated_amount). Two reporting chains, not two measurements of
 -- one thing: the ratio is a LINKAGE indicator, never an error estimate.
+-- ------------------------------------------------------------------ program --
+-- The only cut on this site keyed to a BUDGET LINE rather than to an account.
+-- dm_program_fy carries traceable_obligation alongside obligation because a
+-- program obligation total without its account-traceable share reads as
+-- reconciled when it is not; PROG-03 asserts the two travel together.
+CREATE TABLE IF NOT EXISTS dm_program_dim (
+  id                 bigserial PRIMARY KEY,
+  load_id            bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  program_code       text NOT NULL,
+  program_name       text NOT NULL,
+  total_obligation   numeric(20,2) NOT NULL DEFAULT 0,
+  first_fiscal_year  int NOT NULL,
+  last_fiscal_year   int NOT NULL,
+  is_featured        boolean NOT NULL DEFAULT false,
+  rank_by_obligation int,
+  UNIQUE (load_id, program_code)
+);
+
+-- Program-dimension coverage of the contract file as a whole. FPDS records
+-- "no acquisition program" as code 000 / description NONE, not as a null, so
+-- this is the honest denominator: how much of the file is program-attributable
+-- at all. Roughly three quarters of DoD contract dollars are not.
+CREATE TABLE IF NOT EXISTS dm_program_coverage (
+  id                      bigserial PRIMARY KEY,
+  load_id                 bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  vintage                 date NOT NULL,
+  fiscal_year             int NOT NULL,
+  total_obligation        numeric(20,2) NOT NULL DEFAULT 0,
+  total_actions           bigint NOT NULL DEFAULT 0,
+  attributed_obligation   numeric(20,2) NOT NULL DEFAULT 0,
+  attributed_actions      bigint NOT NULL DEFAULT 0,
+  unattributed_obligation numeric(20,2) NOT NULL DEFAULT 0,
+  unattributed_actions    bigint NOT NULL DEFAULT 0,
+  attributed_pct          numeric(9,4) NOT NULL DEFAULT 0,
+  program_count           int NOT NULL DEFAULT 0,
+  is_partial_year         boolean NOT NULL DEFAULT false,
+  UNIQUE (load_id, fiscal_year)
+);
+
+CREATE TABLE IF NOT EXISTS dm_program_fy (
+  id                      bigserial PRIMARY KEY,
+  load_id                 bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  vintage                 date NOT NULL,
+  program_code            text NOT NULL,
+  fiscal_year             int NOT NULL,
+  obligation              numeric(20,2) NOT NULL DEFAULT 0,
+  traceable_obligation    numeric(20,2) NOT NULL DEFAULT 0,
+  untraceable_obligation  numeric(20,2) NOT NULL DEFAULT 0,
+  traceable_pct           numeric(9,4) NOT NULL DEFAULT 0,
+  action_count            bigint NOT NULL DEFAULT 0,
+  award_count             bigint NOT NULL DEFAULT 0,
+  top5_obligation         numeric(20,2) NOT NULL DEFAULT 0,
+  top5_pct                numeric(9,4) NOT NULL DEFAULT 0,
+  late_quarter_obligation numeric(20,2) NOT NULL DEFAULT 0,
+  late_quarter_pct        numeric(9,4) NOT NULL DEFAULT 0,
+  is_partial_year         boolean NOT NULL DEFAULT false,
+  UNIQUE (load_id, program_code, fiscal_year)
+);
+CREATE INDEX IF NOT EXISTS dm_program_fy_idx ON dm_program_fy (load_id, program_code, fiscal_year);
+
+CREATE TABLE IF NOT EXISTS dm_program_dim_fy (
+  id           bigserial PRIMARY KEY,
+  load_id      bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  program_code text NOT NULL,
+  fiscal_year  int NOT NULL,
+  dimension    text NOT NULL,  -- recipient | extent_competed | pricing | psc | awarding_office | sub_agency
+  dim_key      text NOT NULL,
+  dim_label    text NOT NULL,
+  obligation   numeric(20,2) NOT NULL DEFAULT 0,
+  action_count bigint NOT NULL DEFAULT 0,
+  rank_in_dim  int
+);
+CREATE INDEX IF NOT EXISTS dm_program_dim_fy_idx
+  ON dm_program_dim_fy (load_id, program_code, fiscal_year, dimension, rank_in_dim);
+
+-- Contract-level concentration. Aggregated by PIID rather than by modification,
+-- because the concentration this page reports lives at the contract level.
+CREATE TABLE IF NOT EXISTS dm_program_award (
+  id                 bigserial PRIMARY KEY,
+  load_id            bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  program_code       text NOT NULL,
+  fiscal_year        int NOT NULL,
+  award_id_piid      text NOT NULL,
+  recipient_name     text NOT NULL,
+  obligation         numeric(20,2) NOT NULL DEFAULT 0,
+  action_count       bigint NOT NULL DEFAULT 0,
+  share_of_fy_pct    numeric(9,4) NOT NULL DEFAULT 0,
+  has_account_link   boolean NOT NULL DEFAULT false,
+  largest_action_date date,
+  description        text,
+  rank_in_fy         int
+);
+CREATE INDEX IF NOT EXISTS dm_program_award_idx
+  ON dm_program_award (load_id, program_code, fiscal_year, rank_in_fy);
+
+-- The exact set of accounts NAMED on an action. The obligation is not split
+-- across them and must never be summed by account -- PROG-02 asserts that.
+CREATE TABLE IF NOT EXISTS dm_program_account (
+  id                   bigserial PRIMARY KEY,
+  load_id              bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  program_code         text NOT NULL,
+  fiscal_year          int NOT NULL,
+  account_set          text NOT NULL,   -- ';'-separated federal account symbols
+  account_count        int NOT NULL DEFAULT 0,
+  obligation           numeric(20,2) NOT NULL DEFAULT 0,
+  action_count         bigint NOT NULL DEFAULT 0,
+  out_of_scope_accounts text[],         -- e.g. 011-8242, FMS trust -- disclosed, not dropped
+  has_out_of_scope     boolean NOT NULL DEFAULT false,
+  rank_in_fy           int
+);
+CREATE INDEX IF NOT EXISTS dm_program_account_idx
+  ON dm_program_account (load_id, program_code, fiscal_year, rank_in_fy);
+
+CREATE TABLE IF NOT EXISTS dm_program_filec (
+  id                bigserial PRIMARY KEY,
+  load_id           bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  program_code      text NOT NULL,
+  fiscal_year       int NOT NULL,
+  filec_obligation  numeric(20,2) NOT NULL DEFAULT 0,
+  filec_rows        bigint NOT NULL DEFAULT 0,
+  filec_awards      bigint NOT NULL DEFAULT 0,
+  award_obligation  numeric(20,2) NOT NULL DEFAULT 0,
+  linkage_pct       numeric(12,4) NOT NULL DEFAULT 0,
+  submission_period text,
+  is_partial_year   boolean NOT NULL DEFAULT false,
+  UNIQUE (load_id, program_code, fiscal_year)
+);
+
 CREATE TABLE IF NOT EXISTS dm_reconciliation (
   id                  bigserial PRIMARY KEY,
   load_id             bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
