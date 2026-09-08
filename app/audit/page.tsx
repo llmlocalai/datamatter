@@ -121,7 +121,7 @@ export default async function AuditPage() {
         <Caveat>
           The new approach validates account balances directly with supporting documentation rather than
           working primarily through remediated internal controls, and reduces the number of standalone
-          financial statements produced department-wide. GAO's own review of the shift raises open questions
+          financial statements produced department-wide. GAO&rsquo;s own review of the shift raises open questions
           it has not resolved: whether fewer standalone statements narrow oversight, whether deprioritizing
           the scope-limiting material weaknesses above for multiple years delays the root-cause fixes those
           weaknesses represent, whether fraud-risk controls keep pace under compressed timelines, and whether
