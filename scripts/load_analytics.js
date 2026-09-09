@@ -125,14 +125,23 @@ const CONTROLS = {
         ? 'No Department-scope figure includes agency code 011 (Executive Office of the President).'
         : `${rows[0].n} Department-scope rows include agency code 011.` }];
   },
+  // File C is cumulative per period, so a row built from more than one snapshot
+  // is double counted. REC-01 asserts the single-snapshot rule as well as the
+  // ratio — summing periods is the specific error this control now blocks.
   'REC-01': async (c) => (await c.query(`
-    SELECT fiscal_year, filec_obligation AS observed, award_obligation AS expected, linkage_pct
+    SELECT fiscal_year, filec_obligation AS observed, award_obligation AS expected, linkage_pct,
+           submission_period, periods_available
       FROM dm_reconciliation r JOIN dm_load l ON l.id=r.load_id AND l.is_current
-     ORDER BY fiscal_year`)).rows.map((r) => ({
-    fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
-    variance_pct: r.linkage_pct,
-    status: Number(r.observed) <= Number(r.expected) ? 'pass' : 'fail',
-    message: `FY${r.fiscal_year}: File C covers ${Number(r.linkage_pct).toFixed(1)}% of award-file obligations.` })),
+     ORDER BY fiscal_year`)).rows.map((r) => {
+    const named = !!r.submission_period;
+    const ok = Number(r.observed) <= Number(r.expected) && named;
+    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      variance_pct: r.linkage_pct, status: ok ? 'pass' : 'fail',
+      message: named
+        ? `FY${r.fiscal_year}: File C snapshot ${r.submission_period} (of ${r.periods_available} periods held) `
+          + `covers ${Number(r.linkage_pct).toFixed(1)}% of award-file obligations.`
+        : `FY${r.fiscal_year}: no single submission period named — the figure may sum overlapping cumulative snapshots.` };
+  }),
   'VIN-01': async (c) => {
     const { rows } = await c.query(
       `SELECT count(*)::int AS n FROM dm_load WHERE is_current AND (vintage IS NULL OR extracted_at IS NULL)`);
@@ -338,7 +347,8 @@ const CONTROLS = {
       dm_vintage_drift: ['fiscal_year','vintage_from','vintage_to','obligation_from','obligation_to',
         'obligation_delta','actions_from','actions_to','action_delta','year_closed'],
       dm_reconciliation: ['fiscal_year','award_obligation','award_actions','filec_obligation','filec_rows',
-        'filec_awards','linkage_pct','unlinked_obligation','is_partial_year'],
+        'filec_awards','linkage_pct','unlinked_obligation','submission_period','periods_available',
+        'period_row_counts','is_partial_year'],
       dm_assistance_fy: ['vintage','fiscal_year','obligation','action_count','is_partial_year'],
       dm_assistance_dim: ['fiscal_year','dimension','dim_key','dim_label','obligation','action_count','rank_in_dim'],
       dm_assistance_vintage_drift: ['fiscal_year','vintage_from','vintage_to','obligation_from','obligation_to',

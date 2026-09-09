@@ -243,6 +243,52 @@ sit on the same transactions as Department dollars and the file does not separat
 them. **This is a second, independent reason the $36.28B is not comparable to
 the $12.465B appropriation:** an unknown part of it is partner and FMS money.
 
+
+> ## ⚠ CORRECTION, 2026-09-09 — the linkage collapse was my error
+>
+> §3c and §3d of this memo reported File C linkage falling from **18.2% (FY2021)
+> to 3.1% (FY2025)**, and presented it as reproducing the figure already published
+> on `/reconciliation`. **Both were wrong, and wrong the same way.**
+>
+> File C is a **monthly cumulative snapshot**: each submission period restates the
+> fiscal year to date. P03, P06, P09 and P12 are four overlapping copies of the
+> same year, not four slices of it. Both the ETL and my ad-hoc queries summed
+> every period, so a year for which more period files happened to be retained
+> looked larger. The "collapse" tracked how many snapshots we hold per year, not
+> how DoD reported.
+>
+> Corrected — one snapshot per year, the most complete one held:
+>
+> | FY | snapshot used | rows | File C | award files | linkage |
+> |---|---|---:|---:|---:|---:|
+> | 2021 | FY2021P06 | 1,006,565 | $22.8B | $387B | 5.9% |
+> | 2022 | FY2022P06 | 984,135 | $8.1B | $414B | 2.0% |
+> | 2023 | FY2023P12 | 1,060,922 | $36.0B | $457B | 7.9% |
+> | 2024 | FY2024P06 | 1,012,088 | $8.0B | $446B | 1.8% |
+> | 2025 | FY2025P09 | 999,491 | $13.0B | $492B | 2.6% |
+> | 2026 *(PTD)* | FY2026P03 | 36,764 | $3.1B | $282B | 1.1% |
+>
+> **There is no collapse. Linkage has been low and roughly flat since FY2021**,
+> and the remaining variation is driven by which monthly snapshot survives in the
+> warehouse, not by reporting behaviour. Several period files are visibly
+> truncated — FY2025P12 holds 43,286 rows against P09's 999,491 — so even the
+> corrected series is a floor, not a measurement.
+>
+> **What survives.** The identifier space is sound: **100% of File C PIIDs match
+> an FPDS PIID** in every year tested, so the join was never the problem. What
+> File C actually does is cover about a quarter of contract *awards* in every
+> size band while disproportionately missing the largest — in FY2025, **5 of the
+> 37 awards of $1B or more**. Because those 37 awards carry 21% of all contract
+> dollars, dollar coverage lands in the low single digits. That is why F-35, whose
+> year is 59% one contract, has no File C rows at all: not a program-specific
+> failure, a size-selection effect.
+>
+> §3d (the sub-agency decomposition) was computed the same summed way and is
+> **withdrawn** pending recomputation on the snapshot basis.
+>
+> The ETL, the schema and control `REC-01` were changed on 2026-09-09 so a
+> reconciliation row must name the single submission period it was built from.
+
 ### 3c. File C, the file that would settle it, is empty for these accounts
 
 File C is the account-linked contract obligation file — the only artifact that

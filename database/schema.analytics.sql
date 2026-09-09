@@ -387,6 +387,12 @@ CREATE TABLE IF NOT EXISTS dm_reconciliation (
   filec_awards        bigint NOT NULL DEFAULT 0,
   linkage_pct         numeric(9,4) NOT NULL,
   unlinked_obligation numeric(20,2) NOT NULL,
+  -- File C is a monthly CUMULATIVE snapshot. These three columns record which
+  -- single snapshot the row was built from, how many we hold, and the row count
+  -- of each — so a truncated period download is visible rather than summed in.
+  submission_period   text,
+  periods_available   int,
+  period_row_counts   text,
   is_partial_year     boolean NOT NULL DEFAULT false,
   UNIQUE (load_id, fiscal_year)
 );

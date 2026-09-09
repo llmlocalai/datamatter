@@ -121,6 +121,30 @@ No baked snapshots. A daily refresh reaches the live site without a redeploy.
 - [x] **Removed duplicate legends.** `StackedFY` already renders its own `<Legend>`;
   `/traceability` and `/program` were each rendering a second copy underneath.
 
+## Done — 2026-09-09 — File C snapshot correction + fiscal-year links
+
+- [x] **Fixed the fiscal-year picker.** `FyPicker` hardcoded `?fy=`, so with
+  `base=/program?code=198` it emitted `/program?code=198?fy=2024` — a single
+  literal `code` value, so the year never applied and every program page fell
+  back to its default year. Now picks `&` when the base already has a query.
+- [x] **Corrected the File C linkage series — a published figure was wrong.**
+  File C is a monthly *cumulative* snapshot; `step_filec` summed all periods, so
+  P03+P06+P09+P12 counted the same year up to four times. The published
+  "18.2% → 3.1% collapse" was an artefact of how many period files each year
+  retained. Corrected (one snapshot per year): **5.9 / 2.0 / 7.9 / 1.8 / 2.6 /
+  1.1%** — low and roughly flat, **no collapse**. `dm_reconciliation` now carries
+  `submission_period`, `periods_available` and `period_row_counts`, and `REC-01`
+  fails a row that does not name its snapshot.
+- [x] **Established the join was never broken.** 100% of File C PIIDs match an
+  FPDS PIID in FY2021, FY2023 and FY2025. File C covers ~23% of awards in every
+  size band but only **5 of 37 awards ≥ $1B** in FY2025, and those 37 carry 21%
+  of all contract dollars — a size-selection effect, not a linkage failure.
+- [x] **Found the prior-year budget exhibits.** `11-Budget-Justification/_Archive`
+  holds **all seven "-1" exhibits as xlsx for FY2020–FY2027**, plus the weapons
+  book as PDF per year. Each PB carries three fiscal years of columns, so the
+  same fiscal year appears in several PBs — a restatement axis that does not
+  exist anywhere else in these sources.
+
 ## Open — found while shipping `/program`
 
 - [ ] **`npm run verify` does not cover any page that reads `searchParams`.**
@@ -253,6 +277,9 @@ to actually run and verify against real numbers):
 
 ## Changelog
 
+- **2026-09-09** — Fixed the FY picker; corrected the File C linkage series (the
+  published collapse was a cumulative-snapshot summing error); confirmed the
+  PIID join is sound; inventoried FY2020–FY2027 machine-readable exhibits.
 - **2026-09-08 (fourth pass)** — `/traceability` rebuilt at memo depth (6 sections,
   chain diagram, 6 charts). Fixed `StackedFY` bar-height collapse, which also
   affected `/execution`, and removed duplicate legends.

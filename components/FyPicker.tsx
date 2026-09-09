@@ -1,6 +1,13 @@
 import Link from 'next/link';
 
-/** Fiscal-year selector as links, so the page stays a server component. */
+/**
+ * Fiscal-year selector as links, so the page stays a server component.
+ *
+ * `base` may already carry a query string (/program?code=198). Hardcoding `?fy=`
+ * produced `/program?code=198?fy=2024`, which browsers pass through as a single
+ * literal `code` value — so the year silently never applied and every page
+ * fell back to its default fiscal year.
+ */
 export function FyPicker({ years, active, base, partial }: {
   years: number[]; active: number; base: string; partial?: number[];
 }) {
@@ -9,7 +16,7 @@ export function FyPicker({ years, active, base, partial }: {
       {years.map((y) => {
         const isPartial = partial?.includes(y);
         return (
-          <Link key={y} href={`${base}?fy=${y}`} scroll={false}
+          <Link key={y} href={`${base}${base.includes('?') ? '&' : '?'}fy=${y}`} scroll={false}
             aria-current={y === active ? 'page' : undefined}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors tnum ${
               y === active ? 'bg-accent-500 text-navy-950'

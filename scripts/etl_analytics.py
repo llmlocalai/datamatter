@@ -302,6 +302,29 @@ def step_awards(out, only_fy=None):
           source_path="contracts", vintages=vs))
 
 # ----------------------------------------------------------------- File C ---
+# File C is a MONTHLY CUMULATIVE snapshot: each submission period restates the
+# fiscal year to date, so P03, P06, P09 and P12 are four overlapping copies of
+# the same year, not four slices of it. Summing them multiplies the total.
+#
+# An earlier version of this step did exactly that, and produced a "linkage
+# collapse from 18.2% to 3.1%" that was an artefact of how many period files
+# happened to be retained per year, not a change in reporting. The corrected
+# rule: use ONE snapshot per fiscal year -- the period carrying the most rows,
+# which is the most complete copy we hold -- and publish which period that was
+# alongside every other period's row count, so a truncated download is visible
+# rather than silently averaged in.
+def _filec_best_period(base, fy, ds):
+    """(period, rows) for the most complete cumulative snapshot of this FY."""
+    p = os.path.join(base, f"fiscal_year={fy}")
+    if not os.path.isdir(p): return None, {}
+    t = ds.dataset(p, format="parquet").to_table(
+        columns=["agency_identifier_code", "submission_period"])
+    code = t["agency_identifier_code"].to_pylist()
+    per  = t["submission_period"].to_pylist()
+    counts = collections.Counter(sp for c, sp in zip(code, per) if c in DOW_CODES and sp)
+    if not counts: return None, {}
+    return max(counts.items(), key=lambda kv: kv[1])[0], dict(counts)
+
 def step_filec(out):
     import pyarrow.dataset as ds
     base = os.path.join(WAREHOUSE, "accounts/file_c_contracts")
@@ -315,14 +338,18 @@ def step_filec(out):
     for fy in FY_RANGE:
         p = os.path.join(base, f"fiscal_year={fy}")
         if not os.path.isdir(p): continue
+        best, period_rows = _filec_best_period(base, fy, ds)
         t = ds.dataset(p, format="parquet").to_table(
-            columns=["agency_identifier_code","transaction_obligated_amount","award_unique_key"])
+            columns=["agency_identifier_code","transaction_obligated_amount","award_unique_key",
+                     "submission_period"])
         code = t["agency_identifier_code"].to_pylist()
         amt  = t["transaction_obligated_amount"].to_pylist()
         keys = t["award_unique_key"].to_pylist()
+        sper = t["submission_period"].to_pylist()
         tot = 0.0; rows = 0; uniq = set()
-        for c_, a_, k_ in zip(code, amt, keys):
+        for c_, a_, k_, s_ in zip(code, amt, keys, sper):
             if c_ not in DOW_CODES: continue
+            if best and s_ != best: continue     # one cumulative snapshot only
             tot += (a_ or 0.0); rows += 1
             if k_: uniq.add(k_)
         aw = award_by_fy.get(fy)
@@ -332,9 +359,13 @@ def step_filec(out):
             "filec_obligation": round(tot,2), "filec_rows": rows, "filec_awards": len(uniq),
             "linkage_pct": round(tot/awob*100, 4) if awob else 0.0,
             "unlinked_obligation": round(awob - tot, 2),
+            "submission_period": best,
+            "periods_available": len(period_rows),
+            "period_row_counts": json.dumps(dict(sorted(period_rows.items()))),
             "is_partial_year": bool(aw and aw["is_partial_year"])})
-        print(f"  FY{fy}: File C {tot/1e9:.2f}B over {rows:,} rows / {len(uniq):,} awards"
-              f"  -> linkage {rec[-1]['linkage_pct']:.1f}%")
+        print(f"  FY{fy}: File C snapshot {best} -> {tot/1e9:.2f}B over {rows:,} rows / "
+              f"{len(uniq):,} awards  (linkage {rec[-1]['linkage_pct']:.1f}%; "
+              f"{len(period_rows)} periods held, rows {min(period_rows.values()):,}-{max(period_rows.values()):,})")
     write(out, "filec.json", payload("file_c_reconciliation", vintage,
           {"dm_reconciliation": rec}, source_path="accounts/file_c_contracts"))
 
@@ -752,9 +783,12 @@ def step_program(out, only_fy=None):
             am = t["transaction_obligated_amount"].to_pylist()
             sp = t["submission_period"].to_pylist()
             acc = collections.defaultdict(lambda: [0.0, 0, set()])
-            latest = max((s for s in sp if s), default=None)
-            for c_, k_, a_ in zip(code_c, pi, am):
+            # One cumulative snapshot, for the same reason as step_filec.
+            counts = collections.Counter(s for c_, s in zip(code_c, sp) if c_ in DOW_CODES and s)
+            latest = max(counts.items(), key=lambda kv: kv[1])[0] if counts else None
+            for c_, k_, a_, s_ in zip(code_c, pi, am, sp):
                 if c_ not in DOW_CODES or not k_: continue
+                if latest and s_ != latest: continue
                 for prog in want.get(k_, ()):
                     e = acc[prog]
                     e[0] += a_ or 0.0; e[1] += 1; e[2].add(k_)
