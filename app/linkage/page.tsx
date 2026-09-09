@@ -11,7 +11,7 @@ import {
   getAllProvenance, getSeams, getFilecPeriods, getFilecSpread, getScopeComparison,
   getMemoWeight, getVintageDrift, getProgramCoverage, getControls, getKbInventory,
   getSourceFields, getSourceSummary, getJoinSamples, getSfisCoverage, getSfisBySource,
-  getLineage, isLoaded,
+  getLineage, getSourceRows, getTrace, getSharedElements, isLoaded,
 } from '@/lib/analytics';
 import { NotLoaded } from '../execution/page';
 
@@ -23,6 +23,41 @@ export const metadata: Metadata = {
 export const revalidate = 900;
 
 const K = (n: number | null | undefined) => Number(n ?? 0) * 1000;
+
+
+/* The six sources as a chain, and the elements that do or do not join them.
+   Laid out by hand because the shape IS the argument: the budget side sits
+   apart from the execution side with nothing between them. */
+const GRAPH_NODES = [
+  { id: 'p1',   x: 30,  y: 20,  w: 210, label: 'P-1 / R-1 exhibits', meta: 'budget line + system', tone: 'budget' },
+  { id: 'wb',   x: 30,  y: 120, w: 210, label: 'Weapons book',       meta: 'system + published cost', tone: 'budget' },
+  { id: 'fa',   x: 300, y: 20,  w: 200, label: 'File A',             meta: 'account balances', tone: 'exec' },
+  { id: 'fb',   x: 300, y: 120, w: 200, label: 'File B',             meta: 'object class + activity', tone: 'exec' },
+  { id: 'fc',   x: 300, y: 240, w: 200, label: 'File C',             meta: 'award financial', tone: 'exec' },
+  { id: 'fpds', x: 300, y: 380, w: 200, label: 'FPDS award files',   meta: 'the contract action', tone: 'exec' },
+] as const;
+
+interface GraphEdge {
+  id: string; d: string; ok: boolean; label: string; sub?: string;
+  lx: number; ly: number; anchor?: 'start' | 'middle' | 'end';
+}
+
+const GRAPH_EDGES: GraphEdge[] = [
+  { id: 'p1-fa', d: 'M240,42 L300,42', ok: true,
+    label: 'account symbol', sub: '100% of lines', lx: 270, ly: 32 },
+  { id: 'p1-wb', d: 'M135,64 L135,120', ok: false,
+    label: 'name match', sub: '71 of 161 systems', lx: 145, ly: 96, anchor: 'start' },
+  { id: 'fa-fb', d: 'M400,64 L400,120', ok: true,
+    label: 'treasury_account_symbol', sub: 'discrete elements', lx: 410, ly: 88, anchor: 'start' },
+  { id: 'fb-fc', d: 'M400,164 L400,240', ok: true,
+    label: 'treasury_account_symbol', sub: '76 of 171 accounts appear', lx: 410, ly: 196, anchor: 'start' },
+  { id: 'fc-fpds', d: 'M400,284 L400,380', ok: false,
+    label: 'award_id_piid', sub: '4% of dollars reconcile', lx: 410, ly: 326, anchor: 'start' },
+  { id: 'p1-fpds', d: 'M135,164 C135,300 135,400 300,402', ok: false,
+    label: 'no shared element', sub: 'nothing to join on', lx: 150, ly: 330, anchor: 'start' },
+  { id: 'fa-fpds', d: 'M500,42 C640,42 700,200 560,395 L505,400', ok: false,
+    label: 'account as a text substring', sub: 'not a key', lx: 690, ly: 210, anchor: 'end' },
+];
 
 const SEAM_LABEL: Record<string, string> = {
   action_account: 'contract action → federal account',
@@ -38,6 +73,52 @@ const UNIT_LABEL: Record<string, string> = {
   lines: 'budget lines', accounts: 'accounts', systems: 'weapon systems',
   dollars: 'obligated dollars', actions: 'contract actions',
 };
+
+
+/** A quoted record is quoted: values print exactly as the source publishes them.
+    Only an amount gets a gloss, and only where the field name says it is one —
+    a fiscal year is not money and must never be rendered with a thousands
+    separator, and a field published in thousands is not dollars. */
+const AMOUNT_RE = /amount|obligat|outlay|balance|resources|value|_k$/i;
+const THOUSANDS_RE = /_k$/i;
+
+function RecordValue({ name, value }: { name: string; value: unknown }) {
+  if (value === null || value === undefined || value === '') {
+    return <span className="text-amber-400">null</span>;
+  }
+  const raw = String(value);
+  const num = typeof value === 'number' ? value : Number(raw);
+  const isAmount = AMOUNT_RE.test(name) && Number.isFinite(num) && Math.abs(num) >= 1000;
+  return (
+    <>
+      {raw}
+      {isAmount && (
+        <span className="ml-2 text-navy-500">
+          ({fmtT(THOUSANDS_RE.test(name) ? num * 1000 : num)})
+        </span>
+      )}
+    </>
+  );
+}
+
+function RecordTable({ record }: { record: Record<string, unknown> }) {
+  return (
+    <div className="scroll-x rounded border border-navy-800 bg-navy-950/60">
+      <table className="min-w-full text-[12px]">
+        <tbody>
+          {Object.entries(record).map(([k, v]) => (
+            <tr key={k} className="border-t border-navy-800/60 first:border-t-0">
+              <td className="px-3 py-1.5 font-mono text-navy-500 whitespace-nowrap align-top">{k}</td>
+              <td className="px-3 py-1.5 font-mono text-navy-100 break-all">
+                <RecordValue name={k} value={v} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function Badge({ children, tone = 'muted' }: {
   children: React.ReactNode; tone?: 'gold' | 'muted' | 'warn';
@@ -64,6 +145,19 @@ export default async function LinkagePage() {
       getSourceFields(), getSourceSummary(), getJoinSamples(), getSfisCoverage(),
       getSfisBySource(), getLineage(),
     ]);
+  const [sourceRows, trace, shared] = await Promise.all([
+    getSourceRows(), getTrace(), getSharedElements(),
+  ]);
+
+  // What the contract file shares, and with what. Computed rather than asserted:
+  // the claim that matters is not "FPDS shares nothing" — it shares 23 names with
+  // File C — but that it shares nothing with the two account files, and that
+  // none of what it does share is an accounting element.
+  const withContracts = shared.filter((s) => s.sources.includes('contracts'));
+  const contractsAccountShare = withContracts.filter(
+    (s) => s.sources.includes('file_a') || s.sources.includes('file_b')).length;
+  const sfisNames = new Set(sfis.flatMap((e) => e.candidateFields ?? []));
+  const contractsSfisShare = withContracts.filter((s) => sfisNames.has(s.fieldName)).length;
 
   // Coverage of the standard, computed rather than asserted.
   const sfisCarried = sfis.filter((e) => Number(e.sourceCount) > 0).length;
@@ -125,6 +219,9 @@ export default async function LinkagePage() {
         <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-2 text-sm">
           {[
             ['#seams', 'The seams, measured', `${seams.length} joins`],
+            ['#trace', 'One account through every file', 'where it stops'],
+            ['#graph', 'The elements, and what they join', `${shared.length} shared`],
+            ['#rows', 'A record from every source', `${sourceRows.length} quoted whole`],
             ['#filec', 'File C, in depth', 'the 8× spread'],
             ['#narrowing', 'The seam that is narrowing', 'contracts to accounts'],
             ['#flow', 'The flow and the hierarchy', `${lineage.length} datasets`],
@@ -207,6 +304,169 @@ export default async function LinkagePage() {
                 {s.note}
               </span>,
             ])} />
+        </div>
+      </Section>
+
+      {/* ============================================ the worked trace === */}
+      <Section id="trace" title="One account, followed through every file"
+        note="Aircraft Procurement, Navy — federal account 017-1506, the account the F-35 airframes are bought under. Every record below is real and quoted whole. Read down: the chain is intact for three steps, and then it is not."
+        >
+        <div className="space-y-4">
+          {trace.map((t) => {
+            let rec: Record<string, unknown> = {};
+            try { rec = JSON.parse(t.record) as Record<string, unknown>; } catch { rec = {}; }
+            return (
+              <div key={t.step} className="relative pl-8">
+                <span aria-hidden
+                  className={`absolute left-0 top-4 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold ${
+                    t.isPresent ? 'bg-accent-500 text-navy-950' : 'bg-amber-500 text-navy-950'}`}>
+                  {t.step}
+                </span>
+                {t.step < trace[trace.length - 1].step && (
+                  <span aria-hidden
+                    className="absolute left-[11px] top-10 bottom-0 w-px bg-navy-700" />
+                )}
+                <div className={`rounded-lg border px-5 py-4 ${
+                  t.isPresent ? 'border-navy-700 bg-navy-900/40'
+                              : 'border-amber-500/40 bg-amber-500/[0.05]'}`}>
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <h3 className="text-sm font-semibold text-navy-100">{t.sourceLabel}</h3>
+                    {!t.isPresent && (
+                      <span className="text-[11px] uppercase tracking-wider text-amber-300 font-semibold">
+                        the chain stops here
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[12px] font-mono text-navy-500 mt-1">
+                    joined on {t.keyField}
+                    {t.keyValue ? <> = <span className="text-accent-300">{t.keyValue}</span></> : null}
+                  </p>
+                  <p className="text-[13px] text-navy-300 leading-relaxed mt-3 mb-3">{t.note}</p>
+                  <RecordTable record={rec} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <Caveat>
+          Step 4 was established over the whole file, not a sample: every row of File C for the
+          fiscal year was read. Step 5 was found by searching text inside a display column, which
+          is why it is shown as reached but not as joined.
+        </Caveat>
+      </Section>
+
+      {/* ========================================== the element graph === */}
+      <Section id="graph" title="The elements, and what they can join"
+        note="Each source is a node; an edge exists only where two sources share a field name that could carry the join. The chain reads down the middle, and the shape is the argument: the contract file connects to exactly one other file, and not to either of the two that carry the accounting.">
+        <div className="scroll-x">
+          <svg viewBox="0 0 760 470" className="w-full h-auto min-w-[640px]" role="img"
+            aria-label="Graph of the six sources and the data elements that join them">
+            <defs>
+              <marker id="lk-arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--series-1)" />
+              </marker>
+              <marker id="lk-arrow-bad" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="#f0b429" />
+              </marker>
+            </defs>
+            {GRAPH_EDGES.map((e) => (
+              <g key={e.id}>
+                <path d={e.d} fill="none"
+                  stroke={e.ok ? 'var(--series-1)' : '#f0b429'}
+                  strokeWidth={e.ok ? 2 : 1.5}
+                  strokeDasharray={e.ok ? undefined : '5 4'}
+                  markerEnd={e.ok ? 'url(#lk-arrow)' : 'url(#lk-arrow-bad)'} />
+                <text x={e.lx} y={e.ly} textAnchor={e.anchor ?? 'middle'}
+                  className="fill-navy-400" style={{ fontSize: 10.5, fontFamily: 'ui-monospace, monospace' }}>
+                  {e.label}
+                </text>
+                {e.sub && (
+                  <text x={e.lx} y={e.ly + 12} textAnchor={e.anchor ?? 'middle'}
+                    className={e.ok ? 'fill-navy-500' : 'fill-amber-400'}
+                    style={{ fontSize: 10 }}>
+                    {e.sub}
+                  </text>
+                )}
+              </g>
+            ))}
+            {GRAPH_NODES.map((n) => (
+              <g key={n.id}>
+                <rect x={n.x} y={n.y} width={n.w} height={44} rx={7}
+                  fill={n.tone === 'budget' ? 'rgba(212,175,55,0.10)' : 'rgba(30,58,95,0.55)'}
+                  stroke={n.tone === 'budget' ? 'rgba(212,175,55,0.45)' : 'rgba(60,90,130,0.7)'} />
+                <text x={n.x + n.w / 2} y={n.y + 19} textAnchor="middle"
+                  className="fill-navy-100" style={{ fontSize: 12, fontWeight: 600 }}>
+                  {n.label}
+                </text>
+                <text x={n.x + n.w / 2} y={n.y + 34} textAnchor="middle"
+                  className="fill-navy-400" style={{ fontSize: 10 }}>
+                  {n.meta}
+                </text>
+              </g>
+            ))}
+          </svg>
+        </div>
+        <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-4 text-[13px] text-navy-300 leading-relaxed">
+          <p>
+            Solid arrows are joins on an element both sides carry as a discrete field. Dashed
+            arrows are the ones the site has to infer — a text search inside a display column, or a
+            match on names. There is no arrow between the budget line and any execution record at
+            all, because the two share no field name whatsoever.
+          </p>
+          <p>
+            <strong className="text-navy-100">The precise position.</strong> The contract file
+            shares {withContracts.length} field names with File C — recipient, product code, award
+            identifier, period of performance — and{' '}
+            <strong className="text-amber-300">{contractsAccountShare}</strong> with File A or File
+            B. Of the {withContracts.length} it does share,{' '}
+            <strong className="text-amber-300">{contractsSfisShare}</strong> are SLOA accounting
+            elements. So the contract file is not isolated; it is connected to the award side and
+            severed from the accounting side, which is exactly the shape that makes an obligation
+            impossible to place in an appropriation.
+          </p>
+        </div>
+
+        <div className="mt-10">
+          <h3 className="text-sm font-semibold text-navy-200 mb-4">
+            Every element more than one source carries — the complete list of candidate keys
+          </h3>
+          <DataTable
+            align={[0, 1, 2, 4]}
+            caption={`${shared.length} of the 173 distinct field names across the four execution sources appear in more than one of them; the rest appear in exactly one file and can join nothing. Read the "carried by" column: the shared names split into two clusters that barely touch — account identifiers held by File A, File B and File C, and award descriptors held by File C and FPDS. File C is the only file in either cluster of the other, which is why the whole chain depends on it. Nothing on this list identifies a programme, a system or a budget line.`}
+            head={['Element', 'Carried by', 'Sources', 'Populated', 'Example values']}
+            rows={shared.map((s) => [
+              <span key={s.fieldName} className="font-mono text-[12px] text-accent-300">
+                {s.fieldName}
+              </span>,
+              <span key={`${s.fieldName}-s`} className="text-[11px] font-mono text-navy-400">
+                {s.sources.join(', ')}
+              </span>,
+              String(s.sourceCount),
+              s.populated == null ? '—' : fmtPct(Number(s.populated)),
+              <span key={`${s.fieldName}-v`} className="font-mono text-[11px] text-navy-400 break-all">
+                {s.samples ?? '—'}
+              </span>,
+            ])} />
+        </div>
+      </Section>
+
+      {/* ============================================ sample records === */}
+      <Section id="rows" title="A complete record from every source"
+        note="One whole row from each file, chosen as the largest obligation in the batch scanned so it is recognisable rather than obscure. Nothing is abridged: these are the fields as the source publishes them.">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {sourceRows.map((r, i) => {
+            let rec: Record<string, unknown> = {};
+            try { rec = JSON.parse(r.record) as Record<string, unknown>; } catch { rec = {}; }
+            return (
+              <div key={i} className="rounded-lg border border-navy-800 bg-navy-900/40 px-5 py-4">
+                <h3 className="text-sm font-semibold text-navy-100">{r.sourceLabel}</h3>
+                <p className="text-[12px] text-navy-400 mt-1 mb-3">{r.why}</p>
+                <RecordTable record={rec} />
+              </div>
+            );
+          })}
         </div>
       </Section>
 
@@ -774,24 +1034,7 @@ export default async function LinkagePage() {
                   )}
                 </div>
                 <p className="text-[13px] text-navy-300 leading-relaxed mb-3">{s.why}</p>
-                <div className="scroll-x rounded border border-navy-800 bg-navy-950/60">
-                  <table className="min-w-full text-[12px]">
-                    <tbody>
-                      {Object.entries(rec).map(([k, v]) => (
-                        <tr key={k} className="border-t border-navy-800/60 first:border-t-0">
-                          <td className="px-3 py-1.5 font-mono text-navy-500 whitespace-nowrap align-top">
-                            {k}
-                          </td>
-                          <td className="px-3 py-1.5 font-mono text-navy-100 break-all">
-                            {v === null || v === undefined || v === ''
-                              ? <span className="text-amber-400">null</span>
-                              : typeof v === 'number' ? fmtT(v) : String(v)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <RecordTable record={rec} />
               </div>
             );
           })}

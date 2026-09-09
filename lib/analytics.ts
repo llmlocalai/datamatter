@@ -1486,3 +1486,50 @@ export async function getLineage() {
        JOIN dm_load l ON l.dataset_key = d.key AND l.is_current
       ORDER BY d.sort_order`);
 }
+
+/** Complete example records, one per source. */
+export async function getSourceRows() {
+  return query<{ sourceKey: string; sourceLabel: string; rowLabel: string;
+                 why: string; record: string }>(
+    `SELECT r.source_key AS "sourceKey", r.source_label AS "sourceLabel",
+            r.row_label AS "rowLabel", r.why, r.record
+       FROM dm_source_row r JOIN dm_load l ON l.id = r.load_id AND l.is_current
+      ORDER BY r.id`);
+}
+
+/** One account followed through every file, in chain order. */
+export async function getTrace() {
+  return query<{ step: number; sourceKey: string; sourceLabel: string;
+                 keyField: string; keyValue: string | null; note: string;
+                 isPresent: boolean; record: string }>(
+    `SELECT t.step, t.source_key AS "sourceKey", t.source_label AS "sourceLabel",
+            t.key_field AS "keyField", t.key_value AS "keyValue", t.note,
+            t.is_present AS "isPresent", t.record
+       FROM dm_trace_row t JOIN dm_load l ON l.id = t.load_id AND l.is_current
+      ORDER BY t.step`);
+}
+
+/**
+ * Every field name that appears in more than one source, and which sources
+ * carry it. These are the candidate join keys — the complete list of ways any
+ * two of these files could be tied together at all.
+ *
+ * A field appearing in one source only cannot join anything, which is most of
+ * them: the whole difficulty of this corpus is that the files share very few
+ * element names, and the ones they do share are mostly account identifiers
+ * rather than anything that identifies a programme or a budget line.
+ */
+export async function getSharedElements() {
+  return query<{ fieldName: string; sources: string[]; sourceCount: number;
+                 kinds: string[]; populated: number | null; samples: string | null }>(
+    `SELECT f.field_name AS "fieldName",
+            array_agg(DISTINCT f.source_key ORDER BY f.source_key) AS sources,
+            count(DISTINCT f.source_key)::int AS "sourceCount",
+            array_agg(DISTINCT f.field_kind) AS kinds,
+            round(avg(f.populated_pct), 1) AS populated,
+            (array_agg(f.sample_values ORDER BY f.populated_pct DESC NULLS LAST))[1] AS samples
+       FROM dm_source_field f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      GROUP BY f.field_name
+      HAVING count(DISTINCT f.source_key) > 1
+      ORDER BY count(DISTINCT f.source_key) DESC, f.field_name`);
+}

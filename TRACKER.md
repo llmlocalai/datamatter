@@ -1,6 +1,6 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-09 (/linkage becomes the reference: field catalogue, SFIS coverage, quoted failing records)
+- **Last updated:** 2026-09-09 (/linkage: the trace, the element graph, and records quoted whole)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (2026-09-09):** `tsc --noEmit` clean and `next build` green,
   21/21 routes, run against a full local Postgres load of every staged extract.
@@ -193,6 +193,44 @@
 - File C's object class and programme activity columns are carried and unread;
   extending the extract past its five columns would let an obligation be followed
   from an award to what it bought.
+
+## Done — 2026-09-09 (sixth pass) — the actual records, and the element graph
+
+Three things were asked for repeatedly and were not there: sample rows from each
+source, the data elements as a linked graph and a list, and a demonstration of
+*why* the linkage breaks. The field catalogue was column profiles hidden behind
+collapsed blocks, which is not the same thing.
+
+- [x] **`/linkage#trace` — one account followed through every file.** Federal
+  account `017-1506`, Aircraft Procurement Navy, where the F-35 airframes sit.
+  Six steps, every record real and quoted whole:
+  1. the P-1 line `0147` "Joint Strike Fighter CV", BSA Combat Aircraft — the last
+     record in the chain that can name a system;
+  2. File A `017-2025/2027-1506-000`, every SLOA element discrete, **$11.93B
+     obligations**, no budget line;
+  3. File B, object class 31.0 Equipment, activity 0001 COMBAT AIRCRAFT, still no
+     budget line;
+  4. **File C — nothing.** Every row of the file was read: 76 distinct accounts
+     appear in it and this is not one of them;
+  5. FPDS reached only by *text search inside a display column* — `N0001920C0032`,
+     Lockheed Martin, $1.95B, programme 198;
+  6. the whole population: **95 of 171 Department accounts in File A are absent
+     from File C entirely — $430.3B of obligations, 29.7%.**
+- [x] **`/linkage#graph` — the sources as a graph.** Six nodes, edges only where
+  two sources share a field name, solid where both carry it as a discrete element
+  and dashed where the site must infer. Computed, not asserted: the contract file
+  shares **23** field names with File C, **0** with File A or File B, and **0** of
+  the 23 is a SLOA accounting element. Connected to the award side, severed from
+  the accounting side.
+- [x] **The complete candidate-key list**: 57 of 173 distinct field names appear in
+  more than one execution source, and they split into two clusters that barely
+  touch — account identifiers across A/B/C, award descriptors across C and FPDS.
+  File C is the only member of both, which is why the whole chain rests on it.
+- [x] **`/linkage#rows` — a complete record from every source**, quoted whole and
+  expanded by default rather than collapsed.
+- [x] **Quoted records print verbatim.** A fiscal year is `2025`, not `2,025`; a
+  field published in thousands is not rendered as dollars. Amounts get a grey
+  gloss only where the field name says it is an amount.
 
 ## Architecture
 

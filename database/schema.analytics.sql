@@ -805,6 +805,39 @@ CREATE TABLE IF NOT EXISTS dm_sfis_element (
   UNIQUE (load_id, element_name)
 );
 
+
+-- Complete example records, one per source. A column profile says a field
+-- exists; only a record shows what the data looks like.
+CREATE TABLE IF NOT EXISTS dm_source_row (
+  id           bigserial PRIMARY KEY,
+  load_id      bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  source_key   text NOT NULL,
+  source_label text NOT NULL,
+  row_label    text NOT NULL,
+  why          text NOT NULL,
+  record       text NOT NULL      -- the whole record, as JSON
+);
+
+-- One Treasury account followed through every file in chain order, so the step
+-- where the key disappears can be SEEN rather than described. is_present is
+-- false for a step the account does not reach -- which is the point of the
+-- table: 017-1506 (Aircraft Procurement, Navy, where the F-35 lines sit) is
+-- reported in File A with billions of obligations against it and has no row in
+-- File C at all, so there is nothing for an award to join to.
+CREATE TABLE IF NOT EXISTS dm_trace_row (
+  id           bigserial PRIMARY KEY,
+  load_id      bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  step         int NOT NULL,
+  source_key   text NOT NULL,
+  source_label text NOT NULL,
+  key_field    text NOT NULL,
+  key_value    text,
+  note         text NOT NULL,
+  is_present   boolean NOT NULL DEFAULT true,
+  record       text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dm_trace_row_idx ON dm_trace_row (load_id, step);
+
 -- --------------------------------------------------- oversight & knowledge --
 CREATE TABLE IF NOT EXISTS dm_audit_posture (
   id            bigserial PRIMARY KEY,

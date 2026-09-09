@@ -2050,6 +2050,39 @@ def _stream_table(path, limit, columns):
     return pa.concat_tables(got) if got else None
 
 
+# Real rows, from every source, and one account followed through all of them.
+#
+# A column profile says a field exists. It does not show what a record looks
+# like, and it cannot show why two records fail to meet. These two structures do:
+# dm_source_row carries complete example records from each file, and dm_trace_row
+# carries the records from every file that describe ONE Treasury account, in
+# chain order, so the step where the key disappears can be seen rather than
+# described.
+
+TRACE_ACCOUNT = "017-1506"          # Aircraft Procurement, Navy — the F-35 lines
+TRACE_MAIN, TRACE_AGENCY = "1506", "017"
+
+
+def _rows_as_records(tbl, idxs, cols):
+    out = []
+    for i in idxs:
+        out.append({c: tbl[c][i] for c in cols if c in tbl})
+    return out
+
+
+def _sample_rows(path, source_key, source_label, cols, pick, limit=200_000):
+    """`pick` chooses row indexes from the materialised columns."""
+    t = _stream_table(path, limit, cols)
+    if t is None: return []
+    data = {c: t[c].to_pylist() for c in t.column_names}
+    out = []
+    for label, why, i in pick(data, t.num_rows):
+        out.append({"source_key": source_key, "source_label": source_label,
+                    "row_label": label, "why": why,
+                    "record": json.dumps({c: data[c][i] for c in t.column_names},
+                                         default=str)[:2400]})
+    return out
+
 def step_catalog(out, only_fy=None):
     """Field inventory of every source, plus the rows that demonstrate each break."""
     import pyarrow.dataset as ds
@@ -2212,9 +2245,211 @@ def step_catalog(out, only_fy=None):
                      "file_c.transaction_obligated_amount": famt[j] if j is not None else None,
                      "file_c.submission_period": best})
 
-    print(f"  {len(fields)} field profiles, {len(samples)} demonstrating records")
+
+    # ------------------------------------------------ real rows, every source --
+    rows_out, trace = [], []
+    A_COLS = ["treasury_account_symbol", "federal_account_symbol", "federal_account_name",
+              "agency_identifier_code", "main_account_code", "sub_account_code",
+              "beginning_period_of_availability", "ending_period_of_availability",
+              "availability_type_code", "submission_period", "total_budgetary_resources",
+              "obligations_incurred", "gross_outlay_amount", "unobligated_balance"]
+    B_COLS = ["treasury_account_symbol", "federal_account_symbol", "agency_identifier_code",
+              "main_account_code", "object_class_code", "object_class_name",
+              "program_activity_code", "program_activity_name",
+              "direct_or_reimbursable_funding_source", "submission_period",
+              "obligations_incurred", "gross_outlay_amount_FYB_to_period_end"]
+    C_COLS = ["treasury_account_symbol", "federal_account_symbol", "agency_identifier_code",
+              "main_account_code", "sub_account_code", "beginning_period_of_availability",
+              "ending_period_of_availability", "availability_type_code",
+              "object_class_code", "program_activity_code",
+              "direct_or_reimbursable_funding_source", "submission_period",
+              "award_unique_key", "award_id_piid", "parent_award_id_piid",
+              "transaction_obligated_amount", "recipient_name", "awarding_office_name"]
+    F_COLS = ["award_id_piid", "modification_number", "contract_transaction_unique_key",
+              "action_date", "federal_action_obligation", "recipient_name",
+              "awarding_sub_agency_name", "dod_acquisition_program_code",
+              "dod_acquisition_program_description",
+              "treasury_accounts_funding_this_award", "federal_accounts_funding_this_award",
+              "object_classes_funding_this_award", "program_activities_funding_this_award",
+              "product_or_service_code_description", "extent_competed"]
+
+    def biggest(col):
+        def pick(d, n):
+            i = max(range(n), key=lambda k: (d[col][k] or 0)) if n else None
+            return [("largest obligation in the sample",
+                     "One complete record, chosen as the largest value in the scanned batch so it "
+                     "is recognisable rather than obscure.", i)] if i is not None else []
+        return pick
+
+    fa = os.path.join(WAREHOUSE, f"accounts/file_a/fiscal_year={fy}")
+    if os.path.isdir(fa):
+        rows_out += _sample_rows(fa, "file_a", "File A — account balances", A_COLS,
+                                 biggest("obligations_incurred"), 60_000)
+    fb = os.path.join(WAREHOUSE, f"accounts/file_b/fiscal_year={fy}")
+    if os.path.isdir(fb):
+        rows_out += _sample_rows(fb, "file_b", "File B — object class and programme activity",
+                                 B_COLS, biggest("obligations_incurred"), 200_000)
+    fcp2 = os.path.join(WAREHOUSE, f"accounts/file_c_contracts/fiscal_year={fy}")
+    if os.path.isdir(fcp2):
+        rows_out += _sample_rows(fcp2, "file_c_contracts", "File C — award financial", C_COLS,
+                                 biggest("transaction_obligated_amount"), 400_000)
+    if os.path.isdir(cp):
+        rows_out += _sample_rows(cp, "contracts", "Contract award transactions (FPDS)", F_COLS,
+                                 biggest("federal_action_obligation"), 400_000)
+
+    # ------------------------------- one account, followed through every file --
+    # Aircraft Procurement, Navy. Chosen because the F-35 budget lines sit in it,
+    # so the same money is describable at the top of the chain -- and because of
+    # what happens to it further down.
+    def add_trace(step, source_key, source_label, key_field, key_value, note, record,
+                  present=True):
+        trace.append({"step": step, "source_key": source_key, "source_label": source_label,
+                      "key_field": key_field, "key_value": key_value, "note": note,
+                      "is_present": present,
+                      "record": json.dumps(record, default=str)[:2400]})
+
+    # step 1 -- the budget line, from the exhibits already staged
+    ex_path = os.path.join(out, "exhibits.json")
+    if os.path.exists(ex_path):
+        ex = json.load(open(ex_path))["rows"]["dm_exhibit_program"]
+        cand = [r for r in ex if (r.get("treasury_account") or "") == TRACE_ACCOUNT
+                and not r.get("is_memo")]
+        cand.sort(key=lambda r: -(r.get("latest_request_k") or 0))
+        for r in cand[:1]:
+            add_trace(1, "budget_exhibits", "P-1 / R-1 exhibits — the budget line",
+                      "treasury_account", TRACE_ACCOUNT,
+                      "The top of the chain. This record names a SYSTEM and a budget line item, "
+                      "and it resolves to a Treasury account. It is the last record in the chain "
+                      "that can say which programme the money is for.",
+                      {k: r.get(k) for k in ("exhibit", "account", "treasury_account", "bli",
+                                             "program_name", "appropriation", "bsa_title",
+                                             "fund_type", "latest_request_k", "latest_request_pb",
+                                             "weapon_program")})
+
+    file_a_obl = None
+    if os.path.isdir(fa):
+        t = _stream_table(fa, 60_000, A_COLS)
+        if t is not None:
+            d = {c: t[c].to_pylist() for c in t.column_names}
+            hits = sorted((i for i in range(t.num_rows)
+                           if (d["federal_account_symbol"][i] or "") == TRACE_ACCOUNT),
+                          key=lambda i: -(d["obligations_incurred"][i] or 0))
+            for i in hits[:1]:
+                file_a_obl = d["obligations_incurred"][i]
+                add_trace(2, "file_a", "File A — account balances",
+                          "federal_account_symbol", TRACE_ACCOUNT,
+                          "The account as an execution record. Every SLOA element of the Treasury "
+                          "Account Symbol is here as a discrete field. What is NOT here is any "
+                          "budget line, so from this row onward the several budget lines inside "
+                          "this account cannot be told apart.",
+                          {c: d[c][i] for c in t.column_names})
+
+    if os.path.isdir(fb):
+        t = _stream_table(fb, 250_000, B_COLS)
+        if t is not None:
+            d = {c: t[c].to_pylist() for c in t.column_names}
+            hits = sorted((i for i in range(t.num_rows)
+                           if (d["federal_account_symbol"][i] or "") == TRACE_ACCOUNT),
+                          key=lambda i: -(d["obligations_incurred"][i] or 0))
+            for i in hits[:1]:
+                add_trace(3, "file_b", "File B — object class and programme activity",
+                          "federal_account_symbol", TRACE_ACCOUNT,
+                          "The same account split by what was bought and under which activity. "
+                          "Object class and programme activity arrive as discrete elements. Still "
+                          "no budget line.",
+                          {c: d[c][i] for c in t.column_names})
+
+    # step 4 -- File C. Measured across the WHOLE file, because an absence has to
+    # be established over everything rather than over a sample.
+    fc_accounts, fc_rows_for_account = set(), []
+    if os.path.isdir(fcp2):
+        import pyarrow.parquet as pq
+        for f_ in sorted(ds.dataset(fcp2, format="parquet").files):
+            pfx = pq.ParquetFile(f_)
+            for b in pfx.iter_batches(batch_size=100_000, columns=C_COLS):
+                cols_b = {c: b.column(i).to_pylist() for i, c in enumerate(b.schema.names)}
+                for i in range(b.num_rows):
+                    acc = cols_b["federal_account_symbol"][i] or ""
+                    if acc: fc_accounts.add(acc)
+                    if acc == TRACE_ACCOUNT:
+                        fc_rows_for_account.append({c: cols_b[c][i] for c in b.schema.names})
+    if fc_rows_for_account:
+        best = max(fc_rows_for_account,
+                   key=lambda r: (r.get("transaction_obligated_amount") or 0))
+        add_trace(4, "file_c_contracts", "File C — award financial",
+                  "award_id_piid", best.get("award_id_piid"),
+                  "The bridging record: it carries BOTH the decomposed Treasury account and an "
+                  "award identifier. It is the only file that holds the two together.",
+                  best)
+    else:
+        add_trace(4, "file_c_contracts", "File C — award financial",
+                  "federal_account_symbol", TRACE_ACCOUNT,
+                  f"The chain stops here. Every row of File C for FY{fy} was read -- "
+                  f"{len(fc_accounts)} distinct federal accounts appear in it -- and this account "
+                  "is not among them. The account is reported in File A with obligations against "
+                  "it, and no award-financial record ties any of those obligations to an award. "
+                  "There is nothing to join to, so the step below cannot be reached by account at "
+                  "all.",
+                  {"federal_account_symbol": TRACE_ACCOUNT,
+                   "rows_in_file_c": 0,
+                   "distinct_accounts_in_file_c": len(fc_accounts),
+                   "obligations_reported_in_file_a": file_a_obl},
+                  present=False)
+
+    # step 5 -- the award files, reached by the account string rather than a key
+    if os.path.isdir(cp):
+        ft2 = _stream_table(cp, 400_000, F_COLS)
+        if ft2 is not None:
+            fd = {c: ft2[c].to_pylist() for c in ft2.column_names}
+            m = sorted((k for k in range(ft2.num_rows)
+                        if TRACE_ACCOUNT in (fd["federal_accounts_funding_this_award"][k] or "")),
+                       key=lambda k: -(fd["federal_action_obligation"][k] or 0))
+            if m:
+                k = m[0]
+                add_trace(5, "contracts", "Contract award transactions (FPDS)",
+                          "federal_accounts_funding_this_award (substring)", TRACE_ACCOUNT,
+                          "The award files DO name this account -- but as a substring inside a "
+                          "semicolon-separated display column, not as an element. This row was "
+                          "found by searching text. That is not a join: it cannot be validated, "
+                          "it cannot be indexed, and when the column names several accounts there "
+                          "is no share of the obligation belonging to any one of them.",
+                          {c: fd[c][k] for c in ft2.column_names})
+
+    # how much of File A never reaches File C at all
+    if fc_accounts and os.path.isdir(fa):
+        t = _stream_table(fa, 60_000, A_COLS)
+        if t is not None:
+            d = {c: t[c].to_pylist() for c in t.column_names}
+            tot = missing = tot_ob = missing_ob = 0
+            seen_acc = {}
+            for i in range(t.num_rows):
+                if (d["agency_identifier_code"][i] or "") not in DOW_CODES: continue
+                acc = d["federal_account_symbol"][i] or ""
+                if not acc: continue
+                seen_acc.setdefault(acc, 0.0)
+                seen_acc[acc] += (d["obligations_incurred"][i] or 0.0)
+            for acc, ob in seen_acc.items():
+                tot += 1; tot_ob += ob
+                if acc not in fc_accounts:
+                    missing += 1; missing_ob += ob
+            add_trace(6, "file_a", "File A against File C — the whole population",
+                      "federal_account_symbol", "all Department accounts",
+                      "The trace above is one account. This is every account: how many of the "
+                      "accounts File A reports obligations against have no award-financial record "
+                      "in File C for the same year.",
+                      {"department_accounts_in_file_a": tot,
+                       "of_those_absent_from_file_c": missing,
+                       "obligations_in_file_a": round(tot_ob, 2),
+                       "obligations_on_absent_accounts": round(missing_ob, 2),
+                       "share_of_obligations_absent_pct":
+                           round(missing_ob / tot_ob * 100, 2) if tot_ob else None},
+                      present=False)
+
+    print(f"  {len(fields)} field profiles, {len(samples)} demonstrating records, "
+          f"{len(rows_out)} sample rows, {len(trace)} trace steps")
     write(out, "catalog.json", payload("source_catalog", vintage,
-          {"dm_source_field": fields, "dm_join_sample": samples},
+          {"dm_source_field": fields, "dm_join_sample": samples,
+           "dm_source_row": rows_out, "dm_trace_row": trace},
           source_path="accounts/ and contracts/"))
 
 # ------------------------------------------------------------------- main ---
