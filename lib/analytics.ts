@@ -121,13 +121,19 @@ export async function getScopeComparison(): Promise<{
 export interface ObligationStage {
   fiscalYear: number; obligationsIncurred: number; undeliveredOrdersUnpaid: number;
   deliveredOrdersUnpaid: number; grossOutlays: number; deobligations: number;
+  /** The File B submission the row was read at, so a comparison can name it. */
+  submissionPeriod: string | null;
+  /** Rows that repeated a figure published against another activity, counted once. */
+  replicatedRows: number | null;
 }
 export async function getObligationStages(): Promise<ObligationStage[]> {
   return query<ObligationStage>(
     `SELECT fiscal_year AS "fiscalYear", obligations_incurred AS "obligationsIncurred",
             undelivered_orders_unpaid AS "undeliveredOrdersUnpaid",
             delivered_orders_unpaid AS "deliveredOrdersUnpaid",
-            gross_outlays AS "grossOutlays", deobligations
+            gross_outlays AS "grossOutlays", deobligations,
+            submission_period AS "submissionPeriod",
+            replicated_rows AS "replicatedRows"
        FROM dm_obligation_stage s JOIN dm_load l ON l.id = s.load_id AND l.is_current
       WHERE scope = $1 ORDER BY fiscal_year`, [SCOPE_DOW]);
 }
@@ -1334,6 +1340,57 @@ export async function getFilecSpread() {
             max(period_no) FILTER (WHERE is_chosen) AS "chosenPeriod",
             max(pct) FILTER (WHERE is_chosen) AS "chosenPct"
        FROM k GROUP BY 1 ORDER BY 1`);
+}
+
+/**
+ * File B's grain, year by year, and what the FY2026 key change cost.
+ *
+ * Through FY2025 a File B row is identified by its program activity code. From
+ * the FY2026 P09 submission that column is null on every row and the Program
+ * Activity Reporting Key carries the identity instead — and where an account
+ * holds several PARKs the extract repeats the account's object-class figure
+ * against each one rather than splitting it. This is what that is worth.
+ */
+export async function getFilebGrain() {
+  return query<{ fiscalYear: number; activityKey: string; sourceRows: number;
+                 grainRows: number; replicatedGroups: number; replicatedRows: number;
+                 asPublished: number; atGrain: number; overstatementPct: number;
+                 submissionPeriod: string | null }>(
+    `SELECT g.fiscal_year AS "fiscalYear", g.activity_key AS "activityKey",
+            g.source_rows AS "sourceRows", g.grain_rows AS "grainRows",
+            g.replicated_groups AS "replicatedGroups", g.replicated_rows AS "replicatedRows",
+            g.obligations_as_published AS "asPublished", g.obligations_at_grain AS "atGrain",
+            g.overstatement_pct AS "overstatementPct",
+            o.submission_period AS "submissionPeriod"
+       FROM dm_fileb_grain g
+       JOIN dm_load l ON l.id = g.load_id AND l.is_current
+       LEFT JOIN dm_obligation_stage o
+              ON o.fiscal_year = g.fiscal_year AND o.scope = g.scope
+       LEFT JOIN dm_load lo ON lo.id = o.load_id AND lo.is_current
+      WHERE g.scope = 'DOW'
+      ORDER BY g.fiscal_year`);
+}
+
+/**
+ * File A's obligations beside File B's, for the years both files cover.
+ *
+ * The two are separate submissions of the same execution at different grain, so
+ * they are expected to differ a little and not to differ much. Naming both is
+ * what makes the FY2026 key change legible as an artefact rather than a fall.
+ */
+export async function getFileAB() {
+  return query<{ fiscalYear: number; fileA: number; fileB: number;
+                 periodA: string | null; periodB: string | null }>(
+    `SELECT a.fiscal_year AS "fiscalYear", a.obligations_incurred AS "fileA",
+            b.obligations_incurred AS "fileB",
+            a.submission_period AS "periodA", b.submission_period AS "periodB"
+       FROM dm_sbr_fy a
+       JOIN dm_load la ON la.id = a.load_id AND la.is_current
+       JOIN dm_obligation_stage b
+              ON b.fiscal_year = a.fiscal_year AND b.scope = a.scope
+       JOIN dm_load lb ON lb.id = b.load_id AND lb.is_current
+      WHERE a.scope = 'DOW'
+      ORDER BY a.fiscal_year`);
 }
 
 /** The memo rows the exhibits publish and every total on this site excludes. */

@@ -29,6 +29,16 @@ export default async function ExecutionPage() {
     getObjectClasses(latest.fiscalYear), getSbrDim(latest.fiscalYear, 'agency', 6),
   ]);
   const stage = stages.find((s) => s.fiscalYear === latest.fiscalYear);
+  // Counted rather than asserted: how many years actually miss TIE-01's
+  // tolerance, so the note below cannot drift away from the table under it.
+  const tie = sbr.map((a) => {
+    const b = stages.find((s) => s.fiscalYear === a.fiscalYear);
+    const d = (b?.obligationsIncurred ?? 0) - a.obligationsIncurred;
+    return { fiscalYear: a.fiscalYear,
+             pct: a.obligationsIncurred ? Math.abs(d) / a.obligationsIncurred * 100 : 0 };
+  });
+  const tieOff = tie.filter((t) => t.pct > 0.5);
+  const repaired = stages.filter((s) => Number(s.replicatedRows ?? 0) > 0);
   const award = awards.find((a) => a.fiscalYear === latest.fiscalYear);
   const scopeRow = scope.find((s) => s.fiscalYear === latest.fiscalYear);
 
@@ -114,7 +124,7 @@ export default async function ExecutionPage() {
       </Section>
 
       <Section title="A cross-system reconciliation that does not tie"
-        note="File A and File B are separate submissions of the same execution, at different grain and with the same submission period. They should agree closely. In two of six years they do not, and that variance is published rather than hidden.">
+        note={`File A and File B are separate submissions of the same execution, at different grain and read here at the same submission period. They should agree closely. In ${tieOff.length} of ${tie.length} years they do not, and that variance is published rather than hidden.`}>
         <DataTable
           head={['Fiscal year', 'File A obligations', 'File B obligations', 'Variance', 'Variance %']}
           rows={sbr.map((a) => {
@@ -127,6 +137,21 @@ export default async function ExecutionPage() {
           })}
           caption="Control TIE-01 tests this at a 0.5% tolerance and reports rather than blocks: a genuine divergence between two source submissions is a finding to publish, not a reason to withhold the data."
         />
+        {repaired.length ? (
+          <Caveat>
+            The File B column is not a plain sum for{' '}
+            {repaired.map((r) => `FY${r.fiscalYear}`).join(', ')}. From FY
+            {repaired[0].fiscalYear} the file identifies a program activity by reporting key rather
+            than by code, and where an account holds several keys it repeats the account&rsquo;s
+            object-class figure against each one instead of splitting it — {fmtInt(
+              repaired.reduce((s, r) => s + Number(r.replicatedRows ?? 0), 0))} rows in all. Summed
+            as the file publishes them those rows run about a third above File A; the figure here
+            counts each repeated group once, which is what brings it back into line. The break is
+            set out in full on{' '}
+            <a href="/linkage#fileb" className="text-accent-400 hover:underline">linkage</a>, and
+            control FILEB-01 fails while any repeated row remains.
+          </Caveat>
+        ) : null}
         <div className="mt-4"><ProvenanceBar p={provB} /></div>
       </Section>
 

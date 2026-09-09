@@ -11,7 +11,8 @@ import {
   getAllProvenance, getSeams, getFilecPeriods, getFilecSpread, getScopeComparison,
   getMemoWeight, getVintageDrift, getProgramCoverage, getControls, getKbInventory,
   getSourceFields, getSourceSummary, getJoinSamples, getSfisCoverage, getSfisBySource,
-  getLineage, getSourceRows, getTrace, getSharedElements, isLoaded,
+  getLineage, getSourceRows, getTrace, getSharedElements, getFilebGrain, getFileAB,
+  isLoaded,
 } from '@/lib/analytics';
 import { NotLoaded } from '../execution/page';
 
@@ -145,8 +146,8 @@ export default async function LinkagePage() {
       getSourceFields(), getSourceSummary(), getJoinSamples(), getSfisCoverage(),
       getSfisBySource(), getLineage(),
     ]);
-  const [sourceRows, trace, shared] = await Promise.all([
-    getSourceRows(), getTrace(), getSharedElements(),
+  const [sourceRows, trace, shared, fbGrain, fileAB] = await Promise.all([
+    getSourceRows(), getTrace(), getSharedElements(), getFilebGrain(), getFileAB(),
   ]);
 
   // What the contract file shares, and with what. Computed rather than asserted:
@@ -180,6 +181,17 @@ export default async function LinkagePage() {
     .filter((n): n is number => n != null).sort((a, b) => a - b);
   const widest = [...spread].filter((s) => s.snapshots > 1)
     .sort((a, b) => (Number(b.hi) / Number(b.lo)) - (Number(a.hi) / Number(a.lo)))[0];
+
+  // ---- File B: the year the activity key changed ---------------------------
+  // The break is defined by the data, not by a hard-coded year: the affected
+  // years are the ones the extract found rows repeated in. If a later
+  // submission fixes the split, this section empties itself.
+  const fbBroken = fbGrain.filter((g) => Number(g.replicatedRows) > 0);
+  const fbWorst = [...fbBroken].sort((a, b) =>
+    Number(b.overstatementPct) - Number(a.overstatementPct))[0];
+  const fbKeyChange = fbGrain.find((g) => g.activityKey === 'program_activity_reporting_key');
+  const fbLastCode = [...fbGrain].reverse()
+    .find((g) => g.activityKey === 'program_activity_code');
 
   // ---- the scope trap, at its largest -------------------------------------
   const worstScope = [...scope].sort((a, b) =>
@@ -223,6 +235,9 @@ export default async function LinkagePage() {
             ['#graph', 'The elements, and what they join', `${shared.length} shared`],
             ['#rows', 'A record from every source', `${sourceRows.length} quoted whole`],
             ['#filec', 'File C, in depth', 'the 8× spread'],
+            ['#fileb', 'File B changed its key', fbWorst
+              ? `FY${fbWorst.fiscalYear} reads ${Number(fbWorst.overstatementPct).toFixed(0)}% high`
+              : 'no rows repeated'],
             ['#narrowing', 'The seam that is narrowing', 'contracts to accounts'],
             ['#flow', 'The flow and the hierarchy', `${lineage.length} datasets`],
             ['#sfis', 'The standard: SFIS and SLOA', `${sfisCarried} of ${sfis.length} elements`],
@@ -600,6 +615,167 @@ export default async function LinkagePage() {
             ? <><Link href="/controls" className="underline">FILEC-02</Link> measures the size of
               that choice each year and reports a spread wider than a factor of two as a finding.
               It must never be satisfied by narrowing the series until the spread closes.</>
+            : null}
+        </Caveat>
+      </Section>
+
+      {/* ================================= File B changed its identifier === */}
+      <Section id="fileb"
+        title="File B: the year the program activity stopped having a code"
+        note="File C's seam is a choice between copies. File B's is different in kind — the file changed the column that identifies a program activity, and the first submission under the new key does not split the money across it. Read as published, the Department obligated more in nine months of FY2026 than in all of FY2025. It did not.">
+        {fbKeyChange ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatTile label="Identifier through FY2025"
+                value={fbLastCode ? `FY${fbLastCode.fiscalYear}` : '—'}
+                sub="program_activity_code, populated on every row" />
+              <StatTile label="Identifier from FY2026"
+                value={`FY${fbKeyChange.fiscalYear}`} tone="accent"
+                sub={`program_activity_reporting_key — the old column is null on all ${fmtInt(Number(fbKeyChange.sourceRows))} rows`} />
+              <StatTile label="Rows repeating a figure already published"
+                value={fmtInt(Number(fbKeyChange.replicatedRows))} tone="warning"
+                sub={`across ${fmtInt(Number(fbKeyChange.replicatedGroups))} account and object-class groups, of ${fmtInt(Number(fbKeyChange.sourceRows))} rows`} />
+              <StatTile label="Overstatement if added up as published"
+                value={`${Number(fbKeyChange.overstatementPct).toFixed(1)}%`} tone="warning"
+                sub={`${fmtB(Number(fbKeyChange.asPublished))} against ${fmtB(Number(fbKeyChange.atGrain))} at the file's real grain`} />
+            </div>
+
+            <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-10">
+              <div className="text-sm text-navy-300 leading-relaxed space-y-4">
+                <p>
+                  <strong className="text-navy-100">What changed.</strong> Through FY
+                  {fbLastCode?.fiscalYear ?? 2025} every File B row names a program activity code.
+                  In the FY{fbKeyChange.fiscalYear}{' '}
+                  {fbKeyChange.submissionPeriod
+                    ? fbKeyChange.submissionPeriod.replace(/^FY\d+/, 'period ').replace('P', '')
+                    : ''}{' '}
+                  submission that column is null on every row and the Program Activity Reporting
+                  Key carries the identity instead. That much is a documented change of standard,
+                  not a defect.
+                </p>
+                <p>
+                  <strong className="text-navy-100">What went wrong with it.</strong> Where an
+                  account holds several keys, the file repeats the account&rsquo;s object-class
+                  figure verbatim against each one rather than splitting it between them. Account
+                  017-2026/2030-1612-000 publishes the same $7,384,996,196.00 against object class
+                  31.0 under four different keys. Adding the rows up counts the money once per key.
+                </p>
+                <p>
+                  <strong className="text-navy-100">How that shows up.</strong> Summed as
+                  published, Department-wide obligations for FY{fbKeyChange.fiscalYear} come to{' '}
+                  {fmtB(Number(fbKeyChange.asPublished))} — above the whole of FY
+                  {fbLastCode?.fiscalYear ?? 2025} on nine months of data, and{' '}
+                  {Number(fbKeyChange.overstatementPct).toFixed(1)}% above what File A reports for
+                  the same accounts in the same period. A reader with no reason to doubt the file
+                  would have read that as a surge in spending.
+                </p>
+                <p>
+                  <strong className="text-navy-100">What this site does about it.</strong> File B
+                  is aggregated at its real grain — Treasury account, object class, direct or
+                  reimbursable, emergency fund code — and a group whose rows differ only by
+                  reporting key and repeat one figure counts once. The rule requires the old code
+                  column to be null across the whole group, which is true only of FY
+                  {fbKeyChange.fiscalYear}: it collapses nothing at all in FY
+                  {fbGrain[0]?.fiscalYear}–{fbLastCode?.fiscalYear ?? 2025}, where two activities
+                  may legitimately report the same amount and the code still tells them apart.
+                </p>
+                <p>
+                  <strong className="text-navy-100">What it does not fix.</strong> The money is
+                  now counted once, but it is not attributed. The FY{fbKeyChange.fiscalYear} file
+                  does not say how an account&rsquo;s obligations divide between its reporting
+                  keys, so File B answers &ldquo;how much&rdquo; for that year and no longer
+                  answers &ldquo;on what activity&rdquo;. Object class survives; program activity
+                  does not. The gross outlay column is also only partly repaired by this — it
+                  disagrees between copies of the same row, and remains about three per cent above
+                  File A after the collapse.
+                </p>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-navy-200 mb-4">
+                  File A and File B, the same accounts and the same submission
+                </h3>
+                <DataTable
+                  align={[]}
+                  caption="File A reports the account; File B reports the same account broken out by object class and program activity. They are separate submissions and are expected to differ a little. Every year but the last differs by under two per cent. The last is the key change, and the final column is what this site publishes after counting each repeated group once."
+                  head={['Fiscal year', 'File A', 'File B as published', 'Variance', 'File B at grain']}
+                  rows={fileAB.map((r) => {
+                    const g = fbGrain.find((x) => x.fiscalYear === r.fiscalYear);
+                    const pub = g ? Number(g.asPublished) : Number(r.fileB);
+                    const v = (pub - Number(r.fileA)) / Number(r.fileA) * 100;
+                    const fixed = (Number(r.fileB) - Number(r.fileA)) / Number(r.fileA) * 100;
+                    return [
+                      <span key={`${r.fiscalYear}-y`}>
+                        FY{r.fiscalYear}
+                        <span className="block text-[11px] text-navy-500">
+                          {r.periodA === r.periodB ? r.periodA : `A ${r.periodA} · B ${r.periodB}`}
+                        </span>
+                      </span>,
+                      fmtB(Number(r.fileA)),
+                      <span key={`${r.fiscalYear}-p`}
+                        className={Math.abs(v) > 5 ? 'text-amber-300' : undefined}>
+                        {fmtB(pub)}
+                      </span>,
+                      <span key={`${r.fiscalYear}-v`}
+                        className={Math.abs(v) > 5 ? 'text-amber-300' : 'text-navy-400'}>
+                        {v > 0 ? '+' : ''}{v.toFixed(1)}%
+                      </span>,
+                      <span key={`${r.fiscalYear}-f`} className="text-accent-300">
+                        {fmtB(Number(r.fileB))}
+                        <span className="block text-[11px] text-navy-500 font-normal">
+                          {fixed > 0 ? '+' : ''}{fixed.toFixed(2)}% vs File A
+                        </span>
+                      </span>,
+                    ];
+                  })} />
+
+                <h3 className="text-sm font-semibold text-navy-200 mt-8 mb-4">
+                  Rows published against distinct rows of data
+                </h3>
+                <DataTable
+                  align={[1]}
+                  caption="Grain rows are the distinct combinations of Treasury account, object class, funding source and emergency fund code. Through FY2025 several rows share one of those combinations because they are genuinely different program activities. In FY2026 they share it because the same figure was published against several reporting keys."
+                  head={['Fiscal year', 'Activity identified by', 'Rows', 'Distinct at grain', 'Repeated']}
+                  rows={fbGrain.map((g) => [
+                    `FY${g.fiscalYear}`,
+                    <span key={`${g.fiscalYear}-k`}
+                      className={g.activityKey === 'program_activity_reporting_key'
+                        ? 'text-amber-300' : 'text-navy-300'}>
+                      <code className="text-[11px]">{g.activityKey}</code>
+                    </span>,
+                    fmtInt(Number(g.sourceRows)),
+                    fmtInt(Number(g.grainRows)),
+                    Number(g.replicatedRows) === 0
+                      ? <span key={`${g.fiscalYear}-r`} className="text-navy-600">none</span>
+                      : <span key={`${g.fiscalYear}-r`} className="text-amber-300">
+                          {fmtInt(Number(g.replicatedRows))}
+                          <span className="block text-[11px] text-navy-500 font-normal">
+                            in {fmtInt(Number(g.replicatedGroups))} groups
+                          </span>
+                        </span>,
+                  ])} />
+              </div>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-navy-400">
+            Every File B year held identifies its program activity by code, and no row repeats a
+            figure published against another activity. This section describes a break that the
+            current extract does not find.
+          </p>
+        )}
+
+        <Caveat>
+          {ctl('FILEB-01')
+            ? <><Link href="/controls" className="underline">FILEB-01</Link> counts the repeated
+              rows and fails while any remain, so the repair stays visible rather than becoming an
+              assumption. It is not satisfied by the extract having handled it — only by a
+              submission that splits the money across its keys. </>
+            : null}
+          {ctl('TIE-01')
+            ? <><Link href="/controls" className="underline">TIE-01</Link> compares the two files
+              and now reads the submission period off both rather than asserting in prose that
+              they match.</>
             : null}
         </Caveat>
       </Section>

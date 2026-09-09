@@ -180,40 +180,140 @@ def major_class(code: str) -> str:
 FILE_B_COLS = ["agency_identifier_code","object_class_code","object_class_name",
   "obligations_incurred","obligations_undelivered_orders_unpaid_total",
   "obligations_delivered_orders_unpaid_total","gross_outlay_amount_FYB_to_period_end",
-  "deobligations_or_recoveries_or_refunds_from_prior_year","submission_period"]
+  "deobligations_or_recoveries_or_refunds_from_prior_year","submission_period",
+  # The grain columns. They are not summed; they are what tells a genuine second
+  # row apart from the same row published twice - see _fileb_grain below.
+  "treasury_account_symbol","direct_or_reimbursable_funding_source",
+  "disaster_emergency_fund_code","program_activity_code",
+  "program_activity_reporting_key"]
+
+# File B's measures, and the name each one carries in the stage row.
+FILE_B_MEASURES = [
+  ("obligations_incurred",                                  "obligations_incurred"),
+  ("obligations_undelivered_orders_unpaid_total",            "undelivered_orders_unpaid"),
+  ("obligations_delivered_orders_unpaid_total",              "delivered_orders_unpaid"),
+  ("gross_outlay_amount_FYB_to_period_end",                  "gross_outlays"),
+  ("deobligations_or_recoveries_or_refunds_from_prior_year", "deobligations"),
+]
+
+# ---------------------------------------------------------------------------
+# File B changed its program-activity identifier in FY2026. Through FY2025 a row
+# is identified by program_activity_code; from the FY2026 P09 submission that
+# column is null on every row and the Program Activity Reporting Key (PARK)
+# carries the identity instead.
+#
+# The transition was not made cleanly. Where an account has several PARKs, the
+# FY2026 extract repeats the account's object-class figure verbatim against each
+# one rather than splitting it - 017-2026/2030-1612-000 publishes the same
+# $7,384,996,196.00 against object class 31.0 under four different PARKs. Adding
+# the rows up therefore counts the money once per PARK: Department-wide
+# obligations come to $1,652.9B against File A's $1,225.0B, 34.9% too high, and
+# that is what TIE-01 was failing on.
+#
+# So File B is aggregated at its real grain - account, object class, direct or
+# reimbursable, emergency fund - and a group whose rows differ only by PARK and
+# repeat one figure counts once. The rule is deliberately narrow: it needs every
+# row in the group to have a null program_activity_code, which is true only of
+# the FY2026 partition, so FY2021-25 pass through untouched (measured: zero rows
+# collapsed in any of them). Two program activities in those years may legitimately
+# report equal amounts, and there the code still distinguishes them.
+# ---------------------------------------------------------------------------
+def _fileb_grain(c, rows):
+    """Group File B row indices by account/object class/funding source/DEFC.
+
+    Returns (groups, replicated) where groups maps the grain key to its row
+    indices and replicated is the subset of those keys where the rows differ
+    only by PARK and publish one repeated obligation figure.
+    """
+    groups, replicated = collections.OrderedDict(), set()
+    for i in rows:
+        k = (str(c["treasury_account_symbol"][i] or ""),
+             str(c["object_class_code"][i] or "??"),
+             str(c["direct_or_reimbursable_funding_source"][i] or ""),
+             str(c["disaster_emergency_fund_code"][i] or ""))
+        groups.setdefault(k, []).append(i)
+    for k, idx in groups.items():
+        if len(idx) < 2: continue
+        if any(c["program_activity_code"][i] not in (None, "") for i in idx): continue
+        if any(c["program_activity_reporting_key"][i] in (None, "") for i in idx): continue
+        if len({round(c["obligations_incurred"][i] or 0.0, 2) for i in idx}) == 1:
+            replicated.add(k)
+    return groups, replicated
+
+def _fileb_value(c, idx, col, is_replicated):
+    """One group's contribution to a measure.
+
+    A replicated group is one published row repeated, so it contributes that row
+    once - the modal value, because the FY2026 extract is not even self-consistent
+    across the copies (the gross outlay column disagrees on a minority of them).
+    Any other group is a genuine split and is summed.
+    """
+    vals = [round(c[col][i] or 0.0, 2) for i in idx]
+    if not is_replicated: return sum(vals)
+    return collections.Counter(vals).most_common(1)[0][0]
 
 def step_obligations(out):
     import pyarrow.dataset as ds
     base = os.path.join(WAREHOUSE, "accounts/file_b")
     vintage = mtime_date(base)
-    stage_rows, oc_rows = [], []
+    stage_rows, oc_rows, grain_rows = [], [], []
     for fy in FY_RANGE:
         p = os.path.join(base, f"fiscal_year={fy}")
         if not os.path.isdir(p): continue
         t = ds.dataset(p, format="parquet").to_table(columns=FILE_B_COLS)
         c = {k: t[k].to_pylist() for k in FILE_B_COLS}
+        rows = [i for i in range(t.num_rows)
+                if (c["agency_identifier_code"][i] or "") in DOW_CODES]
+        groups, replicated = _fileb_grain(c, rows)
+
         agg = collections.defaultdict(float)
-        oc  = collections.defaultdict(lambda: collections.defaultdict(float))
+        oc  = collections.defaultdict(float)
         ocn = {}
-        for i in range(t.num_rows):
-            if (c["agency_identifier_code"][i] or "") not in DOW_CODES: continue
-            agg["obligations_incurred"]      += (c["obligations_incurred"][i] or 0.0)
-            agg["undelivered_orders_unpaid"] += (c["obligations_undelivered_orders_unpaid_total"][i] or 0.0)
-            agg["delivered_orders_unpaid"]   += (c["obligations_delivered_orders_unpaid_total"][i] or 0.0)
-            agg["gross_outlays"]             += (c["gross_outlay_amount_FYB_to_period_end"][i] or 0.0)
-            agg["deobligations"]             += (c["deobligations_or_recoveries_or_refunds_from_prior_year"][i] or 0.0)
-            k = str(c["object_class_code"][i] or "??")
-            ocn[k] = str(c["object_class_name"][i] or k)
-            oc[k]["obligations"] += (c["obligations_incurred"][i] or 0.0)
-        stage_rows.append({"fiscal_year": fy, "scope": "DOW", **{k: round(v,2) for k,v in agg.items()}})
-        for rank,(k,m) in enumerate(sorted(oc.items(), key=lambda kv:-kv[1]["obligations"])[:25],1):
-            oc_rows.append({"fiscal_year": fy, "scope":"DOW", "object_class_code": k,
+        raw_obl = sum(c["obligations_incurred"][i] or 0.0 for i in rows)
+        collapsed = 0
+        for k, idx in groups.items():
+            rep = k in replicated
+            if rep: collapsed += len(idx) - 1
+            for col, name in FILE_B_MEASURES:
+                agg[name] += _fileb_value(c, idx, col, rep)
+            ock = k[1]
+            ocn.setdefault(ock, str(c["object_class_name"][idx[0]] or ock))
+            oc[ock] += _fileb_value(c, idx, "obligations_incurred", rep)
+
+        # One period per fiscal year is the shape of this extract; if that ever
+        # stops being true the period is recorded as ambiguous rather than
+        # quietly labelled with one of them, because TIE-01 asserts on it.
+        periods = sorted({c["submission_period"][i] for i in rows if c["submission_period"][i]})
+        stage_rows.append({
+            "fiscal_year": fy, "scope": "DOW",
+            **{k: round(v, 2) for k, v in agg.items()},
+            "submission_period": periods[0] if len(periods) == 1 else None,
+            "periods_available": len(periods),
+            "source_rows": len(rows), "grain_rows": len(groups),
+            "replicated_rows": collapsed,
+        })
+        grain_rows.append({
+            "fiscal_year": fy, "scope": "DOW",
+            "source_rows": len(rows), "grain_rows": len(groups),
+            "replicated_groups": len(replicated), "replicated_rows": collapsed,
+            "activity_key": "program_activity_reporting_key"
+                if all(c["program_activity_code"][i] in (None, "") for i in rows)
+                else "program_activity_code",
+            "obligations_as_published": round(raw_obl, 2),
+            "obligations_at_grain": round(agg["obligations_incurred"], 2),
+            "overstatement_pct": round(
+                (raw_obl - agg["obligations_incurred"]) / max(1.0, abs(agg["obligations_incurred"])) * 100, 4),
+        })
+        for rank, (k, v) in enumerate(sorted(oc.items(), key=lambda kv: -kv[1])[:25], 1):
+            oc_rows.append({"fiscal_year": fy, "scope": "DOW", "object_class_code": k,
                             "object_class_name": ocn[k], "major_class": major_class(k),
-                            "obligations": round(m["obligations"],2), "rank_in_fy": rank})
+                            "obligations": round(v, 2), "rank_in_fy": rank})
+        note = f", {collapsed:,} PARK-replicated rows counted once" if collapsed else ""
         print(f"  FY{fy}: obligations {agg['obligations_incurred']/1e9:.1f}B, "
-              f"UDO {agg['undelivered_orders_unpaid']/1e9:.1f}B")
+              f"UDO {agg['undelivered_orders_unpaid']/1e9:.1f}B{note}")
     write(out, "obligations.json", payload("file_b_obligations", vintage,
-          {"dm_obligation_stage": stage_rows, "dm_object_class": oc_rows},
+          {"dm_obligation_stage": stage_rows, "dm_object_class": oc_rows,
+           "dm_fileb_grain": grain_rows},
           source_path="accounts/file_b"))
 
 # -------------------------------------------------------------- contracts ---

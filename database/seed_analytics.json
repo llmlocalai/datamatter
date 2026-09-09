@@ -172,6 +172,15 @@
       "sort_order": 40
     },
     {
+      "code": "FILEB-01",
+      "name": "File B rows are distinct program activities",
+      "assertion": "No File B row repeats an obligation figure already published against another program activity for the same Treasury account, object class, funding source and emergency fund code.",
+      "rationale": "File B's activity identifier changed from program_activity_code to the Program Activity Reporting Key in FY2026 and the account's object-class figure is repeated against every PARK rather than split across them. Added up as published it counts the same money once per key. The extract counts a replicated group once; this control reports how many rows that was and what it was worth, so the repair is published rather than assumed.",
+      "authority": "OMB Circular A-11 program activity reporting; Treasury USAspending File B specification",
+      "severity": "high",
+      "sort_order": 45
+    },
+    {
       "code": "SCOPE-01",
       "name": "Department scope excludes non-Department agencies",
       "assertion": "No DOW-scope figure includes agency identifier code 011.",

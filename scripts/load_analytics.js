@@ -103,18 +103,56 @@ const CONTROLS = {
     fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
     status: Number(r.observed) <= Number(r.expected) ? 'pass' : 'fail',
     message: `FY${r.fiscal_year}: gross outlays are ${(r.observed / r.expected * 100).toFixed(1)}% of total budgetary resources.` })),
+  // The assertion names a submission period, so the control has to read one.
+  // It used to join on fiscal year and scope alone and then assert "same
+  // submission period" in prose -- true, as it happened, but nothing here
+  // checked it. A period mismatch now fails the control on its own terms
+  // rather than showing up as an unexplained variance.
   'TIE-01': async (c) => (await c.query(`
-    SELECT a.fiscal_year, a.obligations_incurred AS expected, b.obligations_incurred AS observed
+    SELECT a.fiscal_year, a.obligations_incurred AS expected, b.obligations_incurred AS observed,
+           a.submission_period AS period_a, b.submission_period AS period_b,
+           b.periods_available, b.replicated_rows
       FROM dm_sbr_fy a
       JOIN dm_load la ON la.id=a.load_id AND la.is_current
       JOIN dm_obligation_stage b ON b.fiscal_year=a.fiscal_year AND b.scope=a.scope
       JOIN dm_load lb ON lb.id=b.load_id AND lb.is_current
      WHERE a.scope='DOW' ORDER BY a.fiscal_year`)).rows.map((r) => {
     const v = Math.abs(r.observed - r.expected) / Math.max(1, Math.abs(r.expected)) * 100;
-    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
-      tolerance: 0.5, variance_pct: v, status: v <= 0.5 ? 'pass' : 'fail',
+    const same = !!r.period_a && r.period_a === r.period_b;
+    const base = { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      tolerance: 0.5, variance_pct: v };
+    if (!same) return { ...base, status: 'fail',
+      message: `FY${r.fiscal_year}: the two files are not the same submission period `
+        + `(File A ${r.period_a || 'none recorded'}, File B ${r.period_b || 'none recorded'}`
+        + `${Number(r.periods_available) > 1 ? `, File B holds ${r.periods_available} periods` : ''}`
+        + `) -- the obligation comparison is not meaningful until they are.` };
+    const rep = Number(r.replicated_rows) > 0
+      ? ` File B's ${Number(r.replicated_rows).toLocaleString()} PARK-replicated rows are counted once.` : '';
+    return { ...base, status: v <= 0.5 ? 'pass' : 'fail',
       message: `FY${r.fiscal_year}: File B obligations are ${(r.observed>r.expected?'above':'below')} File A by ${v.toFixed(3)}% `
-        + `(File A ${(r.expected/1e9).toFixed(1)}B, File B ${(r.observed/1e9).toFixed(1)}B, same submission period).` };
+        + `(File A ${(r.expected/1e9).toFixed(1)}B, File B ${(r.observed/1e9).toFixed(1)}B, both ${r.period_a}).${rep}` };
+  }),
+  // File B's activity identifier moved from program_activity_code to the
+  // Program Activity Reporting Key in FY2026, and the extract repeats each
+  // account's object-class figure against every PARK instead of splitting it.
+  // The extract counts a replicated group once; this control publishes how much
+  // that was worth, so the repair is visible rather than assumed.
+  'FILEB-01': async (c) => (await c.query(`
+    SELECT fiscal_year, activity_key, source_rows, grain_rows, replicated_groups,
+           replicated_rows, obligations_as_published, obligations_at_grain, overstatement_pct
+      FROM dm_fileb_grain g JOIN dm_load l ON l.id=g.load_id AND l.is_current
+     WHERE scope='DOW' ORDER BY fiscal_year`)).rows.map((r) => {
+    const n = Number(r.replicated_rows);
+    return { fiscal_year: r.fiscal_year, observed: n, expected: 0,
+      status: n === 0 ? 'pass' : 'fail',
+      message: n === 0
+        ? `FY${r.fiscal_year}: every File B row is a distinct ${r.activity_key.replace(/_/g, ' ')} `
+          + `at account, object class, funding source and emergency fund (${Number(r.source_rows).toLocaleString()} rows, `
+          + `${Number(r.grain_rows).toLocaleString()} distinct).`
+        : `FY${r.fiscal_year}: ${n.toLocaleString()} of ${Number(r.source_rows).toLocaleString()} File B rows repeat a figure `
+          + `already published against another ${r.activity_key.replace(/_/g, ' ')} for the same account and object class. `
+          + `Summing as published gives ${(r.obligations_as_published/1e9).toFixed(1)}B against `
+          + `${(r.obligations_at_grain/1e9).toFixed(1)}B at the real grain, ${Number(r.overstatement_pct).toFixed(1)}% too high.` };
   }),
   'SCOPE-01': async (c) => {
     const { rows } = await c.query(`
@@ -686,7 +724,11 @@ const CONTROLS = {
       dm_sbr_dim: ['fiscal_year','scope','dimension','dim_key','dim_label','total_budgetary_resources',
         'obligations_incurred','unobligated_balance','gross_outlays','rank_in_dim'],
       dm_obligation_stage: ['fiscal_year','scope','obligations_incurred','undelivered_orders_unpaid',
-        'delivered_orders_unpaid','gross_outlays','deobligations'],
+        'delivered_orders_unpaid','gross_outlays','deobligations','submission_period',
+        'periods_available','source_rows','grain_rows','replicated_rows'],
+      dm_fileb_grain: ['fiscal_year','scope','activity_key','source_rows','grain_rows',
+        'replicated_groups','replicated_rows','obligations_as_published','obligations_at_grain',
+        'overstatement_pct'],
       dm_object_class: ['fiscal_year','scope','object_class_code','object_class_name','major_class','obligations','rank_in_fy'],
       dm_award_fy: ['vintage','fiscal_year','obligation','action_count','is_partial_year'],
       dm_award_dim: ['fiscal_year','dimension','dim_key','dim_label','obligation','action_count','rank_in_dim'],

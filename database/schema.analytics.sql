@@ -1071,3 +1071,40 @@ CREATE TABLE IF NOT EXISTS dm_hearing (
   UNIQUE (load_id, hearing_id)
 );
 CREATE INDEX IF NOT EXISTS dm_hearing_idx ON dm_hearing (load_id, defense_related, congress DESC);
+
+
+-- 2026-09-09 -- File B's program-activity identifier changed in FY2026 and the
+-- change was not made cleanly. Through FY2025 a row is identified by
+-- program_activity_code; from the FY2026 P09 submission that column is null on
+-- every row and the Program Activity Reporting Key carries the identity. Where
+-- an account has several PARKs the extract repeats the account's object-class
+-- figure verbatim against each one instead of splitting it, so adding the rows
+-- up counts the money once per PARK -- $1,652.9B Department-wide against File
+-- A's $1,225.0B, 34.9% too high.
+--
+-- This table records the count on both sides of that so the break is published
+-- rather than silently repaired. FILEB-01 asserts on it.
+CREATE TABLE IF NOT EXISTS dm_fileb_grain (
+  id                     bigserial PRIMARY KEY,
+  load_id                bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year            int  NOT NULL,
+  scope                  text NOT NULL,
+  activity_key           text NOT NULL,   -- which column identifies the activity
+  source_rows            int  NOT NULL DEFAULT 0,
+  grain_rows             int  NOT NULL DEFAULT 0,
+  replicated_groups      int  NOT NULL DEFAULT 0,
+  replicated_rows        int  NOT NULL DEFAULT 0,
+  obligations_as_published numeric(20,2) NOT NULL DEFAULT 0,
+  obligations_at_grain     numeric(20,2) NOT NULL DEFAULT 0,
+  overstatement_pct        numeric(12,4) NOT NULL DEFAULT 0,
+  UNIQUE (load_id, fiscal_year, scope)
+);
+
+-- The submission period File B was read at. TIE-01's message has always said
+-- File A and File B are compared "at the same submission period"; until now
+-- nothing on this table could verify that claim. It can now.
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS submission_period text;
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS periods_available int;
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS source_rows int;
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS grain_rows int;
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS replicated_rows int;

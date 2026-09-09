@@ -18,6 +18,71 @@
 
 ---
 
+## Done — 2026-09-09 (eighth pass) — the FY2026 File B key change
+
+Prompted by a control run showing `TIE-01 4/6`. Three of the four failing controls
+were accounted for (FILEC-02 and WBC-02 fail by design as published findings;
+ASSIST-01 was pre-existing). TIE-01's second failure was not, and turned out to be
+a break in the source rather than in the extract.
+
+- [x] **File B changed the column that identifies a program activity in FY2026.**
+  Through FY2025 every row carries `program_activity_code`. In the FY2026 P09
+  submission that column is **null on all 27,813 Department rows** and the Program
+  Activity Reporting Key carries the identity instead. Measured, not assumed:
+  0% null in FY2021–24, 5 rows with a PARK in FY2025, 100% in FY2026.
+- [x] **The first submission under the new key does not split the money across it.**
+  Where an account holds several PARKs, the file repeats the account's
+  object-class figure verbatim against each one. Account `017-2026/2030-1612-000`
+  publishes the same **$7,384,996,196.00** against object class 31.0 under four
+  different keys. **3,216 of 27,813 rows** repeat a figure already published, across
+  **1,742** account-and-object-class groups.
+- [x] **That is what TIE-01 was failing on.** Summed as published, Department-wide
+  FY2026 obligations come to **$1,652.9B against File A's $1,225.0B — 34.9% high**,
+  and above the whole of FY2025 on nine months of data. It would have read as a
+  surge in spending.
+- [x] **`step_obligations` now aggregates File B at its real grain** — Treasury
+  account, object class, direct or reimbursable, emergency fund code — and a group
+  whose rows differ only by PARK and repeat one figure counts once (modal value per
+  measure; the FY2026 outlay column is not even self-consistent across the copies).
+  FY2026 obligations land at **$1,228.4B, 0.28% from File A**.
+- [x] **The rule is confined to the break.** It requires `program_activity_code` to
+  be null across the whole group, which is true only of FY2026. Measured: **zero
+  rows collapsed in FY2021–FY2025**, and the published figures for those years are
+  unchanged to the cent. Two program activities in those years may legitimately
+  report equal amounts, and there the code still tells them apart.
+- [x] **New control `FILEB-01`** (high, non-blocking) counts the repeated rows and
+  fails while any remain, so the repair stays visible rather than becoming an
+  assumption. It is not satisfied by the extract having handled it — only by a
+  submission that splits the money across its keys. New table `dm_fileb_grain`
+  holds the count on both sides.
+- [x] **TIE-01 now reads the submission period instead of asserting it.** Its
+  message has always said "same submission period"; nothing on
+  `dm_obligation_stage` could verify that. The table now carries
+  `submission_period`, `periods_available`, and the row and grain counts, and a
+  period mismatch fails the control on its own terms. Verified: File A and File B
+  do hold exactly one period per fiscal year and they do match — the old claim was
+  true by luck.
+- [x] **New `/linkage#fileb` section** — the key change, the four-key example, File
+  A beside File B as published and at grain for all six years, and rows against
+  distinct rows of data. Sits beside the File C section: one seam is a choice
+  between copies, the other is a source that changed its key.
+- [x] **`/execution`'s reconciliation note is now counted, not asserted** ("in 1 of
+  6 years they do not"), with a caveat naming the repair and linking to it.
+- [x] **Result: `TIE-01 5/6`**, FY2022 the only remaining failure at 1.63% — a
+  genuine cross-system variance and a finding worth publishing. `FILEB-01 5/6`,
+  FY2026 failing by design.
+
+**What this does not fix.** The money is counted once but it is not attributed: the
+FY2026 file does not say how an account's obligations divide between its reporting
+keys, so File B answers "how much" for that year and no longer answers "on what
+activity". Object class survives; program activity does not. The gross outlay column
+is only partly repaired — copies of the same row disagree with each other — and
+remains about 3% above File A after the collapse.
+
+Verified with `tsc --noEmit` and a full `next build`, and the loader run end to end
+against a throwaway local Postgres. **Not yet loaded to Neon** — `npm run refresh`
+on the Mac, then deploy.
+
 ## Done — 2026-09-09 (third pass) — programme cost, search and the roster table
 
 - [x] **The weapons book's per-system cost tables are now extracted.** Every system
