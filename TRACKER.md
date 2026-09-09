@@ -145,6 +145,45 @@ No baked snapshots. A daily refresh reaches the live site without a redeploy.
   same fiscal year appears in several PBs — a restatement axis that does not
   exist anywhere else in these sources.
 
+## Done — 2026-09-09 (second pass) — the exhibit spine
+
+- [x] **New ETL step `exhibits`** reads all 24 "-1" books we hold — p1, p1r and r1
+  for **PB2020 through PB2027** — into `dm_exhibit_line` (50,431 line-years) and
+  `dm_exhibit_program` (**3,061 distinct program lines**: 1,223 P-1, 308 P-1R,
+  1,530 R-1), covering **FY2018–FY2027**.
+- [x] **The three-year structure is now modelled, not flattened.** Every book
+  carries FY(pb−2) actuals, FY(pb−1) enacted and FY(pb) request, so a fiscal year
+  appears in three successive books in three different roles. Each row carries
+  both `pb_year` and `fiscal_year` plus `fy_role`, and the restatement reads as a
+  diagonal: F-35 (3010F ATA000) FY2020 was **requested $5.59B, enacted $6.87B,
+  actual $6.56B**; COLUMBIA FY2026 was **requested $17.91B, enacted $14.63B**.
+  Nothing else in these sources shows a request becoming an enactment becoming an
+  actual.
+- [x] **Column shapes resolved by alias, not by exact string.** The books drift
+  across eras — Base/OCO (PB2020–21), a single column per year (PB2022–23),
+  Supplementals (PB2024), Discretionary/Reconciliation (PB2026–27) — and rename
+  "Line Item" to "Budget Line Item", "PE / BLI" to "PE/BLI", "Add/ Non-Add" to
+  "Add/Non-Add". The fiscal-year figure is taken as the **right-most amount column
+  bearing that year** (the exhibits' own convention: "Total OCO" precedes
+  "Total (Base + OCO)"; "Discretionary" and "Mandatory" precede "Total"), with the
+  columns to its left retained as components rather than summed.
+- [x] **The roster problem is solved at source.** The old 12-program list came from
+  FPDS `dod_acquisition_program_code`, which most major programs do not carry.
+  From the exhibits: F-47 (r1 3600F 0207110F), Golden Dome (9 R-1 PEs), COLUMBIA,
+  Virginia, DDG-51, CVN-81, F-16, F/A-18E/F, M1 Abrams, AH-64 Apache, CH-47,
+  UH-60 Black Hawk, B-21 Raider, Patriot, LCS, FFG-Frigate — all present.
+
+## Open — the exhibit spine is not wired yet
+
+- [ ] `dm_exhibit_line` / `dm_exhibit_program` need schema, loader wiring and
+  controls; the step runs and stages 21MB of JSON but nothing loads it.
+- [ ] Crosswalk exhibit program lines to execution: `Account` (e.g. `1506N`) to
+  the File A federal account (`017-1506`), and BLI/PE title to FPDS program code
+  where one exists. That is the join that carries the roster into execution.
+- [ ] Cross-check the roster against the weapons book (PDF, one per year) to mark
+  which lines are major defense acquisition programs.
+- [ ] `/program` should be driven by the exhibit roster, not the FPDS code list.
+
 ## Open — found while shipping `/program`
 
 - [ ] **`npm run verify` does not cover any page that reads `searchParams`.**
@@ -277,6 +316,9 @@ to actually run and verify against real numbers):
 
 ## Changelog
 
+- **2026-09-09 (second pass)** — Added the `exhibits` ETL step: 24 PB books,
+  3,061 program lines, FY2018–FY2027, with the request/enacted/actual restatement
+  modelled explicitly. Not yet loaded.
 - **2026-09-09** — Fixed the FY picker; corrected the File C linkage series (the
   published collapse was a cumulative-snapshot summing error); confirmed the
   PIID join is sound; inventoried FY2020–FY2027 machine-readable exhibits.

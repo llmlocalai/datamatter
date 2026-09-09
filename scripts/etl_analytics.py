@@ -16,6 +16,7 @@ Steps (run all with --step all):
   awards      contracts warehouse -> FY totals, dimensions, vintage drift
   filec       File C  -> account-linked contract obligations + reconciliation
   assistance  DoD financial-assistance warehouse -> FY totals, dimensions, vintage drift
+  exhibits    President's Budget -1 exhibits (FY2020-FY2027) -> the program spine
   program     contracts + File C -> program-level execution and account traceability
   knowledge   wiki + knowledge-bank folders -> definitions, inventory, hearings
   controls    control tests over everything already staged
@@ -565,6 +566,174 @@ def step_knowledge(out):
         {"dm_definition": defs, "dm_kb_inventory": inv,
          "dm_justification_exhibit": jrows, "dm_hearing": hrows}, source_path="knowledge-bank"))
 
+# ----------------------------------------------------------------- exhibits ---
+# The President's Budget "-1" exhibits, every book we hold, as the program spine.
+#
+# THE THREE-YEAR STRUCTURE. Each PB book carries three fiscal years, in three
+# different roles:
+#     FY(pb-2)  prior-year ACTUALS   -- what was executed
+#     FY(pb-1)  current-year ENACTED -- what was appropriated
+#     FY(pb)    budget-year REQUEST  -- what is being asked for
+# So a single fiscal year appears in three successive books, and its number is
+# expected to differ between them: a request becomes an enactment becomes an
+# actual. That is not drift to be averaged away — it is the restatement history,
+# and it exists nowhere else in these sources. Every row therefore carries BOTH
+# pb_year (which book it was read from) and fiscal_year (which year it describes),
+# and no query may collapse the two.
+#
+# THE COLUMN SHAPES DIFFER BY ERA and cannot be hardcoded:
+#     FY2020-21  Base / OCO for Base / OCO Direct War / Total OCO / Total (Base+OCO)
+#     FY2022-23  a single Actual / Enacted / Request column per year
+#     FY2024     Less Supplementals / Supplementals / Total Enacted
+#     FY2026-27  Discretionary / Reconciliation or Mandatory / Total
+# What is stable is the convention that the BROADEST figure for a fiscal year is
+# its LAST amount column. "Total OCO" precedes "Total (Base + OCO)"; "Discretionary"
+# and "Mandatory" precede "Total". So the fiscal-year figure is the right-most
+# amount column bearing that year, and the columns to its left are its components,
+# retained as detail rather than summed (summing them would double count the
+# subtotals).
+# Header spellings drift across books -- "Line Item" becomes "Budget Line Item",
+# "PE / BLI" loses its spaces, "Add/ Non-Add" closes up -- so columns are resolved
+# by normalised alias, never by exact string.
+EXHIBIT_COLS = {
+    "bli":   ("budgetlineitem", "lineitem", "pebli"),
+    "title": ("budgetlineitem(bli)title", "lineitemtitle",
+              "programelementbudgetlineitem(bli)title", "programelement/budgetlineitem(bli)title"),
+    "add":   ("addnonadd",),
+    "org":   ("organization",),
+    "acct_title": ("accounttitle",),
+    "ba":    ("budgetactivity",),
+    "ba_title": ("budgetactivitytitle",),
+    "cost_type": ("costtype",),
+}
+EXHIBITS = ("p1", "p1r", "r1")
+
+def _key(h):
+    return re.sub(r"[\s/]+", "", _norm(h)).lower()
+
+def _resolve(hdr, which):
+    """First column index whose normalised header matches an alias for `which`."""
+    keys = {_key(h): i for i, h in enumerate(hdr) if h}
+    for alias in EXHIBIT_COLS[which]:
+        if alias in keys: return keys[alias]
+    return None
+PB_YEARS = range(2020, 2028)
+_WS = re.compile(r"\s+")
+_FY = re.compile(r"FY\s*(\d{4})")
+
+def _norm(h):
+    return _WS.sub(" ", str(h)).strip() if h is not None else ""
+
+def _num(v):
+    if v in (None, ""): return 0.0
+    try: return float(v)
+    except (TypeError, ValueError):
+        try: return float(re.sub(r"[^0-9.\-]", "", str(v)) or 0)
+        except ValueError: return 0.0
+
+def _exhibit_files(root, pb, ex):
+    import glob
+    for pat in (f"FY{pb}/_Year-Level/{ex}_display_*.xlsx", f"FY{pb}/_Year-Level/{ex}_*.xlsx"):
+        hits = sorted(g for g in glob.glob(os.path.join(root, pat)) if "_ooc" not in g)
+        if hits: return hits[0]
+    return None
+
+def _read_sheet(path):
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    hdr, rows = None, []
+    for row in ws.iter_rows(values_only=True):
+        if hdr is None:
+            if row and row[0] == "Account":
+                hdr = [_norm(h) for h in row]
+            continue
+        rows.append(row)
+    wb.close()
+    return hdr, rows
+
+def _year_columns(hdr):
+    """{fiscal_year: {'total': idx, 'components': [(idx, label)], 'qty': idx|None}}"""
+    out = {}
+    for i, h in enumerate(hdr):
+        m = _FY.search(h)
+        if not h or not m: continue
+        fy = int(m.group(1))
+        e = out.setdefault(fy, {"total": None, "components": [], "qty": None})
+        if "Quantity" in h:
+            e["qty"] = i                      # last quantity column wins, same rule
+        else:
+            e["components"].append((i, h))
+            e["total"] = i                    # right-most amount column for the year
+    return out
+
+def step_exhibits(out):
+    root = os.path.join(KB, "11-Budget-Justification/_Archive")
+    if not os.path.isdir(root):
+        print("  no exhibit archive found, skipping"); return
+    vintage = mtime_date(root)
+    lines, prog = [], {}
+    for pb in PB_YEARS:
+        for ex in EXHIBITS:
+            path = _exhibit_files(root, pb, ex)
+            if not path: continue
+            hdr, rows = _read_sheet(path)
+            if not hdr: print(f"  FY{pb} {ex}: no header row, skipped"); continue
+            years = _year_columns(hdr)
+            iB, iT = _resolve(hdr, "bli"), _resolve(hdr, "title")
+            iAdd = _resolve(hdr, "add")          # absent on some p1r books
+            if iB is None or iT is None:
+                print(f"  FY{pb} {ex}: no line-item/title column, skipped"); continue
+            kept = 0
+            for r in rows:
+                if iAdd is not None and r[iAdd] != "Add":
+                    continue                  # Non-Add rows are AP detail, not money
+                title = _norm(r[iT])
+                if not title: continue
+                acct = _norm(r[0]); bli = _norm(r[iB])
+                cell = lambda w: (_norm(r[_resolve(hdr, w)])
+                                  if _resolve(hdr, w) is not None else "")
+                base = {
+                    "pb_year": pb, "exhibit": ex, "account": acct,
+                    "account_title": cell("acct_title"), "organization": cell("org"),
+                    "budget_activity": cell("ba"), "budget_activity_title": cell("ba_title"),
+                    "bli": bli, "bli_title": title, "cost_type": cell("cost_type"),
+                }
+                for fy, cols in years.items():
+                    role = ("prior_actual" if fy == pb - 2 else
+                            "enacted"      if fy == pb - 1 else
+                            "request"      if fy == pb else "other")
+                    amt = _num(r[cols["total"]]) if cols["total"] is not None else 0.0
+                    qty = _num(r[cols["qty"]]) if cols["qty"] is not None else 0.0
+                    if amt == 0 and qty == 0: continue
+                    lines.append({**base, "fiscal_year": fy, "fy_role": role,
+                        "amount_k": round(amt, 3), "quantity": qty,
+                        "total_column": _norm(hdr[cols["total"]]) if cols["total"] is not None else None,
+                        "component_count": len(cols["components"])})
+                    kept += 1
+                    k = (acct, ex, bli)
+                    p = prog.setdefault(k, {"account": acct, "exhibit": ex, "bli": bli,
+                        "program_name": title, "latest_pb": pb,
+                        "organization": base["organization"],
+                        "account_title": base["account_title"],
+                        "first_fiscal_year": fy, "last_fiscal_year": fy, "pb_years": set()})
+                    if pb >= p["latest_pb"]:
+                        p["latest_pb"], p["program_name"] = pb, title
+                    p["first_fiscal_year"] = min(p["first_fiscal_year"], fy)
+                    p["last_fiscal_year"]  = max(p["last_fiscal_year"], fy)
+                    p["pb_years"].add(pb)
+            print(f"  FY{pb} {ex}: {kept:,} line-years from {len(rows):,} rows "
+                  f"({len(years)} fiscal years: {sorted(years)})")
+    prog_rows = []
+    for k, p in prog.items():
+        p = dict(p); p["pb_year_count"] = len(p.pop("pb_years"))
+        prog_rows.append(p)
+    prog_rows.sort(key=lambda x: (x["exhibit"], x["account"], x["bli"]))
+    write(out, "exhibits.json", payload("budget_exhibits", vintage,
+        {"dm_exhibit_line": lines, "dm_exhibit_program": prog_rows},
+        source_path="knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification/_Archive",
+        pb_years=list(PB_YEARS)))
+
 # ------------------------------------------------------------------ program ---
 # The only field on this warehouse that ties execution to a BUDGET LINE rather
 # than to an account. Everything else here is account-shaped: File A and File B
@@ -824,7 +993,7 @@ def step_program(out, only_fy=None):
         featured=featured))
 
 # ------------------------------------------------------------------- main ---
-STEPS = {"sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
+STEPS = {"exhibits": step_exhibits, "sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
          "filec": step_filec, "assistance": step_assistance, "program": step_program,
          "knowledge": step_knowledge}
 
