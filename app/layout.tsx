@@ -26,6 +26,15 @@ export const metadata: Metadata = {
   robots: { index: true, follow: true },
 };
 
+// The tab strip and the browser chrome. Next picks icon.svg, favicon.ico and
+// apple-icon.png up from app/ by filename, so the only thing left to declare is
+// the colour the browser paints around the page — the same ground the site uses,
+// so a mobile address bar does not sit in white above a navy page.
+export const viewport = {
+  themeColor: "#0a1929",
+  colorScheme: "dark" as const,
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="scroll-smooth">

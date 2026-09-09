@@ -40,9 +40,27 @@ export default function Nav() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14">
           <Link href="/" className="flex items-center gap-2.5 shrink-0">
-            <div className="w-7 h-7 rounded bg-gradient-to-br from-accent-400 to-accent-600 flex items-center justify-center text-navy-950 font-bold text-[12px]">
-              dm
-            </div>
+            {/* The same geometry the favicon is cut from, so the tab icon and
+                the header are one mark rather than two things that resemble
+                each other. Drawn rather than set: the site declares Inter but
+                ships no webfont, so type here would render differently on every
+                visitor's machine and never match the icon at all. */}
+            <svg viewBox="0 0 64 64" className="w-7 h-7 shrink-0" role="img"
+                 aria-label="datamatter">
+              <defs>
+                <linearGradient id="dm-mark" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#e8b54a" />
+                  <stop offset="1" stopColor="#c08a10" />
+                </linearGradient>
+              </defs>
+              <rect width="64" height="64" rx="13" fill="url(#dm-mark)" />
+              <g fill="none" stroke="#0a1929" strokeWidth="5.5" strokeLinejoin="round">
+                <circle cx="17.5" cy="36" r="7.6" />
+                <path d="M25,15 V46.5" />
+                <path d="M35,46.5 V33.15 C35,30.527 37.127,28.4 39.75,28.4 C42.373,28.4 44.5,30.527 44.5,33.15 V46.5" />
+                <path d="M44.5,46.5 V33.15 C44.5,30.527 46.627,28.4 49.25,28.4 C51.873,28.4 54,30.527 54,33.15 V46.5" />
+              </g>
+            </svg>
             <span className="text-navy-100 font-semibold text-sm hidden sm:block">datamatter</span>
           </Link>
 

@@ -18,6 +18,42 @@
 
 ---
 
+## Done — 2026-09-09 (ninth pass) — the site's mark
+
+- [x] **The site had no favicon at all.** Browsers were drawing the default blank
+  page icon, and links shared into Slack or iMessage previewed with nothing.
+- [x] **`scripts/make_icons.py` builds the whole set from one construction.** The
+  mark is the nav's gold tile with `dm` in navy, but drawn as paths on a 64-unit
+  grid rather than set in type: a favicon is rendered by the browser chrome and
+  cannot use a webfont, and the site declares Inter while shipping no font file,
+  so type here would render differently on every machine and never match.
+- [x] **Two optical cuts off the same geometry.** The display cut matches the nav.
+  The small cut is for the 16px slot, where the display cut's counters fall below
+  one device pixel and `dm` reads as a single blob — it opens the counters and
+  widens the tracking rather than simply thickening, because at 16px it is the
+  white space inside a letter that carries its identity. Five candidates were
+  rendered at 16px and compared before this one was chosen.
+- [x] **Strokes overlap rather than abut.** Two butt caps meeting at a point leave
+  an antialiasing seam — invisible at 16px, obvious at the 512px the home-screen
+  icon is rendered from. Each of the m's shoulders redraws the stem it springs
+  from, so no join is ever left to the rasteriser.
+- [x] **`components/Nav.tsx` now inlines the same paths** instead of setting `dm`
+  in whatever the visitor's system font happens to be. The header and the tab
+  icon are one mark, not two things that resemble each other.
+- [x] **Four files, picked up by filename.** `app/icon.svg` (small cut, the tab),
+  `app/favicon.ico` (16/32/48, each rasterised at its own size rather than
+  downsampled from one big render), `app/apple-icon.png` (180, display cut),
+  `app/opengraph-image.png` (1200×630). Next emits the `<link>` and `<meta>` tags
+  itself; nothing in `layout.tsx` names them.
+- [x] **`viewport.themeColor` set to navy-950**, so a mobile address bar does not
+  sit in white above a navy page.
+- [x] **The link card is a flat PNG, not `@vercel/og`.** The site is statically
+  prerendered and its identity does not vary by page, so a rendered-once image
+  costs nothing at request time and cannot fail in production.
+
+Verified with `tsc --noEmit` and a full `next build` — 27 static routes, up from
+23, the four new ones being the icons.
+
 ## Done — 2026-09-09 (eighth pass) — the FY2026 File B key change
 
 Prompted by a control run showing `TIE-01 4/6`. Three of the four failing controls
