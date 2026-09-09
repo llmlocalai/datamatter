@@ -110,6 +110,17 @@
       "refresh_cadence": "annual",
       "limitations": "Read via the curated wiki summary of the AFR, which is a secondary read of a primary document. Each row records which it is.",
       "sort_order": 60
+    },
+    {
+      "key": "source_catalog",
+      "label": "Source field catalogue",
+      "source_system": "USASpending account and award files as held in the local warehouse",
+      "source_path": "accounts/ and contracts/",
+      "grain": "source file x column",
+      "description": "Every column each source carries, how often it is populated, three real values, and whether this site reads it - plus the records that demonstrate each broken join.",
+      "refresh_cadence": "with the warehouse",
+      "limitations": "populated_pct, distinct counts and sample values are measured on the first batch of rows of one partition rather than the whole file, and rows_scanned states how many. A parquet row group in these files is the whole file, so a complete profile costs more memory than the extract host has.",
+      "sort_order": 95
     }
   ],
   "controls": [
@@ -768,5 +779,261 @@
         "citation": "DoD OIG report DODIG-2026-032"
       }
     ]
-  }
+  },
+  "sfis_elements": [
+    {
+      "sort_order": 10,
+      "element_name": "Sub Class Code",
+      "field_length": 2,
+      "definition": "Grouping of a transaction type, e.g. 46 Payments from Current Appropriations.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 20,
+      "element_name": "Department Transfer Code",
+      "field_length": 3,
+      "definition": "Identifies the federal agency transferring obligation authority to the Department.",
+      "is_sloa": true,
+      "candidate_fields": [
+        "allocation_transfer_agency_identifier_code"
+      ],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 30,
+      "element_name": "Department Regular Code",
+      "field_length": 3,
+      "definition": "Treasury-designated code identifying the government agency accountable for the fund accounts.",
+      "is_sloa": true,
+      "candidate_fields": [
+        "agency_identifier_code"
+      ],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 40,
+      "element_name": "Beginning Period of Availability Fiscal Year Date",
+      "field_length": 4,
+      "definition": "The starting fiscal year for fund availability.",
+      "is_sloa": true,
+      "candidate_fields": [
+        "beginning_period_of_availability"
+      ],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 50,
+      "element_name": "Ending Period of Availability Fiscal Year Date",
+      "field_length": 4,
+      "definition": "The ending fiscal year for fund availability.",
+      "is_sloa": true,
+      "candidate_fields": [
+        "ending_period_of_availability"
+      ],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 60,
+      "element_name": "Availability Type",
+      "field_length": 1,
+      "definition": "Indicates the fund type, e.g. X for a no-year Treasury Account Symbol.",
+      "is_sloa": true,
+      "candidate_fields": [
+        "availability_type_code"
+      ],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 70,
+      "element_name": "Main Account",
+      "field_length": 4,
+      "definition": "Synonymous with basic symbol or appropriation symbol, e.g. 4930.",
+      "is_sloa": true,
+      "candidate_fields": [
+        "main_account_code"
+      ],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 80,
+      "element_name": "Sub Account",
+      "field_length": 3,
+      "definition": "Indicates the relationship to the main account.",
+      "is_sloa": true,
+      "candidate_fields": [
+        "sub_account_code"
+      ],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 90,
+      "element_name": "Business Event Type Code",
+      "field_length": 8,
+      "definition": "Replaces transaction codes, e.g. DISB for a disbursement. Carries the Treasury cash-reporting meaning of the event.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 100,
+      "element_name": "Object Class",
+      "field_length": 6,
+      "definition": "Identifies the types of items or services purchased, as defined by OMB.",
+      "is_sloa": true,
+      "candidate_fields": [
+        "object_class_code"
+      ],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 110,
+      "element_name": "Reimbursable Flag",
+      "field_length": 1,
+      "definition": "Designates a transaction as direct or reimbursable.",
+      "is_sloa": true,
+      "candidate_fields": [
+        "direct_or_reimbursable_funding_source"
+      ],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 120,
+      "element_name": "Budget Line Item",
+      "field_length": 16,
+      "definition": "For military personnel, the budget sub-activity plus the budget line item. The element that ties an accounting event to the line of the President's Budget it was appropriated under.",
+      "is_sloa": true,
+      "candidate_fields": [
+        "budget_line_item"
+      ],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 130,
+      "element_name": "Security Cooperation Customer Code",
+      "field_length": 3,
+      "definition": "The country, customer or U.S. programme receiving the product or service.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 140,
+      "element_name": "Security Cooperation Implementing Agency Code",
+      "field_length": 1,
+      "definition": "Identifies the military department or agency executing a foreign military sale.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 150,
+      "element_name": "Security Cooperation Case Designator",
+      "field_length": 4,
+      "definition": "Identifies the foreign military sales or security cooperation contractual sales agreement.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 160,
+      "element_name": "Security Cooperation Case Line Item Identifier",
+      "field_length": 3,
+      "definition": "Identifies the detailed line-item requirement within a case.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 170,
+      "element_name": "Sub-Allocation",
+      "field_length": 4,
+      "definition": "Formerly the limit. Useful for financial reporting, e.g. 2504.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 180,
+      "element_name": "Agency Disbursing Identifier Code",
+      "field_length": 8,
+      "definition": "Synonymous with the Treasury disbursing station symbol number for each disbursing office.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 190,
+      "element_name": "Agency Accounting Identifier",
+      "field_length": 6,
+      "definition": "The fiscal station number; identifies the accounting system responsible for the event.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 200,
+      "element_name": "Funding Center Identifier",
+      "field_length": 16,
+      "definition": "Cost object supporting cost accounting standards, defined by the Component.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 210,
+      "element_name": "Cost Center Identifier",
+      "field_length": 16,
+      "definition": "Cost object supporting cost accounting standards, defined by the Component.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 220,
+      "element_name": "Project Identifier",
+      "field_length": 25,
+      "definition": "Cost object supporting cost accounting standards, defined by the Component.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 230,
+      "element_name": "Activity Identifier",
+      "field_length": 16,
+      "definition": "Cost object supporting cost accounting standards, defined by the Component.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 240,
+      "element_name": "Cost Element Code",
+      "field_length": 15,
+      "definition": "Cost object supporting cost accounting standards, defined by the Component.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 250,
+      "element_name": "Work Order Number",
+      "field_length": 16,
+      "definition": "Cost object supporting cost accounting standards, defined by the Component.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    },
+    {
+      "sort_order": 260,
+      "element_name": "Functional Area",
+      "field_length": 16,
+      "definition": "Cost object supporting cost accounting standards, defined by the Component.",
+      "is_sloa": true,
+      "candidate_fields": [],
+      "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    }
+  ]
 }

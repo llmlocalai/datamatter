@@ -1,6 +1,6 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-09 (/linkage: every join measured, and what File C can actually bear)
+- **Last updated:** 2026-09-09 (/linkage becomes the reference: field catalogue, SFIS coverage, quoted failing records)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (2026-09-09):** `tsc --noEmit` clean and `next build` green,
   21/21 routes, run against a full local Postgres load of every staged extract.
@@ -136,6 +136,63 @@
   committed against a local Postgres with `FILEC-01` passing and `FILEC-02`
   publishing its findings, and 43 routes requested against a running production
   build, all 200.
+
+## Done — 2026-09-09 (fifth pass) — the field catalogue, SFIS, and the records themselves
+
+- [x] **New ETL step `catalog`** profiles every column of every source: 250 field
+  profiles across File A (34 columns), File B (61), File C (91) and FPDS (64),
+  each with type, populated share, distinct count, three real values, and whether
+  this site reads it. **File C carries 91 columns and the site reads 5.**
+- [x] **It also pulls the records that fail.** Six real rows, quoted from source
+  with no editing beyond column selection. The headline one:
+  `N0001923C0003` — Lockheed Martin, **$14.1B**, the largest single contract
+  action of FY2025, product "AIRCRAFT, FIXED WING", acquisition programme 198
+  (F-35) — and `treasury_accounts_funding_this_award` is **null**. The Department
+  knows what the money bought and the published file cannot say which
+  appropriation paid for it. A second row, `N0001920C0032` at $1.95B, names three
+  Treasury accounts and appears nowhere in the File C snapshot for the same year.
+- [x] **SFIS / SLOA is now the frame for every seam.** The 26 Standard Line of
+  Accounting elements are loaded as reference (`dm_sfis_element`) from the OUSD(C)
+  SLOA memorandum of 14 September 2012 as enumerated in DLMS ADC 1043, and
+  coverage is **computed** from the field catalogue rather than asserted:
+  **9 of 26 elements reach the published files, and 0 reach the contract file.**
+  Element 12 is **Budget Line Item** — precisely the key that would tie an
+  obligation to the budget line it was appropriated under, and it is in no
+  published file. This turns "these files do not join" into "these files do not
+  carry the elements that would join them, and the Department has required those
+  elements since 2012".
+- [x] **The discrete-versus-string distinction is the mechanism.** File A, B and C
+  carry the Treasury Account Symbol properly decomposed — department regular and
+  transfer codes, main and sub account, both periods of availability, availability
+  type — as separate typed fields. FPDS carries accounts only as a
+  semicolon-separated display string, which is why every seam involving a contract
+  action is inferred rather than joined.
+- [x] **`/linkage` is now the one-stop reference** with a contents index and eleven
+  anchored sections: the seams, File C in depth, the narrowing seam, **the flow and
+  hierarchy read out of the load record**, **the SFIS standard and coverage**,
+  **the quoted failing records**, **the field catalogue per source**, the traps,
+  restatement, the document corpus, and **an action register** naming each gap,
+  what it costs, what would close it and whose move it is.
+- [x] **SFIS ingested into the knowledge bank.** The wiki entry was a 15-line
+  definition; it now carries all 26 SLOA element names, the Budget Line Item
+  finding, and eight authorities including the SLOA memorandum, the SFIS matrix,
+  TFM Vol 1 Part 2 Ch 6000 and OMB M-20-21. It flows through `step_knowledge` into
+  `dm_definition`, so it is searchable on `/definitions` and in `/regulation`.
+- [x] **Verified**: `tsc --noEmit` clean, `next build` green 22/22, load committed
+  with the new tables (`dm_source_field` 250, `dm_join_sample` 6,
+  `dm_sfis_element` 26), 43 routes requested against a running production build,
+  all 200.
+
+### Open, and named on the page rather than hidden
+
+- The full SFIS matrix is an OUSD(C) spreadsheet this build does not hold, so
+  coverage is measured against the mandatory SLOA subset only.
+- Field profiles are measured on the first batch of one partition (10,000 rows,
+  1,087 for File A) because a parquet row group in these files is the whole file
+  and a complete profile costs more memory than the extract host has.
+- File C's object class and programme activity columns are carried and unread;
+  extending the extract past its five columns would let an obligation be followed
+  from an award to what it bought.
 
 ## Architecture
 

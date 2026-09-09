@@ -731,6 +731,80 @@ CREATE TABLE IF NOT EXISTS dm_filec_period (
 CREATE INDEX IF NOT EXISTS dm_filec_period_idx
   ON dm_filec_period (load_id, fiscal_year, period_no);
 
+
+-- ------------------------------------------------ the field-level catalogue --
+-- What each source actually carries, column by column, with real values.
+--
+-- A join can only be understood at the level of the columns it is made from, so
+-- this table is the evidence behind every seam on /linkage. It also records
+-- which columns the site READS: File C carries ninety-one columns and this site
+-- reads five, and a reader is entitled to see what was available and not used
+-- rather than only what was used.
+--
+-- populated_pct and the sample values are measured on the first batch of rows
+-- rather than the whole file, and rows_scanned says how many. A parquet row
+-- group in these files is the whole file, so a full profile of ninety columns
+-- costs more memory than the extract host has.
+CREATE TABLE IF NOT EXISTS dm_source_field (
+  id              bigserial PRIMARY KEY,
+  load_id         bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  source_key      text NOT NULL,   -- file_a | file_b | file_c_contracts | contracts
+  source_label    text NOT NULL,
+  fiscal_year     int,
+  field_name      text NOT NULL,
+  field_kind      text,            -- text | integer | number | date | boolean
+  rows_scanned    bigint NOT NULL DEFAULT 0,
+  populated_pct   numeric(6,2),
+  distinct_count  bigint,
+  sample_values   text,            -- three real values, most common first
+  is_read         boolean NOT NULL DEFAULT false,
+  note            text,
+  UNIQUE (load_id, source_key, fiscal_year, field_name)
+);
+CREATE INDEX IF NOT EXISTS dm_source_field_idx ON dm_source_field (load_id, source_key, field_name);
+
+-- Real records that demonstrate a break. A gap asserted in prose is an opinion;
+-- a gap shown as the record that fails to join is a fact. Every row here is
+-- quoted from the source with no editing beyond selecting which columns to show.
+CREATE TABLE IF NOT EXISTS dm_join_sample (
+  id           bigserial PRIMARY KEY,
+  load_id      bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  seam_key     text NOT NULL,
+  fiscal_year  int,
+  verdict      text NOT NULL,      -- a short label for what this record shows
+  why          text NOT NULL,
+  record       text NOT NULL       -- the quoted record, as JSON
+);
+CREATE INDEX IF NOT EXISTS dm_join_sample_idx ON dm_join_sample (load_id, seam_key);
+
+-- The Standard Line of Accounting: the minimum set of SFIS data elements the
+-- Department requires to be exchanged for any business event with an accounting
+-- impact, from the initial commitment through to disbursement.
+--
+-- It is carried here because it answers the question the seams raise. The joins
+-- this site cannot make are, for the most part, joins these elements were
+-- defined to make possible -- element 12 is Budget Line Item, which is exactly
+-- the key missing between the budget books and the contract file. Publishing the
+-- standard beside the coverage turns "these files do not join" into "these files
+-- do not carry the elements that would join them", which is a different and more
+-- actionable statement.
+--
+-- candidate_fields lists the column names in the published data that would
+-- satisfy the element; coverage is computed against dm_source_field rather than
+-- asserted here, so it moves when the sources move.
+CREATE TABLE IF NOT EXISTS dm_sfis_element (
+  id               bigserial PRIMARY KEY,
+  load_id          bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  sort_order       int NOT NULL DEFAULT 100,
+  element_name     text NOT NULL,
+  field_length     int,
+  definition       text NOT NULL,
+  is_sloa          boolean NOT NULL DEFAULT true,
+  candidate_fields text[],
+  authority        text NOT NULL,
+  UNIQUE (load_id, element_name)
+);
+
 -- --------------------------------------------------- oversight & knowledge --
 CREATE TABLE IF NOT EXISTS dm_audit_posture (
   id            bigserial PRIMARY KEY,

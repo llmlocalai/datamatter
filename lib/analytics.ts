@@ -1346,3 +1346,143 @@ export async function getMemoWeight() {
        FROM dm_exhibit_program_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
       GROUP BY 1 ORDER BY 1`);
 }
+
+/* ==========================================================================
+   THE CATALOGUE — what each source actually carries, and what it does not
+
+   A seam can be measured without knowing why it is narrow. These queries are
+   the why: the columns each file holds, the values in them, the records that
+   fail to join, and the standard financial elements that would have made the
+   join possible had they been published.
+   ========================================================================== */
+
+export interface SourceField {
+  sourceKey: string; sourceLabel: string; fiscalYear: number | null;
+  fieldName: string; fieldKind: string | null; rowsScanned: number;
+  populatedPct: number | null; distinctCount: number | null;
+  sampleValues: string | null; isRead: boolean; note: string | null;
+}
+
+export async function getSourceFields(sourceKey?: string): Promise<SourceField[]> {
+  return query<SourceField>(
+    `SELECT f.source_key AS "sourceKey", f.source_label AS "sourceLabel",
+            f.fiscal_year AS "fiscalYear", f.field_name AS "fieldName",
+            f.field_kind AS "fieldKind", f.rows_scanned AS "rowsScanned",
+            f.populated_pct AS "populatedPct", f.distinct_count AS "distinctCount",
+            f.sample_values AS "sampleValues", f.is_read AS "isRead", f.note
+       FROM dm_source_field f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      WHERE ($1::text IS NULL OR f.source_key = $1)
+      ORDER BY f.source_key, f.is_read DESC, f.field_name`,
+    [sourceKey ?? null]);
+}
+
+/** One row per source: how wide it is, and how much of it this site reads. */
+export async function getSourceSummary() {
+  return query<{ sourceKey: string; sourceLabel: string; fiscalYear: number | null;
+                 fields: number; fieldsRead: number; rowsScanned: number }>(
+    `SELECT f.source_key AS "sourceKey", min(f.source_label) AS "sourceLabel",
+            max(f.fiscal_year) AS "fiscalYear", count(*)::int AS fields,
+            count(*) FILTER (WHERE f.is_read)::int AS "fieldsRead",
+            max(f.rows_scanned) AS "rowsScanned"
+       FROM dm_source_field f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      GROUP BY 1 ORDER BY 1`);
+}
+
+/** The records that demonstrate a break, quoted from the source. */
+export async function getJoinSamples(seamKey?: string) {
+  return query<{ seamKey: string; fiscalYear: number | null; verdict: string;
+                 why: string; record: string }>(
+    `SELECT s.seam_key AS "seamKey", s.fiscal_year AS "fiscalYear", s.verdict, s.why, s.record
+       FROM dm_join_sample s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+      WHERE ($1::text IS NULL OR s.seam_key = $1)
+      ORDER BY s.seam_key, s.id`,
+    [seamKey ?? null]);
+}
+
+export interface SfisCoverage {
+  sortOrder: number; elementName: string; fieldLength: number | null;
+  definition: string; authority: string;
+  candidateFields: string[] | null;
+  /** Sources that carry this element as a discrete field, and the field name. */
+  carriedBy: string | null;
+  sourceCount: number;
+}
+
+/**
+ * The Standard Line of Accounting against what the published files carry.
+ *
+ * Coverage is computed from the field catalogue rather than asserted, so it
+ * moves when a source adds or drops a column. An element with no candidate
+ * field name is one this site has found no column for anywhere — which is not
+ * a claim that the Department does not hold it, only that it does not reach
+ * these published files.
+ */
+export async function getSfisCoverage(): Promise<SfisCoverage[]> {
+  return query<SfisCoverage>(
+    `SELECT e.sort_order AS "sortOrder", e.element_name AS "elementName",
+            e.field_length AS "fieldLength", e.definition, e.authority,
+            e.candidate_fields AS "candidateFields",
+            (SELECT string_agg(DISTINCT f.source_key || ' · ' || f.field_name, ', '
+                               ORDER BY f.source_key || ' · ' || f.field_name)
+               FROM dm_source_field f
+               JOIN dm_load fl ON fl.id = f.load_id AND fl.is_current
+              WHERE f.field_name = ANY (e.candidate_fields)) AS "carriedBy",
+            (SELECT count(DISTINCT f.source_key)::int
+               FROM dm_source_field f
+               JOIN dm_load fl ON fl.id = f.load_id AND fl.is_current
+              WHERE f.field_name = ANY (e.candidate_fields)) AS "sourceCount"
+       FROM dm_sfis_element e JOIN dm_load l ON l.id = e.load_id AND l.is_current
+      ORDER BY e.sort_order`);
+}
+
+/**
+ * Which SLOA elements each source carries as a DISCRETE field.
+ *
+ * The distinction matters more than the count. The award files name Treasury
+ * accounts, but as a semicolon-separated display string inside one column; the
+ * account files carry the same information as separate, typed elements. A
+ * string that contains the account is not the element, because nothing can be
+ * joined, validated or apportioned on it.
+ */
+export async function getSfisBySource() {
+  return query<{ sourceKey: string; sourceLabel: string; carried: number; total: number }>(
+    `WITH src AS (
+        SELECT DISTINCT f.source_key, f.source_label
+          FROM dm_source_field f JOIN dm_load l ON l.id = f.load_id AND l.is_current),
+      tot AS (SELECT count(*)::int AS n FROM dm_sfis_element e
+                JOIN dm_load l ON l.id = e.load_id AND l.is_current)
+      SELECT s.source_key AS "sourceKey", s.source_label AS "sourceLabel",
+             (SELECT count(*)::int FROM dm_sfis_element e
+                JOIN dm_load el ON el.id = e.load_id AND el.is_current
+               WHERE EXISTS (SELECT 1 FROM dm_source_field f
+                              JOIN dm_load fl ON fl.id = f.load_id AND fl.is_current
+                             WHERE f.source_key = s.source_key
+                               AND f.field_name = ANY (e.candidate_fields))) AS carried,
+             (SELECT n FROM tot) AS total
+        FROM src s ORDER BY carried DESC, s.source_key`);
+}
+
+/**
+ * The flow, end to end: which script produced each dataset, from what path, at
+ * what vintage, and how many rows reached the database.
+ *
+ * This is lineage read out of the load record itself rather than drawn by hand,
+ * so it cannot drift from what actually ran.
+ */
+export async function getLineage() {
+  return query<{ datasetKey: string; label: string; sourceSystem: string;
+                 sourcePath: string; grain: string; etlScript: string;
+                 etlVersion: string; vintage: string; extractedAt: string;
+                 loadedAt: string; rowCount: number; tables: number }>(
+    `SELECT d.key AS "datasetKey", d.label, d.source_system AS "sourceSystem",
+            d.source_path AS "sourcePath", d.grain,
+            l.etl_script AS "etlScript", l.etl_version AS "etlVersion",
+            to_char(l.vintage,'YYYY-MM-DD') AS vintage,
+            to_char(l.extracted_at,'YYYY-MM-DD HH24:MI') AS "extractedAt",
+            to_char(l.loaded_at,'YYYY-MM-DD HH24:MI') AS "loadedAt",
+            l.row_count AS "rowCount",
+            0 AS tables
+       FROM dm_dataset d
+       JOIN dm_load l ON l.dataset_key = d.key AND l.is_current
+      ORDER BY d.sort_order`);
+}

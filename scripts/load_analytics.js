@@ -675,6 +675,7 @@ const CONTROLS = {
       ['program.json',    'program_execution',     'scripts/etl_analytics.py --step program'],
       ['crosswalk.json',  'budget_execution_crosswalk', 'scripts/etl_analytics.py --step crosswalk'],
       ['knowledge.json',  'knowledge_bank',        'scripts/etl_analytics.py --step knowledge'],
+      ['catalog.json',    'source_catalog',        'scripts/etl_analytics.py --step catalog'],
     ];
     const COLS = {
       dm_sbr_fy: ['fiscal_year','scope','scope_label','submission_period','is_partial_year','tas_count',
@@ -734,6 +735,11 @@ const CONTROLS = {
         'program_code','program_name','is_featured','match_method','match_evidence'],
       dm_exhibit_weapon_link: ['account','exhibit','bli','pb_year','weapon_program','weapon_category',
         'weapon_page','match_method','match_evidence'],
+      dm_source_field: ['source_key','source_label','fiscal_year','field_name','field_kind',
+        'rows_scanned','populated_pct','distinct_count','sample_values','is_read','note'],
+      dm_join_sample: ['seam_key','fiscal_year','verdict','why','record'],
+      dm_sfis_element: ['sort_order','element_name','field_length','definition','is_sloa',
+        'candidate_fields','authority'],
       dm_filec_period: ['fiscal_year','submission_period','period_no','obligation','filec_rows',
         'filec_awards','award_obligation','is_chosen'],
       dm_definition: ['slug','term','definition','why_it_matters','key_rules','authorities','related',
@@ -804,6 +810,28 @@ const CONTROLS = {
         ['fiscal_year','rank_in_report','category','citation'],
         mwc.rows, { load_id: apLoad });
       console.log(`· dm_audit_mw_category        ${String(mwc.rows.length).padStart(6)} rows   vintage ${mwc.vintage}`);
+    }
+
+    // The SFIS/SLOA element library is curated reference with a citation, so it
+    // belongs beside the controls rather than in an extract. Coverage against it
+    // is COMPUTED from dm_source_field, never asserted here.
+    if (seed.sfis_elements) {
+      const load = await client.query(
+        `SELECT id FROM dm_load WHERE dataset_key = 'source_catalog' AND is_current LIMIT 1`);
+      for (const e of seed.sfis_elements) {
+        await client.query(
+          `INSERT INTO dm_sfis_element (load_id, sort_order, element_name, field_length, definition,
+                                        is_sloa, candidate_fields, authority)
+           SELECT l.id, $1,$2,$3,$4,$5,$6,$7 FROM dm_load l
+            WHERE l.dataset_key = 'source_catalog' AND l.is_current
+           ON CONFLICT (load_id, element_name) DO UPDATE SET
+             sort_order = EXCLUDED.sort_order, field_length = EXCLUDED.field_length,
+             definition = EXCLUDED.definition, candidate_fields = EXCLUDED.candidate_fields,
+             authority = EXCLUDED.authority`,
+          [e.sort_order, e.element_name, e.field_length, e.definition,
+           e.is_sloa !== false, e.candidate_fields ?? [], e.authority]);
+      }
+      if (load.rowCount) console.log(`· seed: ${seed.sfis_elements.length} SFIS/SLOA elements`);
     }
 
     // ------------------------------------------------------------ controls --

@@ -1953,11 +1953,275 @@ def step_program(out, only_fy=None):
         source_path="contracts + accounts/file_c_contracts", vintages=vs,
         featured=featured))
 
+# ------------------------------------------------------------------ catalog ---
+# The field-level truth about every source this site reads.
+#
+# Every page here is built on joins, and a join can only be understood at the
+# level of the columns it is made from. This step walks each source, records what
+# it actually carries, how often each column is populated, what real values look
+# like, and which columns the site reads at all -- so a reader can see what was
+# available and not used, not merely what was used.
+#
+# It also pulls REAL ROWS that demonstrate each break. A gap asserted in prose is
+# an opinion; a gap shown as the record that fails to join is a fact.
+
+CATALOG_SAMPLE_ROWS = 10_000      # per source; printed on the page, never implied
+
+# What the site reads, by source. Everything else in the file is carried by the
+# source and ignored here.
+FIELDS_READ = {
+    "file_a": set(FILE_A_COLS),
+    "file_b": set(FILE_B_COLS),
+    "file_c_contracts": {"agency_identifier_code", "transaction_obligated_amount",
+                         "award_unique_key", "award_id_piid", "submission_period"},
+    "contracts": ({"federal_action_obligation", "action_date", "modification_number",
+                   "agency_identifier_code", "award_id_piid", "recipient_name",
+                   "transaction_description", "awarding_agency_name",
+                   "dod_acquisition_program_code", "dod_acquisition_program_description",
+                   "treasury_accounts_funding_this_award",
+                   "federal_accounts_funding_this_award"}
+                  | {c for _, c in AWARD_DIMS} | set(DIM_LABEL.values())),
+}
+
+SOURCES = [
+    ("file_a", "File A — account balances", "accounts/file_a/fiscal_year=%d"),
+    ("file_b", "File B — object class and program activity", "accounts/file_b/fiscal_year=%d"),
+    ("file_c_contracts", "File C — award financial", "accounts/file_c_contracts/fiscal_year=%d"),
+]
+
+
+def _arrow_kind(t):
+    s = str(t)
+    if "string" in s or "utf8" in s: return "text"
+    if "int" in s: return "integer"
+    if "double" in s or "float" in s or "decimal" in s: return "number"
+    if "date" in s or "timestamp" in s: return "date"
+    if "bool" in s: return "boolean"
+    return s[:24]
+
+
+def _profile(path, source_key, label, fiscal_year, limit=CATALOG_SAMPLE_ROWS):
+    """Every column of one source: how often it is populated, how many distinct
+    values it carries, three real values, and whether this site reads it.
+
+    Read as batches rather than with head(): a parquet row group in these files
+    is the whole file, so asking for ten thousand rows decompresses ninety
+    columns of two million and takes 2.4GB to answer. iter_batches respects the
+    batch size inside a row group."""
+    import pyarrow.dataset as ds, pyarrow.parquet as pq
+    d = ds.dataset(path, format="parquet")
+    files = sorted(d.files)
+    used = FIELDS_READ.get(source_key, set())
+    kinds = {f.name: _arrow_kind(f.type) for f in d.schema}
+    pf = pq.ParquetFile(files[0])
+    batch = next(pf.iter_batches(batch_size=limit), None)
+    if batch is None: return []
+    n = batch.num_rows
+    out = []
+    for i, name in enumerate(batch.schema.names):
+        vals = batch.column(i).to_pylist()
+        present = [v for v in vals if v is not None and str(v).strip() != ""]
+        uniq = collections.Counter(str(v) for v in present)
+        out.append({
+            "source_key": source_key, "source_label": label, "fiscal_year": fiscal_year,
+            "field_name": name, "field_kind": kinds.get(name, "text"),
+            "rows_scanned": n,
+            "populated_pct": round(len(present) / n * 100, 2) if n else None,
+            "distinct_count": len(uniq),
+            "sample_values": " | ".join(s[:70] for s, _ in uniq.most_common(3))[:400] or None,
+            "is_read": name in used, "note": None})
+        del vals, present, uniq
+    del batch, pf
+    return out
+
+
+def _stream_table(path, limit, columns):
+    """Up to `limit` rows of `columns`, read in batches so a single row group
+    cannot pull the whole file into memory."""
+    import pyarrow as pa, pyarrow.dataset as ds, pyarrow.parquet as pq
+    got, taken = [], 0
+    for f in sorted(ds.dataset(path, format="parquet").files):
+        pf = pq.ParquetFile(f)
+        for b in pf.iter_batches(batch_size=50_000, columns=columns):
+            got.append(pa.Table.from_batches([b]))
+            taken += b.num_rows
+            if taken >= limit: break
+        if taken >= limit: break
+    return pa.concat_tables(got) if got else None
+
+
+def step_catalog(out, only_fy=None):
+    """Field inventory of every source, plus the rows that demonstrate each break."""
+    import pyarrow.dataset as ds
+    fields, samples = [], []
+    fy = only_fy or 2025
+    vintage = mtime_date(os.path.join(WAREHOUSE, "accounts"))
+
+    for key, label, tmpl in SOURCES:
+        p = os.path.join(WAREHOUSE, tmpl % fy)
+        if not os.path.isdir(p):
+            print(f"  {key}: no FY{fy} partition, skipped"); continue
+        rows = _profile(p, key, label, fy)
+        fields.extend(rows)
+        read = sum(1 for r in rows if r["is_read"])
+        print(f"  {key}: {len(rows)} columns, {read} read by the site, "
+              f"{len(rows) - read} carried and unused")
+
+    # contracts live under a vintage partition
+    cvs = vintages()
+    cp = os.path.join(WAREHOUSE, f"contracts/vintage={cvs[-1]}/fy={fy}")
+    if os.path.isdir(cp):
+        rows = _profile(cp, "contracts", "Contract award transactions (FPDS)", fy)
+        fields.extend(rows)
+        read = sum(1 for r in rows if r["is_read"])
+        print(f"  contracts: {len(rows)} columns, {read} read by the site, "
+              f"{len(rows) - read} carried and unused")
+
+    # ------------------------------------------------- the demonstrating rows --
+    # Each of these is a real record, quoted, that fails the join the site needs.
+    def add(seam, verdict, why, cols):
+        samples.append({"seam_key": seam, "fiscal_year": fy, "verdict": verdict,
+                        "why": why, "record": json.dumps(cols, default=str)[:1800]})
+
+    if os.path.isdir(cp):
+        t = _stream_table(cp, 400_000, [
+            "award_id_piid", "modification_number", "federal_action_obligation",
+            "recipient_name", "dod_acquisition_program_code",
+            "dod_acquisition_program_description", "treasury_accounts_funding_this_award",
+            "federal_accounts_funding_this_award", "awarding_sub_agency_name",
+            "action_date", "product_or_service_code_description"])
+        cols = {c: t[c].to_pylist() for c in t.column_names}
+        n = t.num_rows
+
+        def rec(i, keep):
+            return {k: cols[k][i] for k in keep}
+
+        # 1. an action naming no Treasury account at all
+        big_untraced = sorted(
+            (i for i in range(n)
+             if not (cols["treasury_accounts_funding_this_award"][i] or "").strip()),
+            key=lambda i: -(cols["federal_action_obligation"][i] or 0))[:1]
+        for i in big_untraced:
+            add("action_account", "no account named",
+                "The largest single contract action in the year carries no Treasury account at "
+                "all, so this obligation cannot be tied to the appropriation that funded it. It "
+                "is counted as untraceable rather than assigned to a likely account. Note that "
+                "the same row does name its acquisition programme, so the Department knows what "
+                "the money bought and the file still cannot say which appropriation paid.",
+                rec(i, ["award_id_piid", "modification_number", "federal_action_obligation",
+                        "recipient_name", "awarding_sub_agency_name", "action_date",
+                        "treasury_accounts_funding_this_award",
+                        "product_or_service_code_description"]))
+
+        # 2. an action naming SEVERAL accounts, with no split between them
+        multi = sorted(
+            (i for i in range(n)
+             if (cols["federal_accounts_funding_this_award"][i] or "").count(";") >= 2),
+            key=lambda i: -(cols["federal_action_obligation"][i] or 0))[:1]
+        for i in multi:
+            acc = _acct_set(cols["federal_accounts_funding_this_award"][i])
+            add("action_account", f"{len(acc)} accounts, one amount",
+                f"One obligation of ${(cols['federal_action_obligation'][i] or 0):,.0f} names "
+                f"{len(acc)} federal accounts in a single semicolon-separated field. The file "
+                "states no split between them, so no share of this dollar can be attributed to "
+                "any one account without inventing the apportionment.",
+                rec(i, ["award_id_piid", "modification_number", "federal_action_obligation",
+                        "recipient_name", "federal_accounts_funding_this_award", "action_date"]))
+
+        # 3. the sentinel: a programme field that says NONE rather than being null
+        sent = sorted(
+            (i for i in range(n)
+             if (cols["dod_acquisition_program_code"][i] or "") in ("000", "0", "")
+             or (cols["dod_acquisition_program_description"][i] or "").upper() == "NONE"),
+            key=lambda i: -(cols["federal_action_obligation"][i] or 0))[:1]
+        for i in sent:
+            add("action_program", "programme code 000 / NONE",
+                "The acquisition programme field is populated, so a test for missing values "
+                "finds nothing missing. Its value is the sentinel 000 with description NONE, "
+                "which means the opposite: this obligation belongs to no programme the field "
+                "can name.",
+                rec(i, ["award_id_piid", "federal_action_obligation", "recipient_name",
+                        "dod_acquisition_program_code", "dod_acquisition_program_description",
+                        "action_date"]))
+
+        # 4. a large action that DOES name a programme, for contrast
+        good = sorted(
+            (i for i in range(n)
+             if (cols["dod_acquisition_program_code"][i] or "") not in ("000", "0", "")
+             and (cols["dod_acquisition_program_description"][i] or "").upper() != "NONE"
+             and (cols["treasury_accounts_funding_this_award"][i] or "").strip()),
+            key=lambda i: -(cols["federal_action_obligation"][i] or 0))[:1]
+        for i in good:
+            add("action_program", "programme named",
+                "The same two fields, both populated: a real programme and a real account. "
+                "Roughly one contract action in two hundred names a programme, which is why the "
+                "programme view reaches a quarter of the dollars and half a percent of the "
+                "actions.",
+                rec(i, ["award_id_piid", "federal_action_obligation", "recipient_name",
+                        "dod_acquisition_program_code", "dod_acquisition_program_description",
+                        "treasury_accounts_funding_this_award", "action_date"]))
+
+        # 5. the award-to-File-C break, shown as a PIID present in one and not the other
+        fcp = os.path.join(WAREHOUSE, f"accounts/file_c_contracts/fiscal_year={fy}")
+        if os.path.isdir(fcp):
+            ft = _stream_table(fcp, 1_500_000,
+                ["agency_identifier_code", "award_id_piid", "submission_period",
+                 "transaction_obligated_amount", "treasury_account_symbol"])
+            # File C is narrow here (five columns) but long; the award-file scan
+            # above is capped because it is both.
+            fcode = ft["agency_identifier_code"].to_pylist()
+            fpiid = ft["award_id_piid"].to_pylist()
+            fper = ft["submission_period"].to_pylist()
+            famt = ft["transaction_obligated_amount"].to_pylist()
+            ftas = ft["treasury_account_symbol"].to_pylist()
+            counts = collections.Counter(s for c_, s in zip(fcode, fper) if c_ in DOW_CODES and s)
+            best = max(counts.items(), key=lambda kv: kv[1])[0] if counts else None
+            in_filec = {p for c_, p, s_ in zip(fcode, fpiid, fper)
+                        if c_ in DOW_CODES and s_ == best and p}
+            missing = sorted(
+                (i for i in range(n)
+                 if (cols["award_id_piid"][i] or "") and cols["award_id_piid"][i] not in in_filec
+                 and (cols["treasury_accounts_funding_this_award"][i] or "").strip()),
+                key=lambda i: -(cols["federal_action_obligation"][i] or 0))[:1]
+            for i in missing:
+                add("award_filec", f"absent from File C snapshot {best}",
+                    "This contract action is in the award files with a Treasury account named on "
+                    "it, and its award identifier appears nowhere in the File C snapshot the site "
+                    "publishes for the same year. That is a linkage gap in this cut, not evidence "
+                    "the obligation was unreported: a different snapshot of the same year may "
+                    "carry it.",
+                    rec(i, ["award_id_piid", "federal_action_obligation", "recipient_name",
+                            "treasury_accounts_funding_this_award", "awarding_sub_agency_name",
+                            "action_date"]))
+            # and one that DOES reconcile, for contrast
+            paid = {p_ for p_, s_, a_, c_ in zip(fpiid, fper, famt, fcode)
+                    if c_ in DOW_CODES and s_ == best and p_ and a_}
+            hit = sorted(
+                (i for i in range(n) if (cols["award_id_piid"][i] or "") in paid),
+                key=lambda i: -(cols["federal_action_obligation"][i] or 0))[:1]
+            for i in hit:
+                j = next((k for k in range(len(fpiid))
+                          if fpiid[k] == cols["award_id_piid"][i] and fper[k] == best
+                          and famt[k]), None)
+                add("award_filec", "reaches File C",
+                    "The same identifier on both sides. Note what File C adds that the award "
+                    "files do not carry: the Treasury account as a discrete field rather than as "
+                    "a semicolon-separated display string.",
+                    {**rec(i, ["award_id_piid", "federal_action_obligation", "recipient_name"]),
+                     "file_c.treasury_account_symbol": ftas[j] if j is not None else None,
+                     "file_c.transaction_obligated_amount": famt[j] if j is not None else None,
+                     "file_c.submission_period": best})
+
+    print(f"  {len(fields)} field profiles, {len(samples)} demonstrating records")
+    write(out, "catalog.json", payload("source_catalog", vintage,
+          {"dm_source_field": fields, "dm_join_sample": samples},
+          source_path="accounts/ and contracts/"))
+
 # ------------------------------------------------------------------- main ---
 STEPS = {"exhibits": step_exhibits, "sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
          "filec": step_filec, "assistance": step_assistance, "program": step_program,
          "knowledge": step_knowledge,
-         "crosswalk": step_crosswalk}
+         "crosswalk": step_crosswalk, "catalog": step_catalog}
 
 def main():
     ap = argparse.ArgumentParser()

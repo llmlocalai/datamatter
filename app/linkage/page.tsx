@@ -10,7 +10,8 @@ const money = (n: number) => fmtT(n);
 import {
   getAllProvenance, getSeams, getFilecPeriods, getFilecSpread, getScopeComparison,
   getMemoWeight, getVintageDrift, getProgramCoverage, getControls, getKbInventory,
-  isLoaded,
+  getSourceFields, getSourceSummary, getJoinSamples, getSfisCoverage, getSfisBySource,
+  getLineage, isLoaded,
 } from '@/lib/analytics';
 import { NotLoaded } from '../execution/page';
 
@@ -22,6 +23,16 @@ export const metadata: Metadata = {
 export const revalidate = 900;
 
 const K = (n: number | null | undefined) => Number(n ?? 0) * 1000;
+
+const SEAM_LABEL: Record<string, string> = {
+  action_account: 'contract action → federal account',
+  action_program: 'contract action → acquisition programme',
+  award_filec: 'award files → File C',
+  bli_account: 'budget line → Treasury account',
+  bli_program: 'budget line → programme code',
+  system_bli: 'weapon system → budget line',
+  account_filea: 'Treasury account → File A',
+};
 
 const UNIT_LABEL: Record<string, string> = {
   lines: 'budget lines', accounts: 'accounts', systems: 'weapon systems',
@@ -44,12 +55,20 @@ function Badge({ children, tone = 'muted' }: {
 export default async function LinkagePage() {
   if (!(await isLoaded())) return <Shell><NotLoaded /></Shell>;
 
-  const [prov, seams, periods, spread, scope, memo, drift, coverage, controls, kb] =
+  const [prov, seams, periods, spread, scope, memo, drift, coverage, controls, kb,
+         fields, sourceSummary, samples, sfis, sfisBySource, lineage] =
     await Promise.all([
       getAllProvenance(), getSeams(), getFilecPeriods(), getFilecSpread(),
       getScopeComparison(), getMemoWeight(), getVintageDrift(), getProgramCoverage(),
       getControls(), getKbInventory(),
+      getSourceFields(), getSourceSummary(), getJoinSamples(), getSfisCoverage(),
+      getSfisBySource(), getLineage(),
     ]);
+
+  // Coverage of the standard, computed rather than asserted.
+  const sfisCarried = sfis.filter((e) => Number(e.sourceCount) > 0).length;
+  const contractsCarried = Number(
+    sfisBySource.find((s) => s.sourceKey === 'contracts')?.carried ?? 0);
 
   const byKey = Object.fromEntries(prov.map((p) => [p.datasetKey, p]));
   const used = Array.from(new Set(seams.flatMap((s) => [s.fromDataset, s.toDataset])))
@@ -100,8 +119,33 @@ export default async function LinkagePage() {
         two. Where a figure combines them, both vintages are named rather than one.
       </p>
 
+      <nav aria-label="On this page"
+        className="mt-8 rounded-lg border border-navy-800 bg-navy-900/40 px-5 py-4">
+        <h2 className="text-[11px] uppercase tracking-wider text-navy-500 mb-3">On this page</h2>
+        <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-2 text-sm">
+          {[
+            ['#seams', 'The seams, measured', `${seams.length} joins`],
+            ['#filec', 'File C, in depth', 'the 8× spread'],
+            ['#narrowing', 'The seam that is narrowing', 'contracts to accounts'],
+            ['#flow', 'The flow and the hierarchy', `${lineage.length} datasets`],
+            ['#sfis', 'The standard: SFIS and SLOA', `${sfisCarried} of ${sfis.length} elements`],
+            ['#records', 'The records that fail to join', `${samples.length} quoted`],
+            ['#fields', 'What each source carries', `${fields.length} columns`],
+            ['#traps', 'Where it looks complete', '6 traps'],
+            ['#restatement', 'The same number, told twice', 'books and vintages'],
+            ['#corpus', 'The document corpus', 'what text can answer'],
+            ['#actions', 'What is missing', 'the action register'],
+          ].map(([href, label, meta]) => (
+            <li key={href}>
+              <a href={href} className="text-accent-400 hover:underline">{label}</a>
+              <span className="block text-[11px] text-navy-500">{meta}</span>
+            </li>
+          ))}
+        </ol>
+      </nav>
+
       {/* ================================================== the seam map === */}
-      <Section title="The seams, measured"
+      <Section id="seams" title="The seams, measured"
         note="What share of the left-hand side reaches the right-hand side. The unit differs by seam deliberately: a budget line either resolves to a Treasury account or it does not, so that seam is counted in lines, while the contract-to-account seam loses money rather than rows and is counted in dollars. Forcing them onto one scale would make the narrowest seam look like the widest.">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatTile label="Joins the site depends on" value={String(seams.length)}
@@ -301,7 +345,7 @@ export default async function LinkagePage() {
       </Section>
 
       {/* ============================================ the traceability decline === */}
-      <Section title="The seam that is genuinely narrowing"
+      <Section id="narrowing" title="The seam that is genuinely narrowing"
         note="Not every seam is a measurement artefact. The share of contract dollars that can be tied to the account that funded them has fallen by more than half across the years held, on the acquisition programs this site carries — and unlike the File C figure, this one is read the same way every year.">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
           <div>
@@ -341,7 +385,7 @@ export default async function LinkagePage() {
       </Section>
 
       {/* ======================================================= the traps === */}
-      <Section title="Where the data looks complete and is not"
+      <Section id="traps" title="Where the data looks complete and is not"
         note="Each of these has a measured cost, and each of them passed an internal consistency check before it was caught. That is the common shape: an extract can be perfectly consistent with itself and still be wrong, because consistency is a property of the extract and correctness is a property of the source.">
         <DataTable
           align={[0, 1, 2, 3]}
@@ -442,7 +486,7 @@ export default async function LinkagePage() {
       </Section>
 
       {/* ================================================= restatement === */}
-      <Section title="The same number, told twice"
+      <Section id="restatement" title="The same number, told twice"
         note="Two different mechanisms restate a figure that has already been published, and neither is an error. Confusing either one for a change in the underlying money is the most common way to read these files wrongly.">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
           <div>
@@ -505,7 +549,7 @@ export default async function LinkagePage() {
       </Section>
 
       {/* ==================================================== the text layer === */}
-      <Section title="What the document corpus can and cannot answer"
+      <Section id="corpus" title="What the document corpus can and cannot answer"
         note="The numbers are not the only evidence here. Regulation, statute, congressional direction and justification material are held as documents, and they answer a different kind of question — but they invite a specific mistake, which is to treat a count of files as a measurement of anything.">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
           <div>
@@ -545,6 +589,318 @@ export default async function LinkagePage() {
             </p>
           </div>
         </div>
+      </Section>
+
+      {/* ================================================== the data flow === */}
+      <Section id="flow" title="The flow, end to end"
+        note="Read from the load record rather than drawn by hand, so it cannot drift from what actually ran. Each row is one dataset: where it came from, which script extracted it, the date of the copy, and how many rows reached the database.">
+        <DataTable
+          align={[0, 1, 2, 3]}
+          caption="A vintage is the date of the copy, not the date of the money. Every figure on this site is as old as the vintage of the dataset it came from, and a figure that combines two datasets is as old as the older of them."
+          head={['Dataset', 'Source', 'Extracted by', 'Vintage', 'Rows']}
+          rows={lineage.map((n) => [
+            <span key={n.datasetKey}>
+              <span className="text-navy-100">{n.label}</span>
+              <span className="block text-[11px] font-mono text-navy-500">{n.datasetKey}</span>
+            </span>,
+            <span key={`${n.datasetKey}-s`} className="text-[12px]">
+              {n.sourceSystem}
+              <span className="block font-mono text-[11px] text-navy-500">{n.sourcePath}</span>
+            </span>,
+            <span key={`${n.datasetKey}-e`} className="font-mono text-[11px] text-navy-400">
+              {n.etlScript}
+              <span className="block text-navy-600">v{n.etlVersion}</span>
+            </span>,
+            <span key={`${n.datasetKey}-v`} className="font-mono text-[12px]">
+              {n.vintage}
+              <span className="block text-[11px] text-navy-500">loaded {n.loadedAt}</span>
+            </span>,
+            fmtInt(Number(n.rowCount)),
+          ])} />
+
+        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-10 text-sm text-navy-300 leading-relaxed">
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-navy-200">The hierarchy, from the top</h3>
+            <ol className="space-y-2.5 text-[13px]">
+              {[
+                ['Appropriation', 'Congress enacts a Treasury account. Everything below inherits its period of availability and its fund type.'],
+                ['Budget line', 'The P-1 and R-1 exhibits itemise the account into budget line items. This is the finest grain the budget publishes, and the last grain that names a system.'],
+                ['Treasury account execution', 'File A reports budgetary resources, obligations and outlays for the account. The budget line does not survive into it.'],
+                ['Object class and programme activity', 'File B splits the same account obligations by what was bought and under which activity. Still no budget line.'],
+                ['Award financial', 'File C ties an obligation to an award identifier and a Treasury account, as discrete elements.'],
+                ['Contract action', 'FPDS records the action itself: the recipient, the competition, the product. It names accounts only as a display string.'],
+              ].map(([h, b], i) => (
+                <li key={h} className="border-l-2 border-navy-700 pl-4">
+                  <span className="text-navy-100 font-semibold">{i + 1}. {h}</span>
+                  <span className="block text-navy-400 mt-0.5">{b}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-navy-200">Where the hierarchy breaks</h3>
+            <p>
+              The break is between steps two and three, and it is a break in the
+              <em> data</em>, not in the money. A budget line is appropriated into an account and
+              then executed; the execution files carry the account and drop the line. From File A
+              onward nothing in the published record says which budget line an obligation belongs
+              to, so the chain that begins with a named weapon system ends with an account
+              containing several of them.
+            </p>
+            <p>
+              That is not an accident of these files. The Department defines a data element for
+              exactly this — <strong className="text-navy-100">Budget Line Item</strong>, element 12
+              of the Standard Line of Accounting — and requires it to be exchanged for business
+              events with an accounting impact. It does not appear in any published file this site
+              reads. The next section is that standard, measured against what the files carry.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      {/* ============================================= the standard: SFIS === */}
+      <Section id="sfis" title="The standard that would close these joins"
+        note="The Standard Line of Accounting is the minimum set of SFIS data elements the Department requires to be exchanged for any business event with an accounting impact, from the initial commitment through to disbursement. It is not an aspiration — it is the answer to why these files do not join, because most of the joins this site cannot make are joins these elements were defined to make possible.">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatTile label="SLOA elements in the standard" value={String(sfis.length)}
+            sub="the mandatory subset of SFIS" tone="accent" />
+          <StatTile label="Reaching any published file"
+            value={`${sfisCarried} of ${sfis.length}`}
+            sub={`${fmtPct(sfisCarried / Math.max(sfis.length, 1) * 100, 0)} of the standard`}
+            tone={sfisCarried / Math.max(sfis.length, 1) < 0.5 ? 'warning' : 'default'} />
+          <StatTile label="Reaching the contract file"
+            value={`${contractsCarried} of ${sfis.length}`}
+            tone="critical"
+            sub="FPDS carries none of them as a discrete element" />
+          <StatTile label="Budget Line Item" value="absent"
+            tone="critical"
+            sub="element 12 — the key that would tie an obligation to the budget line it was appropriated under" />
+        </div>
+
+        <div className="mt-8">
+          <DataTable
+            align={[0, 1, 3, 4]}
+            caption={`Coverage is computed from the field catalogue below rather than asserted, so it moves when a source adds or drops a column. “Not in these files” is a statement about the published data this site holds — never a claim that the Department does not hold the element in its own systems, which these files would not show.`}
+            head={['#', 'SLOA element', 'Length', 'What carries it here', 'Definition']}
+            rows={sfis.map((e, i) => [
+              <span key={e.elementName} className="text-navy-500">{i + 1}</span>,
+              <span key={`${e.elementName}-n`}
+                className={e.sourceCount ? 'text-navy-100' : 'text-amber-300'}>
+                {e.elementName}
+              </span>,
+              <span key={`${e.elementName}-l`} className="font-mono text-[12px]">
+                {e.fieldLength ?? '—'}
+              </span>,
+              e.carriedBy
+                ? <span key={`${e.elementName}-c`} className="font-mono text-[11px] text-navy-300">
+                    {e.carriedBy}
+                  </span>
+                : <span key={`${e.elementName}-c`} className="text-[12px] text-amber-300">
+                    not in these files
+                  </span>,
+              <span key={`${e.elementName}-d`} className="text-[12px] text-navy-400 leading-relaxed">
+                {e.definition}
+              </span>,
+            ])} />
+        </div>
+
+        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-10">
+          <div>
+            <h3 className="text-sm font-semibold text-navy-200 mb-4">
+              Elements carried, by source
+            </h3>
+            <BarList format="int"
+              rows={sfisBySource.map((s) => ({
+                key: s.sourceKey, label: s.sourceLabel,
+                value: Number(s.carried),
+                meta: `${s.carried} of ${s.total} SLOA elements as discrete fields`,
+              }))}
+              caption="Discrete is the operative word. The award files name Treasury accounts, but as a semicolon-separated display string inside one column; the account files carry the same information as separate, typed elements. A string that contains an account is not the element, because nothing can be joined, validated or apportioned on it." />
+          </div>
+          <div className="text-sm text-navy-300 leading-relaxed space-y-4">
+            <p>
+              <strong className="text-navy-100">This reframes every seam on this page.</strong>{' '}
+              &ldquo;These files do not join&rdquo; is a dead end. &ldquo;These files do not carry
+              the elements that would join them, and the Department has defined those elements and
+              required them since 2012&rdquo; is a finding with somewhere to go.
+            </p>
+            <p>
+              <strong className="text-navy-100">Nine elements reach the account files.</strong> The
+              Treasury Account Symbol arrives properly decomposed — department regular code,
+              transfer code, main account, sub account, both periods of availability and the
+              availability type as separate fields. That is why the budget-line-to-account and
+              account-to-File-A seams are exact: the elements are there.
+            </p>
+            <p>
+              <strong className="text-navy-100">None reach the contract file.</strong> FPDS carries
+              its own vocabulary — PIID, modification number, product service code, competition
+              codes — and represents the accounting side only as text. Every seam involving a
+              contract action is inferred rather than joined, and that is the direct cause.
+            </p>
+            <p className="text-navy-400">
+              Element list and definitions:{' '}
+              <span className="text-[12px]">{sfis[0]?.authority}</span>. The full SFIS matrix is
+              published by OUSD(C) as a spreadsheet that this build does not hold, so what is shown
+              here is the mandatory SLOA subset rather than all of SFIS. The standard itself is
+              now in the knowledge bank and is searchable with the rest of the corpus —{' '}
+              <Link href="/definitions" className="text-accent-400 hover:underline">
+                SFIS in the definitions register
+              </Link>.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      {/* ================================================ the records ==== */}
+      <Section id="records" title="The records that fail to join"
+        note="A gap asserted in prose is an opinion. Each of these is a real record, quoted from the source with no editing beyond choosing which columns to show, that fails the join the site needs.">
+        <div className="space-y-6">
+          {samples.map((s, i) => {
+            let rec: Record<string, unknown> = {};
+            try { rec = JSON.parse(s.record) as Record<string, unknown>; } catch { rec = {}; }
+            const good = s.verdict === 'reaches File C' || s.verdict === 'programme named';
+            return (
+              <div key={i} className={`rounded-lg border px-5 py-4 ${
+                good ? 'border-navy-700 bg-navy-900/40' : 'border-amber-500/25 bg-amber-500/[0.03]'}`}>
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
+                  <span className="font-mono text-[11px] uppercase tracking-wider text-navy-500">
+                    {SEAM_LABEL[s.seamKey] ?? s.seamKey}
+                  </span>
+                  <span className={`text-sm font-semibold ${good ? 'text-accent-300' : 'text-amber-300'}`}>
+                    {s.verdict}
+                  </span>
+                  {s.fiscalYear && (
+                    <span className="text-[11px] text-navy-500">FY{s.fiscalYear}</span>
+                  )}
+                </div>
+                <p className="text-[13px] text-navy-300 leading-relaxed mb-3">{s.why}</p>
+                <div className="scroll-x rounded border border-navy-800 bg-navy-950/60">
+                  <table className="min-w-full text-[12px]">
+                    <tbody>
+                      {Object.entries(rec).map(([k, v]) => (
+                        <tr key={k} className="border-t border-navy-800/60 first:border-t-0">
+                          <td className="px-3 py-1.5 font-mono text-navy-500 whitespace-nowrap align-top">
+                            {k}
+                          </td>
+                          <td className="px-3 py-1.5 font-mono text-navy-100 break-all">
+                            {v === null || v === undefined || v === ''
+                              ? <span className="text-amber-400">null</span>
+                              : typeof v === 'number' ? fmtT(v) : String(v)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <Caveat>
+          These are drawn from one fiscal year of one partition and chosen as the largest example of
+          each kind, not as a random sample. They demonstrate that the break exists and what it
+          looks like; the seam table above is what measures how often it happens.
+        </Caveat>
+      </Section>
+
+      {/* ============================================== the field catalogue === */}
+      <Section id="fields" title="What each source actually carries"
+        note="Every column of every source, how often it is populated, how many distinct values it holds, and three real values. The right-hand flag says whether this site reads the column at all — a reader is entitled to see what was available and not used, not only what was used.">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          {sourceSummary.map((s) => (
+            <StatTile key={s.sourceKey} label={s.sourceLabel}
+              value={`${s.fieldsRead} of ${s.fields}`}
+              sub={`columns read · profiled on ${fmtInt(Number(s.rowsScanned))} rows of FY${s.fiscalYear}`}
+              tone={Number(s.fieldsRead) / Number(s.fields) < 0.15 ? 'warning' : 'default'} />
+          ))}
+        </div>
+
+        {sourceSummary.map((s) => {
+          const rows = fields.filter((f) => f.sourceKey === s.sourceKey);
+          return (
+            <details key={s.sourceKey} className="mb-4 rounded-lg border border-navy-800 bg-navy-900/30">
+              <summary className="cursor-pointer select-none px-5 py-3 text-sm text-navy-200 hover:text-accent-300">
+                <span className="font-semibold">{s.sourceLabel}</span>
+                <span className="text-navy-500"> — {s.fields} columns, {s.fieldsRead} read</span>
+              </summary>
+              <div className="px-5 pb-5">
+                <DataTable
+                  align={[0, 1, 5, 6]}
+                  head={['Column', 'Type', 'Populated', 'Distinct', 'Read', 'Example values']}
+                  rows={rows.map((f) => [
+                    <span key={f.fieldName}
+                      className={f.isRead ? 'font-mono text-[12px] text-accent-300'
+                                          : 'font-mono text-[12px] text-navy-400'}>
+                      {f.fieldName}
+                    </span>,
+                    <span key={`${f.fieldName}-t`} className="text-[11px] text-navy-500">
+                      {f.fieldKind}
+                    </span>,
+                    f.populatedPct == null ? '—' : fmtPct(Number(f.populatedPct)),
+                    f.distinctCount == null ? '—' : fmtInt(Number(f.distinctCount)),
+                    f.isRead
+                      ? <span key={`${f.fieldName}-r`} className="text-accent-300">yes</span>
+                      : <span key={`${f.fieldName}-r`} className="text-navy-600">—</span>,
+                    <span key={`${f.fieldName}-s`} className="font-mono text-[11px] text-navy-400 break-all">
+                      {f.sampleValues ?? <span className="text-navy-600">no populated value in the sample</span>}
+                    </span>,
+                  ])} />
+              </div>
+            </details>
+          );
+        })}
+        <Caveat>
+          Populated share, distinct counts and example values are measured on the first batch of
+          rows of one fiscal year&rsquo;s partition, and the batch size is stated on each tile above.
+          A parquet row group in these files is the whole file, so a complete profile of ninety
+          columns costs more memory than the extract host has. Treat these as the shape of the
+          column, not as a census of it.
+        </Caveat>
+      </Section>
+
+      {/* =================================================== action register === */}
+      <Section id="actions" title="What is missing, and what would close it"
+        note="Stated as work rather than as a finding. Each row names the gap, what it costs today, and the specific thing that would close it — separated into what this site can do and what only the reporting chain can do.">
+        <DataTable
+          align={[0, 1, 2, 3]}
+          caption="Nothing here is scheduled. It is the register of what a reader should know is unresolved, so that a figure on this site is never mistaken for a complete answer."
+          head={['Gap', 'What it costs', 'What would close it', 'Whose move']}
+          rows={[
+            ['Budget Line Item is in no published file',
+             'The budget-to-contract chain cannot be joined at all. The site infers 58 of 2,725 lines to a programme code on shared designators, and refuses to guess the rest.',
+             'SLOA element 12 carried on the contract action, or on File C beside the award identifier it already holds.',
+             'reporting chain'],
+            ['The contract file carries no SLOA element as a discrete field',
+             'Every seam involving a contract action is inferred rather than joined. Accounts arrive as a semicolon-separated string that cannot be validated or apportioned.',
+             'The Treasury Account Symbol decomposed into its elements on the award record, as File C already does.',
+             'reporting chain'],
+            ['File C is held as four snapshots a year, and the figure moves 8× between them',
+             'No year-over-year linkage trend is supportable. The published figure is one of four defensible answers.',
+             'Every submission period retained, and the period stated wherever the figure is quoted. The retention half is now done here; the collector still requests one period per run.',
+             'this site + collection'],
+            ['The warehouse holds a thin copy of three FY2025 File C periods',
+             'FY2025 has one substantive snapshot, so its spread cannot be measured and it cannot be compared like-for-like with FY2021 to FY2024.',
+             'Re-collecting the missing periods, if USASpending still publishes them.',
+             'collection'],
+            ['Two crosswalks on this site are derived from names',
+             'The weapons-system and programme-code links rest on shared designators and shared wording. 71 of 161 systems reach a budget line; the rest carry names no evidence ties back.',
+             'Either source publishing the other’s key. Failing that, the links stay evidence-bearing and individually rejectable, which is the current design.',
+             'this site + reporting chain'],
+            ['Object class and programme activity are read for File B only',
+             'File C carries both as discrete fields and the site does not use them, so an obligation cannot yet be followed from an award to what it bought.',
+             'Extending the File C extract past the five columns it currently reads. The columns are already in the warehouse.',
+             'this site'],
+            ['The full SFIS matrix is not held',
+             'Coverage here is measured against the mandatory SLOA subset, so an element outside SLOA cannot be assessed.',
+             'Ingesting the OUSD(C) SFIS matrix spreadsheet into the knowledge bank and extending dm_sfis_element from it.',
+             'this site'],
+          ].map(([g, c, f, w]) => [
+            <span key={g as string} className="text-navy-100">{g}</span>,
+            <span key={`${g as string}-c`} className="text-[12px] text-navy-400 leading-relaxed">{c}</span>,
+            <span key={`${g as string}-f`} className="text-[12px] text-navy-300 leading-relaxed">{f}</span>,
+            <span key={`${g as string}-w`} className={`text-[12px] ${
+              w === 'this site' ? 'text-accent-300' : 'text-amber-300'}`}>{w}</span>,
+          ])} />
       </Section>
 
       {/* ==================================================== how to read === */}
