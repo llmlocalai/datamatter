@@ -90,6 +90,17 @@
       "sort_order": 50
     },
     {
+      "key": "budget_execution_crosswalk",
+      "label": "Budget line to acquisition program crosswalk",
+      "source_system": "Derived from the President's Budget -1 exhibits and the FPDS contract archive",
+      "source_path": "derived: budget_exhibits x program_execution",
+      "grain": "Budget line item x FPDS acquisition program code",
+      "description": "The join that lets a President's Budget line be followed into the contract file. The -1 exhibits name budget lines; FPDS names acquisition program codes; neither carries the other's key, so each row here records the evidence the link rests on -- a shared type designator, or identical names.",
+      "refresh_cadence": "with each exhibit or contract refresh",
+      "limitations": "Derived, not published by the Department. Only a shared type designator or an identical name is accepted, and a designator naming more than one program code produces no row rather than a guess -- so this covers the lines whose identity is unambiguous in both vocabularies and no others. A link means the two names refer to the same system, not that the budget line's appropriation funded the contracts under that code.",
+      "sort_order": 50
+    },
+    {
       "key": "curated_audit",
       "label": "Audit posture (documentary)",
       "source_system": "DoD FY2025 Agency Financial Report; DoD OIG",
@@ -326,6 +337,15 @@
       "authority": "Program Acquisition Cost by Weapon System, DoD Comptroller, Introduction",
       "severity": "critical",
       "sort_order": 250
+    },
+    {
+      "code": "EXH-09",
+      "name": "Every budget-line to program-code link names its evidence",
+      "assertion": "Every row of dm_exhibit_program_link carries a match_method of designator or exact_name, non-empty evidence, and a budget line that exists in dm_exhibit_program.",
+      "rationale": "This crosswalk is the step that lets an appropriation be followed into a contract, which makes a wrong link worse than no link: it would put one program's contracts under another program's budget line. Nothing weaker than a shared type designator is accepted, an ambiguous designator produces no row, and every accepted row states what it rests on so a reader can reject one without distrusting the rest.",
+      "authority": "Internal reporting standard",
+      "severity": "critical",
+      "sort_order": 260
     }
   ],
   "audit_posture": {

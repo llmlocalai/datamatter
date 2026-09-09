@@ -313,8 +313,12 @@ export function Empty() {
   return <p className="text-sm text-navy-500 italic py-6">No rows in scope for this selection.</p>;
 }
 
+/* Cells accept elements, not just text: a table on this site frequently has to
+   carry the link to the thing it names, or a monospaced account symbol beside a
+   title, and splitting that into a parallel structure only invites the two to
+   drift apart. */
 export function DataTable({ head, rows, caption }: {
-  head: string[]; rows: (string | number)[][]; caption?: string;
+  head: string[]; rows: React.ReactNode[][]; caption?: string;
 }) {
   return (
     <div>

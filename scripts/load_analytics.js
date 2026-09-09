@@ -439,6 +439,28 @@ const CONTROLS = {
           + `$${Number(r.extracted_b).toFixed(1)}B against the $${Number(r.published_b).toFixed(1)}B `
           + `the Department publishes — a $${d.toFixed(1)}B difference the extract cannot explain.` };
   }),
+  'EXH-09': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS n FROM dm_exhibit_program_link x
+        JOIN dm_load l ON l.id = x.load_id AND l.is_current
+       WHERE x.match_method NOT IN ('designator','exact_name')
+          OR coalesce(x.match_evidence,'') = ''
+          OR NOT EXISTS (SELECT 1 FROM dm_exhibit_program p
+                          WHERE p.exhibit = x.exhibit AND p.account = x.account AND p.bli = x.bli)`);
+    const { rows: cov } = await c.query(`
+      SELECT count(DISTINCT (x.exhibit, x.account, x.bli))::int AS lines,
+             count(DISTINCT x.program_code)::int AS codes
+        FROM dm_exhibit_program_link x JOIN dm_load l ON l.id = x.load_id AND l.is_current`);
+    const { rows: tot } = await c.query(`
+      SELECT count(*)::int AS n FROM dm_program_dim d
+        JOIN dm_load l ON l.id = d.load_id AND l.is_current`);
+    return [{ observed: cov[0].lines, expected: null, status: rows[0].n === 0 ? 'pass' : 'fail',
+      message: rows[0].n === 0
+        ? `${cov[0].lines} budget lines reach ${cov[0].codes} of ${tot[0].n} FPDS acquisition program `
+          + 'codes on a shared type designator or an identical name; nothing weaker is accepted, so a '
+          + 'line with no link has none rather than a plausible one.'
+        : `${rows[0].n} budget-line links name no evidence or no budget line.` }];
+  },
 };
 
 // -------------------------------------------------------------------- main --
@@ -488,6 +510,7 @@ const CONTROLS = {
       ['assistance.json', 'assistance_awards',     'scripts/etl_analytics.py --step assistance'],
       ['exhibits.json',   'budget_exhibits',       'scripts/etl_analytics.py --step exhibits'],
       ['program.json',    'program_execution',     'scripts/etl_analytics.py --step program'],
+      ['crosswalk.json',  'budget_execution_crosswalk', 'scripts/etl_analytics.py --step crosswalk'],
       ['knowledge.json',  'knowledge_bank',        'scripts/etl_analytics.py --step knowledge'],
     ];
     const COLS = {
@@ -534,11 +557,13 @@ const CONTROLS = {
       dm_exhibit_program_fy: ['account','treasury_account','exhibit','bli','pb_year','fiscal_year','fy_role',
         'bli_title','organization','account_title','budget_activity','budget_activity_title','is_memo',
         'amount_k','quantity','cost_type_count','total_basis'],
-      dm_exhibit_program: ['account','treasury_account','exhibit','bli','program_name','latest_pb',
+      dm_exhibit_program: ['account','treasury_account','component','exhibit','bli','program_name','latest_pb',
         'organization','account_title','budget_activity_title','is_memo','first_fiscal_year',
-        'last_fiscal_year','latest_request_k','lifetime_amount_k','pb_year_count','slug','in_weapons_book'],
+        'last_fiscal_year','latest_request_k','latest_request_pb','lifetime_amount_k','pb_year_count','slug','in_weapons_book'],
       dm_weapon_system: ['pb_year','program_name','category','page_no'],
       dm_exhibit_tieout: ['pb_year','measure','exhibit','published_b','citation'],
+      dm_exhibit_program_link: ['exhibit','account','bli','treasury_account','bli_title',
+        'program_code','program_name','is_featured','match_method','match_evidence'],
       dm_exhibit_weapon_link: ['account','exhibit','bli','pb_year','weapon_program','weapon_category',
         'weapon_page','match_method','match_evidence'],
       dm_definition: ['slug','term','definition','why_it_matters','key_rules','authorities','related',

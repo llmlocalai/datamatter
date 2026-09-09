@@ -1,9 +1,14 @@
 /** Shared number formatting. Every money figure on the site goes through here. */
-export const fmtT = (n: number) =>
-  Math.abs(n) >= 1e12 ? `$${(n / 1e12).toFixed(2)}T`
-  : Math.abs(n) >= 1e9 ? `$${(n / 1e9).toFixed(1)}B`
-  : Math.abs(n) >= 1e6 ? `$${(n / 1e6).toFixed(1)}M`
-  : `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+/* The sign goes outside the currency mark. "$-549.0M" reads as a dollar amount
+   of minus-549 million; "−$549.0M" reads as a subtraction, which is what a
+   "Less: Advance Procurement (PY)" row actually is. */
+export const fmtT = (n: number) => {
+  const a = Math.abs(n), sign = n < 0 ? '−' : '';
+  return a >= 1e12 ? `${sign}$${(a / 1e12).toFixed(2)}T`
+    : a >= 1e9 ? `${sign}$${(a / 1e9).toFixed(1)}B`
+    : a >= 1e6 ? `${sign}$${(a / 1e6).toFixed(1)}M`
+    : `${sign}$${a.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+};
 
 export const fmtB = (n: number) => `$${(n / 1e9).toFixed(1)}B`;
 export const fmtM = (n: number) => `$${(n / 1e6).toFixed(1)}M`;

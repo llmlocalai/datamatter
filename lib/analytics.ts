@@ -532,3 +532,288 @@ export async function getHearingSummary() {
        FROM dm_hearing h JOIN dm_load l ON l.id = h.load_id AND l.is_current`);
   return { byCongress, recent, totals: totals[0] ?? { total: 0, defense: 0 } };
 }
+
+/* ============================================================== exhibits ====
+ * The President's Budget -1 exhibits: the program spine.
+ *
+ * Two things are true of every function below and neither is negotiable.
+ *
+ * The grain is (pb_year, fiscal_year) and it is never collapsed. Each PB book
+ * restates three fiscal years — FY(pb-2) actuals, FY(pb-1) enacted, FY(pb)
+ * request — so one fiscal year comes back three times with three different
+ * numbers, and the difference between them is the restatement history rather
+ * than noise to average away. Nothing here does a GROUP BY that loses pb_year.
+ *
+ * Memo rows are excluded from every total by default and are never silently
+ * dropped: the P-1R exhibit, R-1 lines outside total obligation authority,
+ * "(MEMO NON ADD)" cost types and the advance-procurement subtotal all restate
+ * money counted elsewhere in the same book. `includeMemo` exists so a page can
+ * show them as what they are.
+ */
+
+export type FyRole = 'prior_actual' | 'enacted' | 'request' | 'other';
+
+export interface ExhibitProgram {
+  exhibit: string; account: string; bli: string; treasuryAccount: string | null;
+  component: string | null;
+  programName: string; organization: string | null; accountTitle: string | null;
+  budgetActivityTitle: string | null; latestPb: number; isMemo: boolean;
+  firstFiscalYear: number; lastFiscalYear: number;
+  latestRequestK: number; latestRequestPb: number | null;
+  lifetimeAmountK: number; pbYearCount: number;
+  slug: string; inWeaponsBook: boolean;
+}
+
+export interface ExhibitRestatement {
+  pbYear: number; fiscalYear: number; fyRole: FyRole;
+  amountK: number; quantity: number; costTypeCount: number;
+  totalBasis: string; isMemo: boolean;
+}
+
+const EXHIBIT_PROGRAM_COLS = `
+  p.exhibit, p.account, p.bli, p.treasury_account AS "treasuryAccount", p.component,
+  p.program_name AS "programName", p.organization, p.account_title AS "accountTitle",
+  p.budget_activity_title AS "budgetActivityTitle", p.latest_pb AS "latestPb",
+  p.is_memo AS "isMemo", p.first_fiscal_year AS "firstFiscalYear",
+  p.last_fiscal_year AS "lastFiscalYear", p.latest_request_k AS "latestRequestK",
+  p.latest_request_pb AS "latestRequestPb",
+  p.lifetime_amount_k AS "lifetimeAmountK", p.pb_year_count AS "pbYearCount",
+  p.slug, p.in_weapons_book AS "inWeaponsBook"`;
+
+export interface RosterFilters {
+  q?: string;              // free text over title, line item and account
+  organization?: string;
+  accountTitle?: string;
+  exhibit?: string;        // p1 | p1r | r1
+  weaponsOnly?: boolean;
+  includeMemo?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * The roster. Ranked by the newest request rather than by lifetime dollars,
+ * because a line that stopped being requested in 2021 should not outrank one
+ * being asked for now — but both are returned, so neither disappears.
+ */
+export async function getExhibitRoster(f: RosterFilters = {}) {
+  const rows = await query<ExhibitProgram & { total: number }>(
+    `SELECT ${EXHIBIT_PROGRAM_COLS}, count(*) OVER () ::int AS total
+       FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+      WHERE ($5::boolean OR $4 = 'p1r' OR NOT p.is_memo)
+        AND ($1::text IS NULL OR (
+              p.program_name ILIKE '%' || $1 || '%'
+           OR p.bli          ILIKE '%' || $1 || '%'
+           OR p.account      ILIKE '%' || $1 || '%'
+           OR p.account_title ILIKE '%' || $1 || '%'
+           OR coalesce(p.treasury_account,'') ILIKE '%' || $1 || '%'))
+        AND ($2::text IS NULL OR p.component = $2)
+        AND ($3::text IS NULL OR p.account_title = $3)
+        AND ($4::text IS NULL OR p.exhibit = $4)
+        AND (NOT $6::boolean OR p.in_weapons_book)
+      ORDER BY p.latest_request_k DESC, p.lifetime_amount_k DESC, p.program_name
+      LIMIT $7 OFFSET $8`,
+    [f.q?.trim() || null, f.organization || null, f.accountTitle || null,
+     f.exhibit || null, !!f.includeMemo, !!f.weaponsOnly,
+     Math.min(f.limit ?? 60, 400), f.offset ?? 0]);
+  return { rows, total: rows[0]?.total ?? 0 };
+}
+
+/** Organisation and appropriation facets, with counts, for the roster filters. */
+export async function getExhibitFacets() {
+  const organizations = await query<{ key: string; label: string; lines: number; requestK: number }>(
+    `SELECT p.component AS key, p.component AS label, count(*)::int AS lines,
+            sum(p.latest_request_k) AS "requestK"
+       FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+      WHERE NOT p.is_memo AND coalesce(p.component,'') <> ''
+      GROUP BY 1,2 ORDER BY 4 DESC NULLS LAST`);
+  const accounts = await query<{ key: string; label: string; organization: string;
+                                 lines: number; requestK: number }>(
+    `SELECT p.treasury_account AS key, p.account_title AS label,
+            min(p.organization) AS organization, count(*)::int AS lines,
+            sum(p.latest_request_k) AS "requestK"
+       FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+      WHERE NOT p.is_memo
+      GROUP BY 1,2 ORDER BY 5 DESC NULLS LAST`);
+  const exhibits = await query<{ key: string; lines: number; requestK: number }>(
+    `SELECT p.exhibit AS key, count(*)::int AS lines, sum(p.latest_request_k) AS "requestK"
+       FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+      GROUP BY 1 ORDER BY 1`);
+  return { organizations, accounts, exhibits };
+}
+
+export async function getExhibitProgram(exhibit: string, account: string, bli: string) {
+  const rows = await query<ExhibitProgram>(
+    `SELECT ${EXHIBIT_PROGRAM_COLS}
+       FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+      WHERE p.exhibit = $1 AND p.account = $2 AND p.bli = $3 LIMIT 1`,
+    [exhibit, account, bli]);
+  return rows[0] ?? null;
+}
+
+/**
+ * The restatement matrix for one budget line: every book, every fiscal year,
+ * every role. This is the whole point of holding eight books rather than one.
+ */
+export async function getExhibitRestatement(
+  exhibit: string, account: string, bli: string, includeMemo = false,
+): Promise<ExhibitRestatement[]> {
+  return query<ExhibitRestatement>(
+    `SELECT f.pb_year AS "pbYear", f.fiscal_year AS "fiscalYear", f.fy_role AS "fyRole",
+            f.amount_k AS "amountK", f.quantity, f.cost_type_count AS "costTypeCount",
+            f.total_basis AS "totalBasis", f.is_memo AS "isMemo"
+       FROM dm_exhibit_program_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      WHERE f.exhibit = $1 AND f.account = $2 AND f.bli = $3
+        AND ($4::boolean OR NOT f.is_memo)
+      ORDER BY f.fiscal_year, f.pb_year`,
+    [exhibit, account, bli, includeMemo]);
+}
+
+/** The cost types behind one cell of the matrix — what the exhibit page shows. */
+export async function getExhibitCostTypes(
+  exhibit: string, account: string, bli: string, pbYear: number, fiscalYear: number,
+) {
+  return query<{ costType: string | null; costTypeTitle: string | null; amountK: number;
+                 quantity: number; totalColumn: string | null; totalBasis: string;
+                 isMemo: boolean; bsaTitle: string | null; lineNumber: string | null }>(
+    `SELECT x.cost_type AS "costType", x.cost_type_title AS "costTypeTitle",
+            x.amount_k AS "amountK", x.quantity, x.total_column AS "totalColumn",
+            x.total_basis AS "totalBasis", x.is_memo AS "isMemo",
+            x.bsa_title AS "bsaTitle", x.line_number AS "lineNumber"
+       FROM dm_exhibit_line x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+      WHERE x.exhibit = $1 AND x.account = $2 AND x.bli = $3
+        AND x.pb_year = $4 AND x.fiscal_year = $5
+      ORDER BY x.is_memo, x.amount_k DESC`,
+    [exhibit, account, bli, pbYear, fiscalYear]);
+}
+
+/** Department-wide totals by book, fiscal year and role — the roster header. */
+export async function getExhibitTotals() {
+  return query<{ exhibit: string; pbYear: number; fiscalYear: number; fyRole: FyRole;
+                 amountK: number; lines: number }>(
+    `SELECT f.exhibit, f.pb_year AS "pbYear", f.fiscal_year AS "fiscalYear",
+            f.fy_role AS "fyRole", sum(f.amount_k) AS "amountK", count(*)::int AS lines
+       FROM dm_exhibit_program_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      WHERE NOT f.is_memo
+      GROUP BY 1,2,3,4 ORDER BY 1,3,2`);
+}
+
+/** What the Department publishes for the same request, and what we extracted. */
+export async function getExhibitTieouts() {
+  return query<{ pbYear: number; measure: string; exhibit: string | null;
+                 publishedB: number; citation: string; extractedB: number | null }>(
+    `SELECT t.pb_year AS "pbYear", t.measure, t.exhibit,
+            t.published_b AS "publishedB", t.citation,
+            CASE WHEN t.exhibit IS NULL THEN NULL ELSE (
+              SELECT sum(f.amount_k) / 1e6 FROM dm_exhibit_program_fy f
+               WHERE f.load_id = t.load_id AND f.pb_year = t.pb_year
+                 AND f.exhibit = t.exhibit AND f.fy_role = 'request' AND NOT f.is_memo)
+            END AS "extractedB"
+       FROM dm_exhibit_tieout t JOIN dm_load l ON l.id = t.load_id AND l.is_current
+      ORDER BY t.pb_year, t.measure`);
+}
+
+/** The Department's own answer to "is this a major program", by book year. */
+export async function getWeaponLinks(exhibit: string, account: string, bli: string) {
+  return query<{ pbYear: number; weaponProgram: string; weaponCategory: string | null;
+                 weaponPage: string | null; matchMethod: string; matchEvidence: string }>(
+    `SELECT w.pb_year AS "pbYear", w.weapon_program AS "weaponProgram",
+            w.weapon_category AS "weaponCategory", w.weapon_page AS "weaponPage",
+            w.match_method AS "matchMethod", w.match_evidence AS "matchEvidence"
+       FROM dm_exhibit_weapon_link w JOIN dm_load l ON l.id = w.load_id AND l.is_current
+      WHERE w.exhibit = $1 AND w.account = $2 AND w.bli = $3
+      ORDER BY w.pb_year DESC`,
+    [exhibit, account, bli]);
+}
+
+export async function getWeaponSystems(pbYear?: number) {
+  return query<{ pbYear: number; programName: string; category: string | null;
+                 pageNo: string | null; linkedLines: number }>(
+    `SELECT s.pb_year AS "pbYear", s.program_name AS "programName", s.category,
+            s.page_no AS "pageNo",
+            (SELECT count(*)::int FROM dm_exhibit_weapon_link w
+              WHERE w.load_id = s.load_id AND w.pb_year = s.pb_year
+                AND w.weapon_program = s.program_name) AS "linkedLines"
+       FROM dm_weapon_system s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+      WHERE ($1::int IS NULL OR s.pb_year = $1)
+      ORDER BY s.pb_year DESC, s.category, s.page_no`,
+    [pbYear ?? null]);
+}
+
+/* ------------------------------------------------- budget -> execution ---- */
+
+/**
+ * File A for the Treasury account a budget line is appropriated into. This is
+ * the first step out of the budget and into execution, and it is an ACCOUNT
+ * figure, not a line-item one: several budget lines share one account and File A
+ * states no split between them. Nothing here apportions one.
+ */
+export async function getAccountExecution(treasuryAccount: string) {
+  return query<{ fiscalYear: number; label: string; totalBudgetaryResources: number;
+                 obligationsIncurred: number; unobligatedBalance: number;
+                 grossOutlays: number; rankInDim: number; submissionPeriod: string | null;
+                 isPartialYear: boolean }>(
+    `SELECT d.fiscal_year AS "fiscalYear", d.dim_label AS label,
+            d.total_budgetary_resources AS "totalBudgetaryResources",
+            d.obligations_incurred AS "obligationsIncurred",
+            d.unobligated_balance AS "unobligatedBalance",
+            d.gross_outlays AS "grossOutlays", d.rank_in_dim AS "rankInDim",
+            s.submission_period AS "submissionPeriod", s.is_partial_year AS "isPartialYear"
+       FROM dm_sbr_dim d
+       JOIN dm_load l ON l.id = d.load_id AND l.is_current
+       LEFT JOIN dm_sbr_fy s ON s.load_id = d.load_id AND s.fiscal_year = d.fiscal_year
+                            AND s.scope = 'DOW'
+      WHERE d.dimension = 'federal_account' AND d.dim_key = $1 AND d.scope = 'DOW'
+      ORDER BY d.fiscal_year`,
+    [treasuryAccount]);
+}
+
+/**
+ * The FPDS acquisition program codes a budget line reaches, and on what
+ * evidence. A link means the two names refer to the same system — it does not
+ * assert that this line's appropriation funded those contracts.
+ */
+export async function getProgramLinks(exhibit: string, account: string, bli: string) {
+  return query<{ programCode: string; programName: string; isFeatured: boolean;
+                 matchMethod: string; matchEvidence: string }>(
+    `SELECT x.program_code AS "programCode", x.program_name AS "programName",
+            x.is_featured AS "isFeatured", x.match_method AS "matchMethod",
+            x.match_evidence AS "matchEvidence"
+       FROM dm_exhibit_program_link x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+      WHERE x.exhibit = $1 AND x.account = $2 AND x.bli = $3
+      ORDER BY x.is_featured DESC, x.program_code`,
+    [exhibit, account, bli]);
+}
+
+/** Which budget lines reach a given FPDS program code — the reverse direction. */
+export async function getLinesForProgramCode(programCode: string) {
+  return query<{ exhibit: string; account: string; bli: string; bliTitle: string;
+                 treasuryAccount: string | null; matchMethod: string; matchEvidence: string }>(
+    `SELECT x.exhibit, x.account, x.bli, x.bli_title AS "bliTitle",
+            x.treasury_account AS "treasuryAccount",
+            x.match_method AS "matchMethod", x.match_evidence AS "matchEvidence"
+       FROM dm_exhibit_program_link x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+      WHERE x.program_code = $1 ORDER BY x.exhibit, x.account, x.bli`,
+    [programCode]);
+}
+
+/**
+ * Contract account sets naming this Treasury account, across the acquisition
+ * programs the contract file is cut by. The obligation on an action is never
+ * split across the accounts named on it, so these are actions that NAMED the
+ * account, not dollars drawn from it.
+ */
+export async function getAccountContracts(treasuryAccount: string, fiscalYear: number, limit = 10) {
+  return query<{ programCode: string; programName: string; accountSet: string;
+                 accountCount: number; obligation: number; actionCount: number }>(
+    `SELECT a.program_code AS "programCode", d.program_name AS "programName",
+            a.account_set AS "accountSet", a.account_count AS "accountCount",
+            a.obligation, a.action_count AS "actionCount"
+       FROM dm_program_account a
+       JOIN dm_load l ON l.id = a.load_id AND l.is_current
+       LEFT JOIN dm_program_dim d ON d.load_id = a.load_id AND d.program_code = a.program_code
+      WHERE a.fiscal_year = $2
+        AND ($1 = ANY (string_to_array(a.account_set, ';')))
+      ORDER BY a.obligation DESC LIMIT $3`,
+    [treasuryAccount, fiscalYear, limit]);
+}

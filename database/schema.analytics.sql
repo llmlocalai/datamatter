@@ -488,6 +488,7 @@ CREATE TABLE IF NOT EXISTS dm_exhibit_program (
   treasury_account      text,
   exhibit               text NOT NULL,
   bli                   text NOT NULL,
+  component             text,            -- derived from the account symbol, not the drifting Organization column
   program_name          text NOT NULL,   -- the title as of the newest book
   latest_pb             int  NOT NULL,
   organization          text,
@@ -497,6 +498,7 @@ CREATE TABLE IF NOT EXISTS dm_exhibit_program (
   first_fiscal_year     int  NOT NULL,
   last_fiscal_year      int  NOT NULL,
   latest_request_k      numeric(20,3) NOT NULL DEFAULT 0,
+  latest_request_pb     int,             -- the newest book that actually contains a request
   lifetime_amount_k     numeric(20,3) NOT NULL DEFAULT 0,
   pb_year_count         int  NOT NULL DEFAULT 0,
   slug                  text NOT NULL,
@@ -555,6 +557,27 @@ CREATE TABLE IF NOT EXISTS dm_exhibit_tieout (
   citation     text NOT NULL,
   UNIQUE (load_id, pb_year, measure)
 );
+
+-- Budget line -> FPDS acquisition program code. Derived, never published as a
+-- Department mapping: every row records the evidence the link rests on, and an
+-- ambiguous designator produces no row at all rather than a guess.
+CREATE TABLE IF NOT EXISTS dm_exhibit_program_link (
+  id               bigserial PRIMARY KEY,
+  load_id          bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  exhibit          text NOT NULL,
+  account          text NOT NULL,
+  bli              text NOT NULL,
+  treasury_account text,
+  bli_title        text NOT NULL,
+  program_code     text NOT NULL,
+  program_name     text NOT NULL,
+  is_featured      boolean NOT NULL DEFAULT false,
+  match_method     text NOT NULL,   -- designator | exact_name
+  match_evidence   text NOT NULL,
+  UNIQUE (load_id, exhibit, account, bli, program_code)
+);
+CREATE INDEX IF NOT EXISTS dm_exhibit_program_link_idx
+  ON dm_exhibit_program_link (load_id, exhibit, account, bli);
 
 -- --------------------------------------------------- oversight & knowledge --
 CREATE TABLE IF NOT EXISTS dm_audit_posture (

@@ -659,6 +659,12 @@ PB_YEARS = range(2020, 2028)
 # thing standing between it and the Treasury account symbol the execution files
 # are keyed on, so it is resolved here rather than at query time.
 ACCT_AGENCY = {"A": "021", "N": "017", "F": "057", "D": "097", "M": "017"}
+# The Organization column is as-published and drifts between books -- "ARMY" in
+# one, "A" in another, "DMACT" and "DEFW" and "OSD" alongside each other -- so it
+# is kept verbatim and a stable component is derived from the account symbol
+# instead. Grouping a roster by the raw column puts Navy in two buckets.
+COMPONENT = {"021": "Army", "017": "Navy and Marine Corps",
+             "057": "Air Force and Space Force", "097": "Defense-Wide"}
 _ACCT = re.compile(r"^(\d{4})([A-Z])$")
 
 _WS = re.compile(r"\s+")
@@ -763,24 +769,51 @@ _WB_PAGE = re.compile(r"^\d+-\d+$")
 _WB_DIVIDER = re.compile(r"^FY \d{4} .*: \$", re.I)
 # Designators are what actually tie a weapons-book name to a budget line:
 # "F-35", "AH-64E", "DDG 51", "CVN 78", "SSN 774", "KC-46A".
-_DESIG = re.compile(r"\b([A-Z]{1,4})[-\s]?(\d{1,4})([A-Z]{0,2})\b")
+#
+# A designator written with a separator is strong evidence on its own. One
+# written as a single run of characters is not, and the difference is not
+# cosmetic: "PATRIOT P3I" yields P-3, which is also the Orion aircraft, and
+# matching on it alone files an air-defence missile's contracts under a maritime
+# patrol aircraft's budget line. So a run-together designator has to be
+# corroborated by a shared significant word before it links anything --
+# "M1A2 Abrams" still reaches "M1 Abrams Tank (MOD)" on M-1 plus ABRAMS.
+_DESIG = re.compile(r"\b([A-Z]{1,4})[-\s](\d{1,4})([A-Z]{0,2})\b")
+_DESIG_RUN = re.compile(r"\b([A-Z]{1,4})(\d{1,4})([A-Z]{0,2})\b")
 _STOP = {"THE", "AND", "FOR", "OF", "SYSTEM", "SYSTEMS", "PROGRAM", "PROGRAMS",
          "PROJECTS", "RELATED", "NEW", "MOD", "MODS", "SUPPORT", "EQUIPMENT",
-         "US", "USA", "USAF", "USN", "USMC", "INC", "II", "III", "IV"}
-
-
-def _designators(name):
-    out = set()
-    for a, b, c in _DESIG.findall((name or "").upper()):
-        if a in _STOP: continue
-        out.add(f"{a}-{b}{c}")
-        if c: out.add(f"{a}-{b}")
-    return out
+         "US", "USA", "USAF", "USN", "USMC", "INC", "II", "III", "IV",
+         # exhibit furniture that would otherwise read as a type designator
+         "FY", "BA", "PE", "BLI", "TOA", "PY", "CY", "AP"}
 
 
 def _words(name):
     return {w for w in re.split(r"[^A-Z0-9]+", (name or "").upper())
             if len(w) > 2 and w not in _STOP}
+
+
+def _designators(name, strong_only=False):
+    out, up = set(), (name or "").upper()
+    pats = (_DESIG,) if strong_only else (_DESIG, _DESIG_RUN)
+    for pat in pats:
+        for a, b, c in pat.findall(up):
+            if a in _STOP: continue
+            out.add(f"{a}-{b}{c}")
+            if c: out.add(f"{a}-{b}")
+    return out
+
+
+def _designator_link(left, right):
+    """Shared designator plus the strength of the evidence, or None.
+
+    Returns (token, 'designator') when both names write the designator with a
+    separator, (token, 'designator_corroborated') when at least one writes it as
+    a run and a significant word is shared as well, and None otherwise."""
+    strong = _designators(left, True) & _designators(right, True)
+    if strong: return sorted(strong)[0], "designator"
+    weak = _designators(left) & _designators(right)
+    if weak and (_words(left) & _words(right)):
+        return sorted(weak)[0], "designator_corroborated"
+    return None
 
 
 def _weapon_book(root, pb):
@@ -873,11 +906,12 @@ def _link_weapons(weapons, programs):
         pd, pw = _designators(p["program_name"]), _words(p["program_name"])
         best = None
         for w, wd, ww in cand:
-            shared_d = pd & wd
-            if shared_d:
-                score = 100 + len(shared_d) * 10 + len(pw & ww)
+            hit = _designator_link(p["program_name"], w["program_name"])
+            if hit:
+                token, how = hit
+                score = (200 if how == "designator" else 100) + len(pw & ww)
                 if not best or score > best[0]:
-                    best = (score, w, "designator", sorted(shared_d)[0])
+                    best = (score, w, how, token)
                 continue
             shared_w = pw & ww
             if len(shared_w) >= 3 and not pd and not wd:
@@ -980,6 +1014,7 @@ def step_exhibits(out):
 
                     k = (acct, ex, bli)
                     p = prog.setdefault(k, {"account": acct, "treasury_account": tas,
+                        "component": COMPONENT.get(agency, "Unresolved"),
                         "exhibit": ex, "bli": bli,
                         "program_name": title, "latest_pb": pb,
                         "organization": base["organization"],
@@ -987,7 +1022,8 @@ def step_exhibits(out):
                         "budget_activity_title": base["budget_activity_title"],
                         "is_memo": is_memo,
                         "first_fiscal_year": fy, "last_fiscal_year": fy,
-                        "latest_request_k": 0.0, "lifetime_amount_k": 0.0,
+                        "latest_request_k": 0.0, "latest_request_pb": None,
+                        "lifetime_amount_k": 0.0,
                         "pb_years": set()})
                     if pb >= p["latest_pb"]:
                         p["latest_pb"], p["program_name"] = pb, title
@@ -1004,11 +1040,26 @@ def step_exhibits(out):
 
     # The headline figure for a line is its newest REQUEST, not its newest number
     # of any kind -- an actual and a request are different claims about a year.
+    # The headline figure for a line is its newest REQUEST, which is not the same
+    # as its figure in the newest book: a line that stopped being requested still
+    # appears for two more books as an enactment and an actual, and reporting a
+    # dash there would hide a program that was funded through FY2021 and simply
+    # ended. So the newest book that CONTAINS A REQUEST is what is reported, and
+    # the book year is carried beside it.
+    requests = collections.defaultdict(lambda: collections.defaultdict(float))
     for ro in rollup.values():
-        p = prog[(ro["account"], ro["exhibit"], ro["bli"])]
-        p["lifetime_amount_k"] += ro["amount_k"] if ro["fy_role"] == "request" else 0.0
-        if ro["fy_role"] == "request" and ro["pb_year"] == p["latest_pb"]:
-            p["latest_request_k"] += ro["amount_k"]
+        # Memo rollups never enter a headline figure. They share a budget line
+        # with the money rows -- the advance-procurement subtotal sits on the
+        # same BLI as the weapon system cost -- so adding them here would put
+        # the roster's request above the line's own restatement matrix.
+        if ro["is_memo"] or ro["fy_role"] != "request": continue
+        k = (ro["account"], ro["exhibit"], ro["bli"])
+        requests[k][ro["pb_year"]] += ro["amount_k"]
+        prog[k]["lifetime_amount_k"] += ro["amount_k"]
+    for k, by_pb in requests.items():
+        pb = max(by_pb)
+        prog[k]["latest_request_pb"] = pb
+        prog[k]["latest_request_k"] = by_pb[pb]
 
     prog_rows = []
     for p in prog.values():
@@ -1038,9 +1089,9 @@ def step_exhibits(out):
     linked = {(l["account"], l["exhibit"], l["bli"]) for l in links}
     for p in prog_rows:
         p["in_weapons_book"] = (p["account"], p["exhibit"], p["bli"]) in linked
-    print(f"  weapons book: {len(weapons)} system-years, "
-          f"{len(links):,} budget lines linked "
-          f"({sum(1 for l in links if l['match_method'] == 'designator'):,} by designator)")
+    print(f"  weapons book: {len(weapons)} system-years, {len(links):,} budget lines linked "
+          + ", ".join(f"{n} {m}" for m, n in
+                      sorted(collections.Counter(l["match_method"] for l in links).items())))
 
     if unparsed_accounts:
         print(f"  {sum(unparsed_accounts.values())} rows carry an account symbol that is "
@@ -1059,6 +1110,70 @@ def step_exhibits(out):
          "dm_exhibit_tieout": tieouts},
         source_path="knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification/_Archive",
         pb_years=list(PB_YEARS)))
+
+# --------------------------------------------------------------- crosswalk ---
+# The last link in the chain the site is built around: budget line -> Treasury
+# account -> contract. The account half falls out of the exhibit symbol. This is
+# the other half -- tying a -1 budget line to the FPDS acquisition program code
+# the contract file is cut by, which is the only field in that file keyed to a
+# budget line rather than to an account.
+#
+# Neither source carries the other's key, so every link is derived and every
+# link records what it rests on. Only two kinds of evidence are accepted:
+#   designator  -- both names carry the same type designator (F-35, DDG 51,
+#                  CH-53K). This is nearly all of it, and it is strong: the
+#                  designator IS the program's identity in both vocabularies.
+#   exact_name  -- the normalised names are identical.
+# Name similarity short of that is not accepted. A budget line with no link is
+# left with none rather than given a plausible one, because a wrong link here
+# would put one program's contracts under another program's appropriation.
+def step_crosswalk(out):
+    ex_path = os.path.join(out, "exhibits.json")
+    pr_path = os.path.join(out, "program.json")
+    if not (os.path.exists(ex_path) and os.path.exists(pr_path)):
+        print("  needs exhibits.json and program.json staged first, skipping"); return
+    ex = json.load(open(ex_path)); pr = json.load(open(pr_path))
+    programs = ex["rows"]["dm_exhibit_program"]
+    fpds = pr["rows"]["dm_program_dim"]
+    vintage = min(ex["vintage"], pr["vintage"])
+
+    by_desig = collections.defaultdict(set)
+    by_name = {}
+    for p in fpds:
+        for d in _designators(p["program_name"]):
+            by_desig[d].add(p["program_code"])
+        by_name.setdefault(re.sub(r"[^A-Z0-9]+", "", p["program_name"].upper()), p)
+
+    links = []
+    for e in programs:
+        if e["is_memo"]: continue
+        hit = None
+        for p in fpds:
+            d = _designator_link(e["program_name"], p["program_name"])
+            if not d: continue
+            token, how = d
+            # An ambiguous designator names more than one program code and is
+            # therefore evidence of nothing; it is skipped, not guessed at.
+            if len(by_desig.get(token, ())) != 1: continue
+            hit = (p, how, token); break
+        if hit is None:
+            p = by_name.get(re.sub(r"[^A-Z0-9]+", "", e["program_name"].upper()))
+            if p: hit = (p, "exact_name", p["program_name"])
+        if hit is None: continue
+        p, how, ev = hit
+        links.append({"exhibit": e["exhibit"], "account": e["account"], "bli": e["bli"],
+                      "treasury_account": e["treasury_account"],
+                      "bli_title": e["program_name"],
+                      "program_code": p["program_code"], "program_name": p["program_name"],
+                      "is_featured": p.get("is_featured", False),
+                      "match_method": how, "match_evidence": ev})
+    codes = {l["program_code"] for l in links}
+    print(f"  {len(links):,} budget lines linked to {len(codes)} of {len(fpds)} "
+          f"FPDS acquisition program codes")
+    write(out, "crosswalk.json", payload("budget_execution_crosswalk", vintage,
+        {"dm_exhibit_program_link": links},
+        source_path="derived from budget_exhibits x program_execution"))
+
 
 # ------------------------------------------------------------------ program ---
 # The only field on this warehouse that ties execution to a BUDGET LINE rather
@@ -1321,7 +1436,8 @@ def step_program(out, only_fy=None):
 # ------------------------------------------------------------------- main ---
 STEPS = {"exhibits": step_exhibits, "sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
          "filec": step_filec, "assistance": step_assistance, "program": step_program,
-         "knowledge": step_knowledge}
+         "knowledge": step_knowledge,
+         "crosswalk": step_crosswalk}
 
 def main():
     ap = argparse.ArgumentParser()
