@@ -6,10 +6,13 @@ import { StatTile, DataTable, BarList } from '@/components/charts';
 import { fmtT, fmtPct, fmtInt } from '@/components/format';
 import {
   getProvenance, getExhibitRoster, getExhibitFacets, getExhibitTotals, getExhibitTieouts,
+  getWeaponSystemPicker, ROSTER_SORTS,
 } from '@/lib/analytics';
 import { NotLoaded } from '../execution/page';
 import ExecutionView from './execution-view';
 import LineView from './line-view';
+import SystemView from './system-view';
+import RosterControls from './roster-controls';
 
 export const metadata: Metadata = {
   title: 'Programs · datamatter',
@@ -42,19 +45,35 @@ function Chip({ href, active, children, tone = 'default' }: {
   );
 }
 
+/** How a row met the search, said in words rather than shown as a score. */
+const MATCH_LABEL: Record<string, string> = {
+  text: 'matches the text',
+  alias: 'reached through an abbreviation the weapons book expands',
+  alias_designator: 'reached through the designator that abbreviation expands to',
+  terms: 'carries every word of the query',
+};
+
 /** The roster: every budget line the -1 exhibits publish, searchable. */
 async function RosterView({ searchParams }: { searchParams: Record<string, string | undefined> }) {
   const q = searchParams.q?.trim() || '';
   const org = searchParams.org || '';
   const exhibit = searchParams.exhibit || '';
+  const fund = searchParams.fund || '';
+  const approp = searchParams.approp || '';
+  const cat = searchParams.cat || '';
+  const bsa = searchParams.bsa || '';
   const weaponsOnly = searchParams.mdap === '1';
+  const sort = searchParams.sort && ROSTER_SORTS[searchParams.sort] ? searchParams.sort : 'request';
+  const dir = searchParams.dir === 'asc' ? 'asc' : 'desc';
   const page = Math.max(1, Number(searchParams.page) || 1);
   const perPage = 60;
 
-  const [prov, facets, totals, tieouts, roster] = await Promise.all([
+  const [prov, facets, totals, tieouts, systems, roster] = await Promise.all([
     getProvenance('budget_exhibits'), getExhibitFacets(), getExhibitTotals(),
-    getExhibitTieouts(),
+    getExhibitTieouts(), getWeaponSystemPicker(),
     getExhibitRoster({ q, organization: org, exhibit, weaponsOnly,
+                       fundType: fund, appropriation: approp,
+                       weaponCategory: cat, bsaTitle: bsa, sort, dir,
                        limit: perPage, offset: (page - 1) * perPage }),
   ]);
   if (!prov) return <Shell><NotLoaded /></Shell>;
@@ -77,18 +96,42 @@ async function RosterView({ searchParams }: { searchParams: Record<string, strin
             .reduce((s, t) => s + K(t.amountK), 0);
     return { fy, request: pick('request'), enacted: pick('enacted'), actual: pick('prior_actual') };
   });
-  const complete = byYear.filter((y) => y.request && y.enacted && y.actual);
 
+  const filtered = !!(q || org || exhibit || weaponsOnly || fund || approp || cat || bsa);
   const qs = (over: Record<string, string | undefined>) => {
     const p = new URLSearchParams();
-    const merged = { q, org, exhibit, mdap: weaponsOnly ? '1' : '', ...over };
+    const merged: Record<string, string | undefined> = {
+      q, org, exhibit, fund, approp, cat, bsa,
+      mdap: weaponsOnly ? '1' : '',
+      sort: sort === 'request' ? '' : sort, dir: dir === 'desc' ? '' : dir,
+      ...over,
+    };
     for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
     const s = p.toString();
     return s ? `/program?${s}` : '/program';
   };
 
+  /** A column header that sorts the whole roster, not the page. */
+  const Th = ({ label, k }: { label: string; k: string }) => {
+    const active = sort === k;
+    const next = active && dir === 'desc' ? 'asc' : 'desc';
+    return (
+      <Link href={qs({ sort: k, dir: next, page: undefined })} scroll={false}
+        aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        className={`inline-flex items-center gap-1 hover:text-accent-400 transition-colors ${
+          active ? 'text-accent-400' : ''}`}>
+        {label}
+        <span aria-hidden className={active ? '' : 'opacity-30'}>
+          {active ? (dir === 'asc' ? '↑' : '↓') : '↕'}
+        </span>
+      </Link>
+    );
+  };
+
   const total = roster.total;
   const lastPage = Math.max(1, Math.ceil(total / perPage));
+  const matchReasons = Array.from(new Set(
+    roster.rows.map((r) => r.matchReason).filter((x): x is string => !!x && x !== 'text')));
 
   return (
     <Shell>
@@ -107,7 +150,7 @@ async function RosterView({ searchParams }: { searchParams: Record<string, strin
         note="Eight President's Budget books, three fiscal years each, at the grain the exhibits publish.">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatTile label="Budget lines in the roster" value={fmtInt(total)}
-            sub={q || org || exhibit || weaponsOnly ? 'matching the current filter' : 'across every book held'}
+            sub={filtered ? 'matching the current filter' : 'across every book held'}
             tone="accent" />
           <StatTile label={`PB${newestBook} request`} value={fmtT(requestNewest)}
             sub={`${fmtInt(linesNewest)} line-items in the newest book`} />
@@ -184,24 +227,17 @@ async function RosterView({ searchParams }: { searchParams: Record<string, strin
 
       {/* ---------------------------------------------------------- the roster */}
       <Section title="The roster"
-        note="Ranked by the newest request rather than by lifetime dollars, so a line still being asked for outranks one that stopped being requested in 2021. Both are here.">
-        <form method="get" action="/program" className="flex flex-wrap items-center gap-3 mb-5">
-          <input type="search" name="q" defaultValue={q} placeholder="F-35, DDG, Golden Dome, 1506N, 017-1506…"
-            aria-label="Search budget lines"
-            className="flex-1 min-w-[16rem] px-3 py-2 rounded-lg bg-navy-800 border border-navy-700 text-sm text-navy-100 placeholder:text-navy-500 focus:outline-none focus:ring-2 focus:ring-accent-500" />
-          {org && <input type="hidden" name="org" value={org} />}
-          {exhibit && <input type="hidden" name="exhibit" value={exhibit} />}
-          {weaponsOnly && <input type="hidden" name="mdap" value="1" />}
-          <button type="submit"
-            className="px-4 py-2 rounded-lg bg-accent-500 text-navy-950 text-sm font-semibold hover:bg-accent-400 transition-colors">
-            Search
-          </button>
-          {(q || org || exhibit || weaponsOnly) && (
-            <Link href="/program" className="text-sm text-navy-400 hover:text-accent-400">Clear</Link>
-          )}
-        </form>
+        note="Search, filter and sort run over every budget line in the roster rather than over the page on screen, and every view is a link. Ranked by default on the newest request rather than on lifetime dollars, so a line still being asked for outranks one that stopped being requested in 2021. Both are here.">
+        <RosterControls
+          systems={systems.map((s) => ({ category: s.category, programName: s.programName,
+                                         aliases: s.aliases, lines: s.lines }))}
+          fundTypes={facets.fundTypes}
+          appropriations={facets.appropriations}
+          weaponCategories={facets.weaponCategories}
+          bsaTitles={facets.bsaTitles}
+          components={facets.organizations} />
 
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className="flex flex-wrap gap-2 mt-5 mb-3">
           <Chip href={qs({ exhibit: '', page: undefined })} active={!exhibit}>All exhibits</Chip>
           {facets.exhibits.map((e) => (
             <Chip key={e.key} href={qs({ exhibit: e.key, page: undefined })} active={exhibit === e.key}>
@@ -211,15 +247,20 @@ async function RosterView({ searchParams }: { searchParams: Record<string, strin
           <Chip href={qs({ mdap: weaponsOnly ? '' : '1', page: undefined })} active={weaponsOnly} tone="gold">
             In the weapons book
           </Chip>
+          {filtered && (
+            <Link href="/program" className="px-3 py-1.5 text-sm text-navy-400 hover:text-accent-400">
+              Clear all
+            </Link>
+          )}
         </div>
-        <div className="flex flex-wrap gap-2 mb-6">
-          <Chip href={qs({ org: '', page: undefined })} active={!org}>All components</Chip>
-          {facets.organizations.map((o) => (
-            <Chip key={o.key} href={qs({ org: o.key, page: undefined })} active={org === o.key}>
-              {o.label} · {fmtInt(o.lines)}
-            </Chip>
-          ))}
-        </div>
+
+        {q && roster.rows.length > 0 && matchReasons.length > 0 && (
+          <p className="text-xs text-navy-400 mb-4 leading-relaxed">
+            Some of these rows do not contain the text &ldquo;{q}&rdquo;. They were reached because{' '}
+            {matchReasons.map((r) => MATCH_LABEL[r] ?? r).join(', or because ')} — the reason is
+            printed on the row. Nothing is matched on a similarity score.
+          </p>
+        )}
 
         {roster.rows.length === 0 ? (
           <p className="text-sm text-navy-400">
@@ -228,24 +269,68 @@ async function RosterView({ searchParams }: { searchParams: Record<string, strin
           </p>
         ) : (
           <DataTable
-            caption={`${fmtInt(total)} budget lines match. Amounts are the request in each line's newest book — an actual or an enactment is a different claim about a year and is not mixed in here.`}
-            head={['Budget line', 'Exhibit', 'Account', 'Line item', 'Newest request', 'Years', 'Weapons book']}
+            align={[1, 2, 3, 4, 5, 6, 7]}
+            caption={`${fmtInt(total)} budget lines match. Amounts are the request in each line's newest book — an actual or an enactment is a different claim about a year and is not mixed in here. The two category columns come from different sources and are not interchangeable: one is the Department's own grouping of major systems, the other is the sub-activity the J-book files the line under.`}
+            head={[
+              <Th key="h0" label="Budget line" k="name" />,
+              <Th key="h1" label="Fund type" k="fund" />,
+              <Th key="h2" label="Service / agency" k="component" />,
+              <Th key="h3" label="Appropriation · account" k="appropriation" />,
+              <Th key="h4" label="Category · weapons book" k="category" />,
+              <Th key="h5" label="Category · J-book" k="bsa" />,
+              <Th key="h6" label="Exhibit" k="exhibit" />,
+              <Th key="h7" label="Line item" k="bli" />,
+              <Th key="h8" label="Newest request" k="request" />,
+              <Th key="h9" label="Years" k="years" />,
+            ]}
             rows={roster.rows.map((p) => [
-              <Link key={p.slug} href={`/program?bli=${encodeURIComponent(`${p.exhibit}:${p.account}:${p.bli}`)}`}
-                className="text-accent-400 hover:underline">{p.programName}</Link>,
-              p.exhibit.toUpperCase(),
-              <span key={`${p.slug}-a`} className="font-mono text-[12px]">
-                {p.account}{p.treasuryAccount ? ` · ${p.treasuryAccount}` : ''}
-                <span className="block text-navy-500">{p.accountTitle}</span>
+              <span key={p.slug}>
+                <Link href={`/program?bli=${encodeURIComponent(`${p.exhibit}:${p.account}:${p.bli}`)}`}
+                  className="text-accent-400 hover:underline">{p.programName}</Link>
+                {p.matchReason && p.matchReason !== 'text' && (
+                  <span className="block text-[11px] text-navy-500">
+                    {p.matchAlias ? `via “${p.matchAlias}” · ` : ''}
+                    {MATCH_LABEL[p.matchReason] ?? p.matchReason}
+                  </span>
+                )}
               </span>,
-              <span key={`${p.slug}-b`} className="font-mono text-[12px]">{p.bli}</span>,
+              p.fundType ?? '—',
+              <span key={`${p.slug}-c`}>
+                {p.component ?? '—'}
+                {p.organization && (
+                  <span className="block text-[11px] text-navy-500">{p.organization}</span>
+                )}
+              </span>,
+              <span key={`${p.slug}-a`} className="text-[12px]">
+                {p.appropriation ?? p.accountTitle ?? '—'}
+                <span className="block font-mono text-navy-500">
+                  {p.account}{p.treasuryAccount ? ` · ${p.treasuryAccount}` : ''}
+                </span>
+              </span>,
+              p.weaponProgram
+                ? <Link key={`${p.slug}-w`} href={`/program?system=${encodeURIComponent(p.weaponProgram)}`}
+                    className="text-accent-400 hover:underline text-[12px]">
+                    {p.weaponCategory ?? 'in the weapons book'}
+                    <span className="block text-navy-500">{p.weaponProgram}</span>
+                  </Link>
+                : <span key={`${p.slug}-w`} className="text-navy-600">not in the book</span>,
+              <span key={`${p.slug}-b`} className="text-[12px]">
+                {p.bsaTitle || '—'}
+                {(p.activityCount ?? 1) > 1 && (
+                  <span className="block text-[11px] text-navy-500">
+                    and {(p.activityCount ?? 1) - 1} other budget activit
+                    {(p.activityCount ?? 1) === 2 ? 'y' : 'ies'}
+                  </span>
+                )}
+              </span>,
+              p.exhibit.toUpperCase(),
+              <span key={`${p.slug}-l`} className="font-mono text-[12px]">{p.bli}</span>,
               p.latestRequestK
                 ? <span key={`${p.slug}-r`}>{fmtT(K(p.latestRequestK))}
                     <span className="block text-[12px] text-navy-500">PB{p.latestRequestPb}</span>
                   </span>
                 : <span key={`${p.slug}-r`} className="text-navy-500">not requested in any book held</span>,
               `FY${p.firstFiscalYear}–${p.lastFiscalYear}`,
-              p.inWeaponsBook ? <span key={`${p.slug}-w`} className="text-accent-300">yes</span> : '—',
             ])} />
         )}
 
@@ -266,6 +351,13 @@ async function RosterView({ searchParams }: { searchParams: Record<string, strin
             line. Open the line to see what was enacted and what was actually reported.
           </p>
           <p>
+            <strong className="text-navy-100">The two category columns are different claims.</strong>{' '}
+            One is the Department&rsquo;s own grouping from the weapons book, and it is empty for most
+            lines because that book itemises only major systems — an empty cell is a fact about the
+            book, not about the line. The other is the budget sub-activity the J-book files the line
+            under, which every procurement line has and no R-1 line does.
+          </p>
+          <p>
             <strong className="text-navy-100">Memo lines are held out.</strong> The P-1R exhibit is
             National Guard and Reserve equipment already counted inside the P-1 lines, and some R-1
             lines sit outside total obligation authority. They are kept and flagged rather than
@@ -280,6 +372,13 @@ async function RosterView({ searchParams }: { searchParams: Record<string, strin
             Nothing here apportions one.
           </p>
           <p>
+            <strong className="text-navy-100">Search does not guess.</strong> The query and the line
+            are both stripped of case, spacing and punctuation, so <span className="font-mono text-[12px]">f35</span>{' '}
+            finds <span className="font-mono text-[12px]">F-35</span>. An abbreviation such as
+            &ldquo;JSF&rdquo; works only because the weapons book itself writes the expansion, and the
+            row says so. There is no similarity score anywhere.
+          </p>
+          <p>
             <strong className="text-navy-100">Absence is absence in this cut.</strong> An empty result
             means the filter matched nothing in the vintage named above — never that the Department
             did not publish it.
@@ -287,7 +386,8 @@ async function RosterView({ searchParams }: { searchParams: Record<string, strin
         </div>
         <p className="text-xs text-navy-500 mt-8">
           Method and controls:{' '}
-          <Link href="/controls" className="text-accent-400 hover:underline">EXH-01 through EXH-09</Link>{' '}
+          <Link href="/controls" className="text-accent-400 hover:underline">EXH-01 through EXH-09</Link>,{' '}
+          <Link href="/controls" className="text-accent-400 hover:underline">WBC-01 through WBC-03</Link>{' '}
           · <Link href="/sources" className="text-accent-400 hover:underline">sources</Link>
           {' '}· <Link href="/traceability" className="text-accent-400 hover:underline">where the chain breaks</Link>
         </p>
@@ -297,10 +397,13 @@ async function RosterView({ searchParams }: { searchParams: Record<string, strin
 }
 
 export default async function ProgramPage({ searchParams }: {
-  searchParams: { bli?: string; code?: string; fy?: string; q?: string; org?: string;
-                  exhibit?: string; mdap?: string; page?: string; pb?: string };
+  searchParams: { bli?: string; code?: string; system?: string; fy?: string; q?: string;
+                  org?: string; exhibit?: string; mdap?: string; page?: string; pb?: string;
+                  fund?: string; approp?: string; cat?: string; bsa?: string;
+                  sort?: string; dir?: string };
 }) {
   if (searchParams.bli) return <LineView searchParams={searchParams} />;
   if (searchParams.code) return <ExecutionView searchParams={searchParams} />;
+  if (searchParams.system) return <SystemView searchParams={searchParams} />;
   return <RosterView searchParams={searchParams} />;
 }

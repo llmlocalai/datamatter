@@ -1,6 +1,6 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-09 (the exhibit spine: `/program` rebuilt on the -1 books)
+- **Last updated:** 2026-09-09 (the weapons-book cost spine: what a whole programme costs)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (2026-09-09):** `tsc --noEmit` clean and `next build` green,
   21/21 routes, run against a full local Postgres load of every staged extract.
@@ -17,6 +17,74 @@
   Program Acquisition Cost by Weapon System for all seven books that state them.
 
 ---
+
+## Done — 2026-09-09 (third pass) — programme cost, search and the roster table
+
+- [x] **The weapons book's per-system cost tables are now extracted.** Every system
+  page in Program Acquisition Cost by Weapon System carries a table of the same
+  money the -1 exhibits itemise, totalled by the Department against the SYSTEM:
+  RDT&E and procurement by service, with quantities, for three fiscal years.
+  **7,167 rows across seven books** in `dm_weapon_system_cost`. This is the only
+  source here that states what a whole programme costs.
+- [x] **It changes shape between eras exactly as the -1 books do** — Base/OCO in
+  PB2020-21, Discretionary/Mandatory in PB2026 — so the fiscal-year figure is
+  picked by the same two rules as `EXH-05` (right-most column labelled *Total*,
+  else the sum of that year's components) and `total_basis` records which fired.
+  A right-most-column rule alone publishes the PB2026 mandatory add as the year.
+- [x] **`WBC-01`: 1,599 of 1,613 system-years (99.1%) foot to the total printed
+  on their own page.** The 14 that do not are pages typeset so tightly a figure
+  cannot be assigned to a column; they are named rather than absorbed. Four
+  parser rules were each worth several hundred rows: numbers are right-aligned so
+  the right-most token in a column band is the aligned one; a dash is an absent
+  figure and must not occupy the slot; a label can carry digits ("AH-64E New
+  Build") and can wrap onto the line above its figures; and a valued row at or
+  left of its heading is a sibling of it ("Mods"), not a member.
+- [x] **`WBC-02` caught a real defect in the existing weapon crosswalk.** `_STOP`
+  drops roman numerals, so "Small Diameter Bomb (SDB) I" phrase-matched
+  "SMALL DIAMETER BOMB II" and filed $195M of SDB II under SDB I. Fixed two ways,
+  both justified on their own terms rather than to make a number fit: a variant
+  marker (I/II/III, Block n, Increment n) is never evidence FOR a match but a
+  disagreement between two is decisive against one; and a line that fits two
+  systems equally well now gets **no** row — 8 lines, previously broken by
+  iteration order. Links 191 → 183.
+- [x] **`WBC-02` is deliberately non-blocking in both directions.** 45 of 57
+  system-years reach LESS than the book publishes (the crosswalk cannot tie back
+  spares and modification lines whose titles name no system) and 6 reach MORE (a
+  budget line can be broader than one programme — the NGSW ammunition line, one
+  R-1 element funding several systems). The control states the gap on the page;
+  it must never be satisfied by dropping links until the figures agree.
+- [x] **Search that does not guess**, three explainable layers: normalised text
+  (`f35` = `F-35` = `F 35`), the **117 abbreviations the weapons book itself
+  expands** into a system's own name (`JSF`, `FLRAA`, `JLTV`, `SDB`) carried in
+  `dm_weapon_alias` with the sentence they were read from, and all-terms-present
+  for multi-word queries. No similarity score anywhere, and every row says how it
+  was reached. `WBC-03` refuses an alias that names no evidence.
+- [x] **The roster carries both published taxonomies and neither is blended.**
+  The weapons book's own category (authoritative, sparse — an empty cell is a
+  fact about the book) and the J-book's own budget sub-activity (covers every
+  procurement line: "Combat Aircraft", "Rotary", "Aircraft Spares and Repair
+  Parts"). Plus fund type from the exhibit, service/agency, and one canonical
+  spelling per Treasury account because the books write the same account four ways.
+- [x] **A budget line item is not confined to one budget activity.** PB2027 line
+  `ATA000` sits under BA 03 Tactical Forces for $16.6B **and** BA 10 Aircraft
+  Spares and Repair Parts for $1.0B. Taking whichever row was read last labelled
+  the F-35 procurement line "Aircraft Spares and Repair Parts". The activity shown
+  is now the one carrying the most money in the newest book, and `activity_count`
+  says how many the line spans — 43 lines span more than one.
+- [x] **Sort and filter run in Postgres over the whole roster**, in the query
+  string, so a sorted or filtered view is a link and ordering by newest request
+  shows the largest line in the roster rather than the largest on page one.
+- [x] **New `/program?system=<name>`**: the published system cost table beside the
+  roll-up of every budget line tied to it, the gap between them stated as a
+  property of the crosswalk, then the accounts those lines execute in.
+- [x] **Verified end to end against a local Postgres**: load committed, `WBC-01`
+  and `WBC-03` pass and `WBC-02` publishes its finding; each new control was
+  deliberately broken and confirmed to fail (corrupted totals → WBC-01 fails;
+  blanked alias evidence → WBC-03 fails; removed the over-reaching links →
+  WBC-02 passes), then the database was reset before any render was trusted.
+  `tsc --noEmit` clean, `next build` green 21/21, and **42 routes requested
+  against a running production build, all 200** — including every new filter,
+  sort and system view.
 
 ## Architecture
 
@@ -51,6 +119,7 @@ No baked snapshots. A daily refresh reaches the live site without a redeploy.
 | `/program` | the roster: 2,725 money budget lines (memo lines reachable by filter), searchable, filtered by component, exhibit and weapons-book presence; the department-wide restatement table; the `EXH-08` tie-out |
 | `/program?bli=p1:3010F:ATA000` | one budget line: the full `pb_year × fiscal_year` restatement matrix with the book beside every figure, the cost types behind it and which exhibit column each came from, the weapons-book entry, File A for its Treasury account, and the contract account sets that named it |
 | `/program?code=198` | the execution view for one FPDS acquisition program code — unchanged, plus the budget lines that reach it |
+| `/program?system=F-35 Joint Strike Fighter` | one weapon system: what the Department publishes it costs, the budget lines that money is spread across, and how much of the published total those lines actually reach |
 
 The spine holds **eight President's Budget books** (PB2020–PB2027) describing
 **ten fiscal years** (FY2018–FY2027), each restated up to three times:

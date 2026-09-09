@@ -317,9 +317,12 @@ export function Empty() {
    carry the link to the thing it names, or a monospaced account symbol beside a
    title, and splitting that into a parallel structure only invites the two to
    drift apart. */
-export function DataTable({ head, rows, caption }: {
-  head: string[]; rows: React.ReactNode[][]; caption?: string;
+export function DataTable({ head, rows, caption, align }: {
+  head: React.ReactNode[]; rows: React.ReactNode[][]; caption?: string;
+  /** Columns to keep left-aligned beyond the first — labels, not figures. */
+  align?: number[];
 }) {
+  const left = new Set([0, ...(align ?? [])]);
   return (
     <div>
       <div className="scroll-x rounded-lg border border-navy-800">
@@ -327,8 +330,8 @@ export function DataTable({ head, rows, caption }: {
           <thead>
             <tr className="bg-navy-900/70">
               {head.map((h, i) => (
-                <th key={h} scope="col"
-                    className={`px-4 py-2.5 text-[12px] uppercase tracking-wider font-semibold text-navy-400 ${i ? 'text-right' : 'text-left'}`}>
+                <th key={i} scope="col"
+                    className={`px-4 py-2.5 text-[12px] uppercase tracking-wider font-semibold text-navy-400 ${left.has(i) ? 'text-left' : 'text-right'}`}>
                   {h}
                 </th>
               ))}
@@ -338,7 +341,7 @@ export function DataTable({ head, rows, caption }: {
             {rows.map((r, i) => (
               <tr key={i} className="border-t border-navy-800/70 hover:bg-navy-900/40">
                 {r.map((c, j) => (
-                  <td key={j} className={`px-4 py-2.5 tnum ${j ? 'text-right text-navy-100' : 'text-navy-300'}`}>{c}</td>
+                  <td key={j} className={`px-4 py-2.5 tnum ${left.has(j) ? 'text-navy-300' : 'text-right text-navy-100'}`}>{c}</td>
                 ))}
               </tr>
             ))}

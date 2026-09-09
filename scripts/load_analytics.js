@@ -439,6 +439,108 @@ const CONTROLS = {
           + `$${Number(r.extracted_b).toFixed(1)}B against the $${Number(r.published_b).toFixed(1)}B `
           + `the Department publishes — a $${d.toFixed(1)}B difference the extract cannot explain.` };
   }),
+  // ------------------------------------------- the weapons book's own totals --
+  // WBC-01 is an INTERNAL check on the cost-table extract: the book prints a
+  // total for each system and the appropriation blocks above it, and they must
+  // agree. A page that does not foot has been read wrongly, or is typeset so
+  // tightly that a figure cannot be assigned to a column at all -- which is a
+  // finding about a handful of pages, not a reason to refuse a load of 545, so
+  // the failures are published rather than blocking.
+  'WBC-01': async (c) => {
+    const { rows } = await c.query(`
+      WITH t AS (
+        SELECT pb_year, program_name, fiscal_year, amount_m
+          FROM dm_weapon_system_cost x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+         WHERE x.row_kind = 'total' AND x.amount_m IS NOT NULL),
+      b AS (
+        SELECT pb_year, program_name, fiscal_year, amount_m
+          FROM dm_weapon_system_cost x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+         WHERE x.row_kind = 'block_check')
+      SELECT count(*)::int AS n,
+             count(*) FILTER (WHERE abs(b.amount_m - t.amount_m)
+                                    > greatest(0.6, abs(t.amount_m) * 0.002))::int AS off
+        FROM t JOIN b USING (pb_year, program_name, fiscal_year)`);
+    const { n, off } = rows[0];
+    const pct = n ? (n - off) / n * 100 : 0;
+    return [{ observed: n - off, expected: n, variance_pct: n ? off / n * 100 : 0,
+      status: off / Math.max(n, 1) <= 0.03 ? 'pass' : 'fail',
+      message: `${n - off} of ${n} weapon-system years foot to the total printed on the same page `
+        + `(${pct.toFixed(1)}%). The ${off} that do not are pages whose figures cannot be assigned `
+        + 'to a column with confidence; they are kept and named rather than absorbed.' }];
+  },
+  // WBC-02 is the per-system version of EXH-08, and it is the one that answers
+  // "do these budget lines carry the whole programme". The weapons book states
+  // what a system costs; the -1 exhibits itemise the same request across several
+  // budget lines and several appropriations. Neither direction of a break is an
+  // arithmetic error, and both are published rather than repaired:
+  //
+  //   SHORT -- the crosswalk has not reached some of the system's spares,
+  //     modification or support lines. Their titles carry no shared designator
+  //     ("Aircraft Spares and Repair Parts" names no aircraft), so they cannot
+  //     be tied back on evidence and are not counted. This is the common case
+  //     and it is why no programme total on this site is called complete.
+  //   OVER -- the lines tied to the system carry MORE than the book states for
+  //     it, because a budget line can be broader than one programme: the NGSW
+  //     ammunition line funds the ammunition the weapons-book page excludes, and
+  //     one R-1 program element can fund several systems. The exhibits publish
+  //     no split inside a line, so nothing here apportions one.
+  //
+  // What this control must never be allowed to do is make the roll-up agree by
+  // dropping links until it fits. It reports the gap; it does not close it.
+  'WBC-02': async (c) => {
+    const { rows } = await c.query(`
+      WITH pub AS (
+        SELECT x.pb_year, x.program_name, x.amount_m * 1000 AS published_k
+          FROM dm_weapon_system_cost x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+         WHERE x.row_kind = 'total' AND x.fy_role = 'request' AND x.amount_m IS NOT NULL),
+      roll AS (
+        SELECT w.pb_year, w.weapon_program AS program_name,
+               sum(f.amount_k) AS rolled_k, count(DISTINCT (f.exhibit, f.account, f.bli))::int AS lines
+          FROM dm_exhibit_weapon_link w
+          JOIN dm_load l ON l.id = w.load_id AND l.is_current
+          JOIN dm_exhibit_program_fy f
+            ON f.load_id = w.load_id AND f.exhibit = w.exhibit AND f.account = w.account
+           AND f.bli = w.bli AND f.pb_year = w.pb_year AND f.fy_role = 'request'
+           AND f.is_memo = false
+         GROUP BY 1, 2)
+      SELECT count(*)::int AS n,
+             count(*) FILTER (WHERE r.rolled_k > p.published_k * 1.005)::int AS over,
+             count(*) FILTER (WHERE r.rolled_k < p.published_k * 0.995)::int AS under,
+             coalesce(sum(r.rolled_k) / nullif(sum(p.published_k), 0) * 100, 0) AS covered_pct
+        FROM pub p JOIN roll r USING (pb_year, program_name)`);
+    const { n, over, under, covered_pct } = rows[0];
+    return [{ observed: Number(covered_pct).toFixed(1), expected: 100, variance_pct: over,
+      status: over === 0 ? 'pass' : 'fail',
+      message: over === 0
+        ? `Across ${n} system-years the budget lines tied to a weapon system total `
+          + `${Number(covered_pct).toFixed(0)}% of what the Department publishes for those systems; `
+          + `${under} fall short, which is the crosswalk missing a spares, modification or support `
+          + 'line rather than money going missing. None carries more than its published total.'
+        : `${under} of ${n} system-years reach less than the Department publishes for the system — `
+          + 'the crosswalk cannot tie back spares, modification and support lines whose titles name '
+          + `no system. ${over} reach MORE, because a budget line can be broader than one programme `
+          + '(the NGSW ammunition line, one R-1 element funding several systems), and the exhibits '
+          + 'publish no split inside a line for anything here to apportion. Both gaps are shown on '
+          + 'the system, and neither is closed by dropping links until the figures agree.' }];
+  },
+  // An alias is a search aid, so the risk it carries is not an arithmetic one:
+  // it is that "JSF" quietly starts meaning something the book never said.
+  'WBC-03': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS n,
+             count(*) FILTER (WHERE coalesce(a.match_evidence,'') = ''
+                                 OR a.match_method NOT IN ('book_parenthetical','name_parenthetical')
+                                 OR NOT EXISTS (SELECT 1 FROM dm_weapon_system s
+                                                 WHERE s.load_id = a.load_id
+                                                   AND s.program_name = a.weapon_program))::int AS bad
+        FROM dm_weapon_alias a JOIN dm_load l ON l.id = a.load_id AND l.is_current`);
+    const { n, bad } = rows[0];
+    return [{ observed: n - bad, expected: n, status: bad === 0 ? 'pass' : 'fail',
+      message: bad === 0
+        ? `${n} search abbreviations, every one of them a phrase the weapons book itself expands `
+          + 'into the named system, quoted on the row. No synonym is invented here.'
+        : `${bad} abbreviations name no evidence or no system in the book.` }];
+  },
   'EXH-09': async (c) => {
     const { rows } = await c.query(`
       SELECT count(*)::int AS n FROM dm_exhibit_program_link x
@@ -558,9 +660,14 @@ const CONTROLS = {
         'bli_title','organization','account_title','budget_activity','budget_activity_title','is_memo',
         'amount_k','quantity','cost_type_count','total_basis'],
       dm_exhibit_program: ['account','treasury_account','component','exhibit','bli','program_name','latest_pb',
-        'organization','account_title','budget_activity_title','is_memo','first_fiscal_year',
+        'organization','account_title','budget_activity','budget_activity_title','bsa','bsa_title',
+        'fund_type','appropriation','weapon_category','weapon_program','search_norm','activity_count','is_memo','first_fiscal_year',
         'last_fiscal_year','latest_request_k','latest_request_pb','lifetime_amount_k','pb_year_count','slug','in_weapons_book'],
-      dm_weapon_system: ['pb_year','program_name','category','page_no'],
+      dm_weapon_system: ['pb_year','program_name','category','page_no','prime_contractor','coverage_note'],
+      dm_weapon_system_cost: ['pb_year','program_name','page_no','appropriation','service','row_kind',
+        'fiscal_year','fy_role','amount_m','quantity','total_basis','component_count','coverage_note'],
+      dm_weapon_alias: ['alias','alias_norm','weapon_program','pb_year','designator_norm','linked_lines',
+        'match_method','match_evidence'],
       dm_exhibit_tieout: ['pb_year','measure','exhibit','published_b','citation'],
       dm_exhibit_program_link: ['exhibit','account','bli','treasury_account','bli_title',
         'program_code','program_name','is_featured','match_method','match_evidence'],

@@ -544,6 +544,74 @@ CREATE TABLE IF NOT EXISTS dm_exhibit_weapon_link (
 CREATE INDEX IF NOT EXISTS dm_exhibit_weapon_link_idx
   ON dm_exhibit_weapon_link (load_id, exhibit, account, bli);
 
+
+-- The weapons book's own cost table for each system: the SAME money the -1
+-- exhibits itemise line by line, but totalled by the Department against the
+-- system rather than against a budget line, split by appropriation and service
+-- with quantities, for the three fiscal years each book restates.
+--
+-- This is the only source here that states what a whole programme costs, and it
+-- is the only published answer to what that total covers: several pages carry a
+-- footnote -- "Includes Modification Program and Spares" -- which is kept in
+-- coverage_note beside every row it applies to, because a programme total whose
+-- scope is unstated cannot be compared with anything.
+--
+-- The book changes shape between eras exactly as the -1 books do (Base/OCO in
+-- PB2020-21, Discretionary/Mandatory in PB2026), so total_basis records which
+-- of the two column rules produced the figure, the same way dm_exhibit_line
+-- does. row_kind separates what may be added from what may not:
+--   detail       -- one service under one appropriation
+--   subtotal     -- the book's own subtotal for that appropriation
+--   total        -- the book's own total for the system
+--   block_check  -- NOT published by the book. The sum of the appropriation
+--                   blocks as extracted, carried so WBC-01 can assert the page
+--                   foots without the page's own total being compared to itself.
+-- Summing across row_kind double counts. Every query names the one it wants.
+CREATE TABLE IF NOT EXISTS dm_weapon_system_cost (
+  id              bigserial PRIMARY KEY,
+  load_id         bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  pb_year         int  NOT NULL,
+  program_name    text NOT NULL,
+  page_no         text,
+  appropriation   text,            -- RDT&E | Procurement | Mods | ... as printed
+  service         text,            -- USN/USMC | USAF | SOCOM | ... as printed
+  row_kind        text NOT NULL,   -- detail | subtotal | total | block_check
+  fiscal_year     int  NOT NULL,
+  fy_role         text NOT NULL,   -- prior_actual | enacted | request | other
+  amount_m        numeric(16,3),   -- MILLIONS of dollars, as printed
+  quantity        numeric(16,3),
+  total_basis     text NOT NULL,
+  component_count int  NOT NULL DEFAULT 0,
+  coverage_note   text             -- the page's own footnote on what is included
+);
+CREATE INDEX IF NOT EXISTS dm_weapon_system_cost_idx
+  ON dm_weapon_system_cost (load_id, program_name, pb_year, fiscal_year);
+CREATE INDEX IF NOT EXISTS dm_weapon_system_cost_kind_idx
+  ON dm_weapon_system_cost (load_id, row_kind, fy_role);
+
+-- The abbreviations the weapons book expands into a system's own name, which is
+-- the only published source for the shorthand people actually type: JSF, FLRAA,
+-- JLTV, SDB. Every row carries the sentence the expansion was read from, so an
+-- alias can be rejected one at a time. Nothing is matched on a bare acronym
+-- appearing near a system: the expansion has to share two or more significant
+-- words with the system's name, the same evidence test the weapon crosswalk
+-- uses. This table is a SEARCH aid and nothing else -- no figure is ever
+-- aggregated through it, and it is never presented as a Department mapping.
+CREATE TABLE IF NOT EXISTS dm_weapon_alias (
+  id              bigserial PRIMARY KEY,
+  load_id         bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  alias           text NOT NULL,
+  alias_norm      text NOT NULL,   -- case, spacing and punctuation removed
+  weapon_program  text NOT NULL,
+  pb_year         int  NOT NULL,
+  designator_norm text,            -- the type designators in the expanded name
+  linked_lines    int  NOT NULL DEFAULT 0,
+  match_method    text NOT NULL,   -- book_parenthetical | name_parenthetical
+  match_evidence  text NOT NULL,
+  UNIQUE (load_id, alias_norm, weapon_program)
+);
+CREATE INDEX IF NOT EXISTS dm_weapon_alias_idx ON dm_weapon_alias (load_id, alias_norm);
+
 -- The one external check on the exhibit extract. The weapons book states the
 -- same request the -1 books itemise, totalled by the Department itself, so a
 -- disagreement means the extract is wrong rather than that the sources differ.
@@ -601,6 +669,35 @@ CREATE INDEX IF NOT EXISTS dm_exhibit_program_link_idx
 ALTER TABLE dm_reconciliation ADD COLUMN IF NOT EXISTS submission_period text;
 ALTER TABLE dm_reconciliation ADD COLUMN IF NOT EXISTS periods_available int;
 ALTER TABLE dm_reconciliation ADD COLUMN IF NOT EXISTS period_row_counts text;
+
+
+-- 2026-09-09 -- the roster carries the two published taxonomies over a budget
+-- line and the class of appropriation it sits in, so /program can be filtered
+-- and sorted by them. All five are restatements of columns the exhibits already
+-- publish; the only derived one is `appropriation`, which picks a single
+-- spelling per Treasury account because the books write the same account four
+-- ways. search_norm is the same line with case, spacing and punctuation removed,
+-- which is what makes "f35" find "F-35" without a fuzzy matcher guessing.
+ALTER TABLE dm_exhibit_program ADD COLUMN IF NOT EXISTS budget_activity text;
+ALTER TABLE dm_exhibit_program ADD COLUMN IF NOT EXISTS bsa text;
+ALTER TABLE dm_exhibit_program ADD COLUMN IF NOT EXISTS bsa_title text;
+ALTER TABLE dm_exhibit_program ADD COLUMN IF NOT EXISTS fund_type text;
+ALTER TABLE dm_exhibit_program ADD COLUMN IF NOT EXISTS appropriation text;
+ALTER TABLE dm_exhibit_program ADD COLUMN IF NOT EXISTS weapon_category text;
+ALTER TABLE dm_exhibit_program ADD COLUMN IF NOT EXISTS weapon_program text;
+ALTER TABLE dm_exhibit_program ADD COLUMN IF NOT EXISTS search_norm text;
+-- A line item is not confined to one budget activity: PB2027 line ATA000 sits
+-- under Tactical Forces for its airframes and under Aircraft Spares and Repair
+-- Parts for its spares. The activity shown is the one carrying the most money
+-- in the newest book; this says how many the line actually spans.
+ALTER TABLE dm_exhibit_program ADD COLUMN IF NOT EXISTS activity_count int;
+CREATE INDEX IF NOT EXISTS dm_exhibit_program_norm_idx
+  ON dm_exhibit_program (load_id, search_norm text_pattern_ops);
+
+-- 2026-09-09 -- the weapons book names a prime contractor on every system page
+-- and, on some, states what the system's total covers.
+ALTER TABLE dm_weapon_system ADD COLUMN IF NOT EXISTS prime_contractor text;
+ALTER TABLE dm_weapon_system ADD COLUMN IF NOT EXISTS coverage_note text;
 
 -- --------------------------------------------------- oversight & knowledge --
 CREATE TABLE IF NOT EXISTS dm_audit_posture (

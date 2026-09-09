@@ -557,11 +557,24 @@ export interface ExhibitProgram {
   exhibit: string; account: string; bli: string; treasuryAccount: string | null;
   component: string | null;
   programName: string; organization: string | null; accountTitle: string | null;
-  budgetActivityTitle: string | null; latestPb: number; isMemo: boolean;
+  budgetActivity: string | null; budgetActivityTitle: string | null;
+  bsa: string | null; bsaTitle: string | null;
+  /** How many budget activities the line actually spans in its newest book. */
+  activityCount: number | null;
+  /** Procurement or RDT&E — which exhibit the line is published in, not a guess. */
+  fundType: string | null;
+  /** One spelling per Treasury account; the books write the same account four ways. */
+  appropriation: string | null;
+  /** The Department's own category, only where its own weapons book names the system. */
+  weaponCategory: string | null; weaponProgram: string | null;
+  latestPb: number; isMemo: boolean;
   firstFiscalYear: number; lastFiscalYear: number;
   latestRequestK: number; latestRequestPb: number | null;
   lifetimeAmountK: number; pbYearCount: number;
   slug: string; inWeaponsBook: boolean;
+  /** How this row met the search: text | alias | alias_designator | terms. */
+  matchReason?: string | null;
+  matchAlias?: string | null;
 }
 
 export interface ExhibitRestatement {
@@ -573,7 +586,12 @@ export interface ExhibitRestatement {
 const EXHIBIT_PROGRAM_COLS = `
   p.exhibit, p.account, p.bli, p.treasury_account AS "treasuryAccount", p.component,
   p.program_name AS "programName", p.organization, p.account_title AS "accountTitle",
-  p.budget_activity_title AS "budgetActivityTitle", p.latest_pb AS "latestPb",
+  p.budget_activity AS "budgetActivity",
+  p.budget_activity_title AS "budgetActivityTitle",
+  p.bsa, p.bsa_title AS "bsaTitle", p.activity_count AS "activityCount",
+  p.fund_type AS "fundType", p.appropriation,
+  p.weapon_category AS "weaponCategory", p.weapon_program AS "weaponProgram",
+  p.latest_pb AS "latestPb",
   p.is_memo AS "isMemo", p.first_fiscal_year AS "firstFiscalYear",
   p.last_fiscal_year AS "lastFiscalYear", p.latest_request_k AS "latestRequestK",
   p.latest_request_pb AS "latestRequestPb",
@@ -581,45 +599,154 @@ const EXHIBIT_PROGRAM_COLS = `
   p.slug, p.in_weapons_book AS "inWeaponsBook"`;
 
 export interface RosterFilters {
-  q?: string;              // free text over title, line item and account
-  organization?: string;
+  q?: string;              // free text over title, line item, account and aliases
+  organization?: string;   // the component derived from the account symbol
   accountTitle?: string;
   exhibit?: string;        // p1 | p1r | r1
+  fundType?: string;       // Procurement | RDT&E
+  appropriation?: string;  // the canonical account title
+  weaponCategory?: string; // the weapons book's own category
+  bsaTitle?: string;       // the J-book's own sub-activity
+  weaponProgram?: string;  // every line tied to one weapon system
   weaponsOnly?: boolean;
   includeMemo?: boolean;
+  sort?: string;           // see ROSTER_SORTS
+  dir?: string;            // asc | desc
   limit?: number;
   offset?: number;
 }
 
 /**
- * The roster. Ranked by the newest request rather than by lifetime dollars,
- * because a line that stopped being requested in 2021 should not outrank one
- * being asked for now — but both are returned, so neither disappears.
+ * The columns the roster may be ordered by, and the SQL for each.
+ *
+ * A whitelist rather than an interpolated column name: `sort` arrives from the
+ * query string. Every entry names a real column, so a sorted view is a
+ * shareable link and the sort applies to all 2,725 lines rather than to the
+ * sixty on the screen.
+ */
+export const ROSTER_SORTS: Record<string, string> = {
+  request: '"latestRequestK"',
+  name: '"programName"',
+  exhibit: 'exhibit',
+  account: '"treasuryAccount"',
+  appropriation: 'appropriation',
+  bli: 'bli',
+  component: 'component',
+  fund: '"fundType"',
+  category: '"weaponCategory"',
+  bsa: '"bsaTitle"',
+  years: '"lastFiscalYear"',
+  lifetime: '"lifetimeAmountK"',
+};
+
+/**
+ * Search that does not guess.
+ *
+ * Three layers, each of which can be explained on the row it produced, and no
+ * similarity score anywhere:
+ *
+ *   1. NORMALISED TEXT. Case, spacing and punctuation are removed from both the
+ *      query and the line, so "f35", "F-35" and "F 35" are one string. This is
+ *      a normalisation, not a fuzzy match: it never makes two different
+ *      designators equal.
+ *   2. PUBLISHED ABBREVIATIONS. "JSF" reaches the F-35 because the weapons book
+ *      writes "The F-35 Joint Strike Fighter (JSF)". The alias carries that
+ *      sentence, and the row says which alias matched it. No synonym is
+ *      invented here — see control WBC-03.
+ *   3. ALL TERMS PRESENT. A multi-word query matches a line carrying every one
+ *      of its words in any order, so "black hawk" and "golden dome" find their
+ *      lines without a word-order rule.
+ *
+ * A line that matches none of the three is not returned. An empty result means
+ * the filter matched nothing in this vintage — never that the Department did
+ * not publish it.
  */
 export async function getExhibitRoster(f: RosterFilters = {}) {
+  const sortCol = ROSTER_SORTS[f.sort ?? ''] ?? ROSTER_SORTS.request;
+  const dir = f.dir === 'asc' ? 'ASC' : 'DESC';
+  const nulls = 'NULLS LAST';
   const rows = await query<ExhibitProgram & { total: number }>(
-    `SELECT ${EXHIBIT_PROGRAM_COLS}, count(*) OVER () ::int AS total
-       FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current
-      WHERE ($5::boolean OR $4 = 'p1r' OR NOT p.is_memo)
-        AND ($1::text IS NULL OR (
-              p.program_name ILIKE '%' || $1 || '%'
-           OR p.bli          ILIKE '%' || $1 || '%'
-           OR p.account      ILIKE '%' || $1 || '%'
-           OR p.account_title ILIKE '%' || $1 || '%'
-           OR coalesce(p.treasury_account,'') ILIKE '%' || $1 || '%'))
-        AND ($2::text IS NULL OR p.component = $2)
-        AND ($3::text IS NULL OR p.account_title = $3)
-        AND ($4::text IS NULL OR p.exhibit = $4)
-        AND (NOT $6::boolean OR p.in_weapons_book)
-      ORDER BY p.latest_request_k DESC, p.lifetime_amount_k DESC, p.program_name
-      LIMIT $7 OFFSET $8`,
+    `WITH q AS (
+        SELECT $1::text AS raw,
+               regexp_replace(lower(coalesce($1::text,'')), '[^a-z0-9]+', '', 'g') AS norm,
+               (SELECT array_agg(t) FROM unnest(
+                  regexp_split_to_array(lower(coalesce($1::text,'')), '[^a-z0-9]+')) AS t
+                 WHERE length(t) >= 2) AS terms),
+      alias AS (
+        SELECT a.weapon_program, a.alias, a.designator_norm
+          FROM dm_weapon_alias a
+          JOIN dm_load l ON l.id = a.load_id AND l.is_current, q
+         WHERE q.norm <> '' AND a.alias_norm = q.norm),
+      hit AS (
+        SELECT ${EXHIBIT_PROGRAM_COLS.replace(/\s+/g, ' ')},
+               CASE
+                 WHEN q.norm = '' THEN NULL
+                 WHEN p.search_norm LIKE '%' || q.norm || '%' THEN 'text'
+                 WHEN EXISTS (SELECT 1 FROM alias al
+                               WHERE al.weapon_program IS NOT NULL
+                                 AND al.weapon_program = p.weapon_program) THEN 'alias'
+                 WHEN EXISTS (SELECT 1 FROM alias al, unnest(
+                                 string_to_array(coalesce(al.designator_norm,''), ' ')) AS d
+                               WHERE d <> '' AND p.search_norm LIKE '%' || d || '%')
+                   THEN 'alias_designator'
+                 ELSE 'terms'
+               END AS "matchReason",
+               (SELECT al.alias FROM alias al
+                 WHERE al.weapon_program = p.weapon_program
+                    OR EXISTS (SELECT 1 FROM unnest(
+                                 string_to_array(coalesce(al.designator_norm,''), ' ')) AS d
+                                WHERE d <> '' AND p.search_norm LIKE '%' || d || '%')
+                 LIMIT 1) AS "matchAlias"
+          FROM dm_exhibit_program p
+          JOIN dm_load l ON l.id = p.load_id AND l.is_current, q
+         WHERE ($5::boolean OR $4 = 'p1r' OR NOT p.is_memo)
+           AND ($2::text IS NULL OR p.component = $2)
+           AND ($3::text IS NULL OR p.account_title = $3)
+           AND ($4::text IS NULL OR p.exhibit = $4)
+           AND ($9::text  IS NULL OR p.fund_type = $9)
+           AND ($10::text IS NULL OR p.appropriation = $10)
+           AND ($11::text IS NULL OR p.weapon_category = $11)
+           AND ($12::text IS NULL OR p.bsa_title = $12)
+           AND ($13::text IS NULL OR p.weapon_program = $13)
+           AND (NOT $6::boolean OR p.in_weapons_book)
+           AND (q.norm = ''
+                OR p.search_norm LIKE '%' || q.norm || '%'
+                OR EXISTS (SELECT 1 FROM alias al
+                            WHERE al.weapon_program = p.weapon_program)
+                OR EXISTS (SELECT 1 FROM alias al, unnest(
+                              string_to_array(coalesce(al.designator_norm,''), ' ')) AS d
+                            WHERE d <> '' AND p.search_norm LIKE '%' || d || '%')
+                OR (q.terms IS NOT NULL AND cardinality(q.terms) > 1
+                    AND NOT EXISTS (SELECT 1 FROM unnest(q.terms) AS t
+                                     WHERE p.search_norm NOT LIKE '%' || t || '%'))))
+      SELECT hit.*, count(*) OVER () ::int AS total
+        FROM hit
+       ORDER BY ${sortCol} ${dir} ${nulls}, "programName"
+       LIMIT $7 OFFSET $8`,
     [f.q?.trim() || null, f.organization || null, f.accountTitle || null,
      f.exhibit || null, !!f.includeMemo, !!f.weaponsOnly,
-     Math.min(f.limit ?? 60, 400), f.offset ?? 0]);
+     Math.min(f.limit ?? 60, 400), f.offset ?? 0,
+     f.fundType || null, f.appropriation || null, f.weaponCategory || null,
+     f.bsaTitle || null, f.weaponProgram || null]);
   return { rows, total: rows[0]?.total ?? 0 };
 }
 
-/** Organisation and appropriation facets, with counts, for the roster filters. */
+/**
+ * Every value the roster can be filtered by, with a count beside it.
+ *
+ * Two taxonomies are returned and they answer different questions, so the page
+ * labels both rather than blending them:
+ *
+ *   weaponCategories — the Department's own grouping of major systems, read from
+ *     Program Acquisition Cost by Weapon System. Authoritative, and sparse: it
+ *     covers only the lines that tie to a system page. An empty cell means the
+ *     line is not one of the systems that book itemises, which is a fact about
+ *     the book rather than about the line.
+ *   bsaTitles — the J-book's own budget sub-activity, as printed in the P-1
+ *     ("Combat Aircraft", "Rotary", "Tactical Missiles", "Aircraft Spares and
+ *     Repair Parts"). It covers every procurement line, because it is the
+ *     structure the exhibit is organised by. The R-1 publishes none.
+ */
 export async function getExhibitFacets() {
   const organizations = await query<{ key: string; label: string; lines: number; requestK: number }>(
     `SELECT p.component AS key, p.component AS label, count(*)::int AS lines,
@@ -639,7 +766,184 @@ export async function getExhibitFacets() {
     `SELECT p.exhibit AS key, count(*)::int AS lines, sum(p.latest_request_k) AS "requestK"
        FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current
       GROUP BY 1 ORDER BY 1`);
-  return { organizations, accounts, exhibits };
+  const facet = (col: string) => query<{ key: string; lines: number; requestK: number }>(
+    `SELECT ${col} AS key, count(*)::int AS lines, sum(p.latest_request_k) AS "requestK"
+       FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+      WHERE NOT p.is_memo AND coalesce(${col}, '') <> ''
+      GROUP BY 1 ORDER BY 3 DESC NULLS LAST`);
+  const [fundTypes, appropriations, weaponCategories, bsaTitles] = await Promise.all([
+    facet('p.fund_type'), facet('p.appropriation'),
+    facet('p.weapon_category'), facet('p.bsa_title'),
+  ]);
+  return { organizations, accounts, exhibits,
+           fundTypes, appropriations, weaponCategories, bsaTitles };
+}
+
+/**
+ * Every weapon system the Department's own book names, grouped by its own
+ * category, for the roster's programme picker.
+ *
+ * `lines` is how many budget lines the evidence-bearing crosswalk ties to the
+ * system, and it can be zero: a system whose budget lines carry names no shared
+ * designator or phrase reaches is listed with nothing behind it rather than
+ * being quietly dropped or matched on a guess.
+ */
+export async function getWeaponSystemPicker() {
+  return query<{ category: string | null; programName: string; pbYear: number;
+                 aliases: string | null; lines: number; requestK: number | null }>(
+    `WITH newest AS (
+        SELECT s.program_name, max(s.pb_year) AS pb_year
+          FROM dm_weapon_system s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+         GROUP BY 1)
+      SELECT s.category, s.program_name AS "programName", s.pb_year AS "pbYear",
+             (SELECT string_agg(DISTINCT a.alias, ', ' ORDER BY a.alias)
+                FROM dm_weapon_alias a
+               WHERE a.load_id = s.load_id AND a.weapon_program = s.program_name) AS aliases,
+             (SELECT count(DISTINCT (p.exhibit, p.account, p.bli))::int
+                FROM dm_exhibit_program p
+               WHERE p.load_id = s.load_id AND p.weapon_program = s.program_name) AS lines,
+             (SELECT sum(p.latest_request_k)
+                FROM dm_exhibit_program p
+               WHERE p.load_id = s.load_id AND p.weapon_program = s.program_name
+                 AND NOT p.is_memo) AS "requestK"
+        FROM dm_weapon_system s
+        JOIN dm_load l ON l.id = s.load_id AND l.is_current
+        JOIN newest n ON n.program_name = s.program_name AND n.pb_year = s.pb_year
+       ORDER BY s.category, s.program_name`);
+}
+
+/* ------------------------------------------ what a whole programme costs ---- */
+
+export interface SystemCostRow {
+  pbYear: number; appropriation: string | null; service: string | null;
+  rowKind: string; fiscalYear: number; fyRole: FyRole;
+  amountM: number | null; quantity: number | null;
+  totalBasis: string; coverageNote: string | null;
+}
+
+/**
+ * The weapons book's own cost table for one system: the same money the -1
+ * exhibits itemise line by line, totalled by the Department against the system.
+ *
+ * row_kind separates what may be added from what may not. `detail` is one
+ * service under one appropriation, `subtotal` is the book's own subtotal for
+ * that appropriation, `total` is the book's own system total, and `block_check`
+ * is the sum of the blocks as extracted — carried only so control WBC-01 can
+ * assert the page foots, and never rendered as a figure. Summing across kinds
+ * double counts, so every caller names the one it wants.
+ */
+export async function getSystemCost(programName: string) {
+  return query<SystemCostRow>(
+    `SELECT x.pb_year AS "pbYear", x.appropriation, x.service, x.row_kind AS "rowKind",
+            x.fiscal_year AS "fiscalYear", x.fy_role AS "fyRole",
+            x.amount_m AS "amountM", x.quantity, x.total_basis AS "totalBasis",
+            x.coverage_note AS "coverageNote"
+       FROM dm_weapon_system_cost x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+      WHERE x.program_name = $1 AND x.row_kind <> 'block_check'
+      ORDER BY x.pb_year, x.fiscal_year, x.appropriation NULLS LAST, x.service NULLS LAST`,
+    [programName]);
+}
+
+export async function getSystemMeta(programName: string) {
+  const rows = await query<{ programName: string; category: string | null;
+                             pbYear: number; pageNo: string | null;
+                             primeContractor: string | null; coverageNote: string | null;
+                             books: number }>(
+    `SELECT s.program_name AS "programName", s.category, s.pb_year AS "pbYear",
+            s.page_no AS "pageNo", s.prime_contractor AS "primeContractor",
+            s.coverage_note AS "coverageNote",
+            (SELECT count(DISTINCT s2.pb_year)::int FROM dm_weapon_system s2
+              WHERE s2.load_id = s.load_id AND s2.program_name = s.program_name) AS books
+       FROM dm_weapon_system s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+      WHERE s.program_name = $1
+      ORDER BY s.pb_year DESC LIMIT 1`,
+    [programName]);
+  return rows[0] ?? null;
+}
+
+export async function getSystemAliases(programName: string) {
+  return query<{ alias: string; matchMethod: string; matchEvidence: string; pbYear: number }>(
+    `SELECT DISTINCT ON (a.alias) a.alias, a.match_method AS "matchMethod",
+            a.match_evidence AS "matchEvidence", a.pb_year AS "pbYear"
+       FROM dm_weapon_alias a JOIN dm_load l ON l.id = a.load_id AND l.is_current
+      WHERE a.weapon_program = $1
+      ORDER BY a.alias, a.pb_year DESC`,
+    [programName]);
+}
+
+/**
+ * Every budget line the crosswalk ties to one weapon system, rolled up by book
+ * year and appropriation, beside the total the Department publishes for the
+ * same system and year.
+ *
+ * The gap between the two is the point of the table, and it is a statement
+ * about the CROSSWALK, not about the money: a system's spares, modification and
+ * support lines are separate budget lines whose titles often carry no shared
+ * designator, so they cannot be tied back on evidence and are not counted here.
+ * Control WBC-02 refuses a load where a roll-up EXCEEDS the published total —
+ * that would be double counting — and publishes the shortfalls as coverage.
+ */
+export async function getSystemRollup(programName: string) {
+  return query<{ pbYear: number; fiscalYear: number; fyRole: FyRole;
+                 fundType: string | null; lines: number; amountK: number;
+                 publishedM: number | null }>(
+    `WITH rolled AS (
+        SELECT w.pb_year, f.fiscal_year, f.fy_role,
+               CASE WHEN f.exhibit = 'r1' THEN 'RDT&E' ELSE 'Procurement' END AS fund_type,
+               count(DISTINCT (f.exhibit, f.account, f.bli))::int AS lines,
+               sum(f.amount_k) AS amount_k
+          FROM dm_exhibit_weapon_link w
+          JOIN dm_load l ON l.id = w.load_id AND l.is_current
+          JOIN dm_exhibit_program_fy f
+            ON f.load_id = w.load_id AND f.exhibit = w.exhibit AND f.account = w.account
+           AND f.bli = w.bli AND f.pb_year = w.pb_year AND f.is_memo = false
+         WHERE w.weapon_program = $1
+         GROUP BY 1,2,3,4),
+      -- The book's figure for one appropriation block, by the rule the book
+      -- itself is laid out to: its Subtotal where one is printed, the block's
+      -- own row where the heading carries the figure (the CH-47 page has no
+      -- subtotal at all), and otherwise the sum of the services beneath it.
+      -- Taking only the Subtotal row silently returns nothing for a third of
+      -- these pages.
+      block AS (
+        SELECT c.pb_year, c.fiscal_year,
+               CASE WHEN c.appropriation ILIKE '%RDT%' THEN 'RDT&E' ELSE 'Procurement' END
+                 AS fund_type,
+               coalesce(
+                 max(c.amount_m) FILTER (WHERE c.row_kind = 'subtotal'),
+                 max(c.amount_m) FILTER (WHERE c.row_kind = 'detail' AND c.service IS NULL),
+                 sum(c.amount_m) FILTER (WHERE c.row_kind = 'detail' AND c.service IS NOT NULL)
+               ) AS amount_m
+          FROM dm_weapon_system_cost c
+          JOIN dm_load l ON l.id = c.load_id AND l.is_current
+         WHERE c.program_name = $1 AND c.appropriation IS NOT NULL
+         GROUP BY c.pb_year, c.fiscal_year, c.appropriation)
+      SELECT r.pb_year AS "pbYear", r.fiscal_year AS "fiscalYear", r.fy_role AS "fyRole",
+             r.fund_type AS "fundType", r.lines, r.amount_k AS "amountK",
+             (SELECT sum(b.amount_m) FROM block b
+               WHERE b.pb_year = r.pb_year AND b.fiscal_year = r.fiscal_year
+                 AND b.fund_type = r.fund_type) AS "publishedM"
+        FROM rolled r
+       ORDER BY r.pb_year, r.fiscal_year, r.fund_type`,
+    [programName]);
+}
+
+/** Every budget line tied to one weapon system, for the system view's table. */
+export async function getSystemLines(programName: string) {
+  return query<ExhibitProgram & { matchMethod: string; matchEvidence: string }>(
+    `SELECT ${EXHIBIT_PROGRAM_COLS},
+            w.match_method AS "matchMethod", w.match_evidence AS "matchEvidence"
+       FROM dm_exhibit_program p
+       JOIN dm_load l ON l.id = p.load_id AND l.is_current
+       JOIN LATERAL (
+         SELECT match_method, match_evidence FROM dm_exhibit_weapon_link w2
+          WHERE w2.load_id = p.load_id AND w2.exhibit = p.exhibit
+            AND w2.account = p.account AND w2.bli = p.bli
+            AND w2.weapon_program = $1
+          ORDER BY w2.pb_year DESC LIMIT 1) w ON true
+      WHERE p.weapon_program = $1
+      ORDER BY p.latest_request_k DESC NULLS LAST, p.program_name`,
+    [programName]);
 }
 
 export async function getExhibitProgram(exhibit: string, account: string, bli: string) {

@@ -346,6 +346,33 @@
       "authority": "Internal reporting standard",
       "severity": "critical",
       "sort_order": 260
+    },
+    {
+      "code": "WBC-01",
+      "name": "Each weapon system's cost table foots to its own printed total",
+      "assertion": "For every weapon system and fiscal year, the appropriation blocks extracted from the page sum to the total the page prints, within the greater of $0.6M and 0.2%. At least 97% of system-years must foot.",
+      "rationale": "The Program Acquisition Cost by Weapon System book prints a total beneath the appropriation blocks it is made of, so a page that does not foot has been read wrongly. The book changes shape between eras -- Base/OCO in PB2020-21, Discretionary/Mandatory in PB2026 -- and a column assigned to the wrong year publishes an OCO or reconciliation add as a whole year. A small number of pages are typeset so tightly that a figure cannot be assigned to a column at all; those are named rather than absorbed, which is why this is a threshold rather than an absolute.",
+      "authority": "Program Acquisition Cost by Weapon System, FY2020-FY2026 President's Budget",
+      "severity": "high",
+      "sort_order": 270
+    },
+    {
+      "code": "WBC-02",
+      "name": "A weapon system's budget lines never exceed its published cost",
+      "assertion": "For each weapon system and book year, the non-memo request on every budget line tied to that system is compared with the system total the weapons book publishes. Neither direction is repaired; both are published on the system.",
+      "rationale": "This is the per-system form of EXH-08 and the only check on the weapon crosswalk that reaches outside the extract. A shortfall means the crosswalk has not found some of the system's spares, modification or support lines -- their titles carry no designator to tie back -- which is why no programme total on this site is presented as complete. An excess means a budget line is broader than the programme: the Next Generation Squad Weapon ammunition line funds ammunition the weapons-book page excludes, and one R-1 program element can fund several systems. The exhibits publish no split inside a line, so nothing here apportions one. The control exists to state the gap on the page beside the figures; it must never be satisfied by dropping links until the two numbers agree, which would be fitting the crosswalk to the answer.",
+      "authority": "Program Acquisition Cost by Weapon System; P-1 and R-1 exhibits, FY2020-FY2027",
+      "severity": "high",
+      "sort_order": 280
+    },
+    {
+      "code": "WBC-03",
+      "name": "Every search abbreviation is one the weapons book itself expands",
+      "assertion": "Every row in the alias table names a system that exists in the weapons book, quotes the phrase the expansion was read from, and was made by one of the two recorded methods.",
+      "rationale": "The alias table is what lets a search for 'JSF' find the F-35. Its risk is not arithmetic -- no figure is ever aggregated through it -- but that an abbreviation quietly starts meaning something the Department never wrote. So an alias exists only where the book expands it into the system's own name, sharing two or more significant words with it, and the sentence is carried on the row so a reader can reject one alias without distrusting the rest. The same evidence test the weapon crosswalk uses.",
+      "authority": "Program Acquisition Cost by Weapon System, FY2020-FY2026",
+      "severity": "moderate",
+      "sort_order": 290
     }
   ],
   "audit_posture": {

@@ -825,6 +825,25 @@ def _designators(name, strong_only=False):
     return out
 
 
+# The token that separates two programmes is often the one a stop list throws
+# away. "Small Diameter Bomb (SDB) I" and "SMALL DIAMETER BOMB II" share every
+# significant word -- Small, Diameter, Bomb -- and differ only in a roman
+# numeral that _STOP removes, so a phrase match cannot tell them apart and files
+# SDB II's $195M under SDB I. A variant marker is therefore never evidence FOR a
+# match, but a disagreement between two of them is decisive evidence against one.
+_VARIANT = re.compile(r"\b(?:(I{1,3}|IV|VI{0,3}|IX)|BLOCK\s*([0-9IVX]+)|INCREMENT\s*([0-9IVX]+))\b")
+
+
+def _variants(name):
+    return {tuple(g for g in m.groups() if g) for m in _VARIANT.finditer((name or "").upper())}
+
+
+def _variant_conflict(left, right):
+    """True when both names carry a variant marker and they disagree."""
+    a, b = _variants(left), _variants(right)
+    return bool(a) and bool(b) and not (a & b)
+
+
 def _designator_link(left, right):
     """Shared designator plus the strength of the evidence, or None.
 
@@ -839,26 +858,296 @@ def _designator_link(left, right):
     return None
 
 
+# ------------------------------------------- the weapons book's cost tables ---
+# Every weapon-system page in Program Acquisition Cost by Weapon System carries a
+# table of the SAME money the -1 exhibits itemise line by line, but totalled by
+# the Department against the system rather than against a budget line: RDT&E and
+# Procurement, split by service, with quantities, for three fiscal years. It is
+# the only place in these sources that states what a whole programme costs, and
+# several pages say in a footnote what that total covers -- "Includes
+# Modification Program and Spares" -- which is the only published answer to
+# whether spares and modification money is inside the figure or beside it.
+#
+# The book changes shape between eras exactly as the -1 books do: PB2020 and
+# PB2021 split the budget year into Base / OCO / Total Request, PB2026 splits it
+# into Discretionary / Mandatory / TOTAL, and PB2022-PB2025 print one column per
+# year. So the fiscal-year figure is picked by the SAME two rules used for the
+# exhibits -- the right-most column labelled Total, or the sum of that year's
+# components where the book labels none -- and which rule fired is recorded per
+# row in total_basis. A right-most-column rule alone would publish the PB2026
+# mandatory add as the whole year.
+
+_WB_TOTAL_SUB = re.compile(r"Total Request|TOTAL|Total$")
+_WB_ANY_SUB = re.compile(r"Base Budget|OCO Budget|Total Request|\(DISC\.\)|\(MAND\.\)|TOTAL")
+_WB_FY = re.compile(r"FY\s*(20\d\d)")
+_WB_NUM = re.compile(r"^\(?\$?-?[\d,]+(?:\.\d+)?\)?$")
+_WB_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+_WB_DASH = ("-", "--", "–", "—")
+
+
+def _wb_clean(s):
+    """Category and system names carry stray control bytes in some books."""
+    return _WS.sub(" ", _WB_CTRL.sub("", s or "")).strip()
+
+
+def _wb_tokens(line):
+    return [(m.group(0), m.start(), m.end()) for m in re.finditer(r"\S+", line)]
+
+
+def _wb_num(t):
+    t = t.strip().replace("$", "").replace(",", "")
+    if t in _WB_DASH or not t: return None
+    neg = t.startswith("(") and t.endswith(")")
+    try: v = float(t.strip("()"))
+    except ValueError: return None
+    return -v if neg else v
+
+
+def _wb_geometry(lines, ruler_i):
+    """The table's columns as [(fiscal_year, is_total_column, qty, amt)], or an error."""
+    rt = _wb_tokens(lines[ruler_i])
+    if len(rt) % 2: return None, "odd number of column headers"
+    pairs = []
+    for a, b in zip(rt[0::2], rt[1::2]):
+        if {a[0], b[0]} != {"Qty", "$M"}: return None, "column headers are not Qty/$M pairs"
+        q, m = (a, b) if a[0] == "Qty" else (b, a)
+        pairs.append({"lo": min(a[1], b[1]), "hi": max(a[2], b[2]), "qty": q, "amt": m})
+    fy, subs = [], []
+    for l in lines[max(0, ruler_i - 4):ruler_i]:
+        fy += [(int(m.group(1)), m.start()) for m in _WB_FY.finditer(l)]
+        subs += [(m.group(0), m.start()) for m in _WB_ANY_SUB.finditer(l)]
+    if not fy: return None, "no fiscal-year labels above the columns"
+    fy.sort(key=lambda x: x[1]); subs.sort(key=lambda x: x[1])
+    # Extra columns are always sub-columns of the budget year, and sub-labels
+    # always describe the trailing columns. Anything else is a shape this parser
+    # has not seen: refuse it rather than guess, because one wrong column here
+    # publishes an OCO add or a reconciliation add as a whole year.
+    if len(pairs) == len(fy):
+        years = [y for y, _ in fy]
+    elif subs and len(pairs) == len(fy) - 1 + len(subs):
+        years = [y for y, _ in fy[:-1]] + [fy[-1][0]] * len(subs)
+    else:
+        return None, (f"unrecognised header: {len(pairs)} columns, "
+                      f"{len(fy)} year labels, {len(subs)} sub-labels")
+    total_at = set()
+    if subs:
+        base = len(pairs) - len(subs)
+        total_at = {base + i for i, (t, _) in enumerate(subs) if _WB_TOTAL_SUB.fullmatch(t)}
+    return [{"fy": years[i], "is_total": i in total_at, **p}
+            for i, p in enumerate(pairs)], None
+
+
+def _wb_bands(cols):
+    """Each column header widened to the midpoint of its neighbours."""
+    flat = []
+    for c in cols:
+        flat.append((c, "qty", c["qty"])); flat.append((c, "amt", c["amt"]))
+    flat.sort(key=lambda x: x[2][1])
+    out = []
+    for i, (c, kind, tok) in enumerate(flat):
+        lo = -1 if i == 0 else (flat[i - 1][2][2] + tok[1]) / 2
+        hi = 10 ** 6 if i == len(flat) - 1 else (tok[2] + flat[i + 1][2][1]) / 2
+        out.append((c, kind, lo, hi))
+    return out
+
+
+def _wb_split_row(line):
+    """(label, where the figures start).
+
+    The label is everything before the run of numbers that ends the line.
+    Splitting on the column positions truncates 'AH-64E New Build'; splitting on
+    the first digit truncates 'Total   13,189'."""
+    toks = _wb_tokens(line)
+    i = len(toks)
+    while i > 0 and (_WB_NUM.match(toks[i - 1][0]) or toks[i - 1][0] in _WB_DASH):
+        i -= 1
+    if i == 0: return "", (toks[0][1] if toks else 0)
+    if i == len(toks): return line.strip(" ."), 10 ** 6
+    return line[:toks[i][1]].strip(" ."), toks[i][1]
+
+
+def _wb_cells(line, bands, figure_start):
+    got = {}
+    for t, s, e in _wb_tokens(line):
+        if s < figure_start: continue
+        if not _WB_NUM.match(t): continue   # a dash is an absent figure, not a zero
+        c = (s + e) / 2
+        for col, kind, lo, hi in bands:
+            if lo <= c < hi:
+                # The figures are right-aligned to their column, so where two
+                # tokens fall in one band -- which happens on rows typeset
+                # tightly enough that a figure drifts left out of its own column
+                # -- the right-most is the one actually aligned to this column.
+                got.setdefault(id(col), {})[kind] = _wb_num(t)
+                break
+    return got
+
+
+def _wb_fold(cols, got):
+    """One figure per fiscal year, by the exhibits' own two rules."""
+    by_year = {}
+    for c in cols: by_year.setdefault(c["fy"], []).append(c)
+    out = {}
+    for year, group in by_year.items():
+        cells = [(c, got.get(id(c), {})) for c in group]
+        if len(group) == 1:
+            amt, qty = cells[0][1].get("amt"), cells[0][1].get("qty")
+            basis = "sole_column"
+        else:
+            tot = [g for c, g in cells if c["is_total"]]
+            if tot:
+                amt, qty, basis = tot[-1].get("amt"), tot[-1].get("qty"), "total_column"
+            else:
+                parts = [g.get("amt") for _, g in cells if g.get("amt") is not None]
+                qtys = [g.get("qty") for _, g in cells if g.get("qty") is not None]
+                amt = round(sum(parts), 3) if parts else None
+                qty = round(sum(qtys), 3) if qtys else None
+                basis = "sum_of_components"
+        if amt is None and qty is None: continue
+        out[year] = {"amount_m": amt, "quantity": qty, "total_basis": basis,
+                     "component_count": len(group)}
+    return out
+
+
+def _wb_cost_table(page):
+    """({rows, note, shape}, error) for one weapon-system page."""
+    lines = page.split("\n")
+    ruler_i = None
+    for i, l in enumerate(lines):
+        t = _wb_tokens(l)
+        if len(t) >= 2 and all(x[0] in ("Qty", "$M") for x in t):
+            ruler_i = i; break
+    if ruler_i is None: return None, "no Qty/$M column headers on the page"
+    cols, err = _wb_geometry(lines, ruler_i)
+    if err: return None, err
+    bands = _wb_bands(cols)
+    rows, block, block_indent, note = [], None, -1, None
+    carry, carry_at = None, -9
+    for idx, l in enumerate(lines[ruler_i + 1:]):
+        s = l.strip()
+        if not s: continue
+        if s.startswith("Note:"):
+            note = _WS.sub(" ", s[5:].split("Numbers may not")[0]).strip() or note
+            break
+        if s.startswith("Numbers may not"): break
+        label, figure_start = _wb_split_row(l)
+        indent = len(l) - len(l.lstrip())
+        if not label or not re.search(r"[A-Za-z]", label):
+            # A wrapped label puts its figures on a line of their own:
+            # "Chemical Agents and" / the figures / "Munitions Destruction".
+            if not label and carry and idx - carry_at <= 2:
+                label, indent = carry, 0
+            else:
+                continue
+        years = _wb_fold(cols, _wb_cells(l, bands, figure_start))
+        low = label.lower()
+        kind = "total" if low == "total" else "subtotal" if low == "subtotal" else "detail"
+        if not years:                      # a heading, or a row that is all dashes
+            if kind == "detail":
+                # Only a line at the level of the current heading opens a new
+                # appropriation. A deeper one is a service with nothing to
+                # report, and promoting it would hand the block's Subtotal to
+                # the wrong parent, which double counts: the services under the
+                # real parent are then added as well.
+                if block is None or indent <= block_indent:
+                    block, block_indent = label, indent
+                carry, carry_at = label, idx
+            continue
+        service = None
+        if kind == "detail":
+            # A valued row at or left of its heading is a sibling of that
+            # heading rather than a member of it: "Mods" sits beside RDT&E and
+            # Procurement as a third addend, and on pages with no service split
+            # the RDT&E heading carries the figure itself.
+            if block is None or indent <= block_indent:
+                block, block_indent = label, indent
+            else:
+                service = label
+        rows.append({"appropriation": None if kind == "total" else block,
+                     "service": service, "row_kind": kind, "years": years})
+    return {"rows": rows, "note": note}, None
+
+
+def _wb_block_total(rows, fy):
+    """The sum of the appropriation blocks for one fiscal year.
+
+    A block counts once: its Subtotal where the book prints one, its own row
+    where it carries the figure itself, otherwise the sum of its services."""
+    blocks = {}
+    for r in rows:
+        if r["row_kind"] == "total": continue
+        amt = r["years"].get(fy, {}).get("amount_m")
+        if amt is None: continue
+        slot = blocks.setdefault(r["appropriation"],
+                                 {"subtotal": None, "own": None, "children": 0.0})
+        if r["row_kind"] == "subtotal": slot["subtotal"] = amt
+        elif r["service"] is None: slot["own"] = amt
+        else: slot["children"] += amt
+    return round(sum(s["subtotal"] if s["subtotal"] is not None else
+                     s["own"] if s["own"] is not None else s["children"]
+                     for s in blocks.values()), 3)
+
+
+# An abbreviation is an alias for a system only when the book expands it into
+# the system's own name. "The F-35 Joint Strike Fighter (JSF)" is evidence;
+# "Close Air Support (CAS)" on the same page is not, and neither is "(ISR)".
+# The test is the one the weapon crosswalk already uses: two or more shared
+# significant words. Nothing is matched on a single common word.
+_WB_PAREN = re.compile(r"([A-Z][A-Za-z0-9\-/&' ]{3,60}?)\s*\(([A-Z][A-Za-z0-9\-/]{1,14})\)")
+
+
+def _wb_aliases(name, body):
+    out = []
+    nw = _words(name)
+    for long, ab in _WB_PAREN.findall(body):
+        long = _WS.sub(" ", long).strip()
+        shared = _words(long) & nw
+        if len(shared) < 2: continue
+        if ab.upper() in _STOP or ab.upper() in nw: continue
+        out.append({"alias": ab, "expands_to": name, "match_method": "book_parenthetical",
+                    "match_evidence": f"{long} ({ab})"[:300]})
+    # An abbreviation printed inside the system's own name needs no corroboration.
+    for long, ab in _WB_PAREN.findall(name):
+        if ab.upper() in _STOP: continue
+        out.append({"alias": ab, "expands_to": name, "match_method": "name_parenthetical",
+                    "match_evidence": name[:300]})
+    seen, uniq = set(), []
+    for a in out:
+        if a["alias"].upper() in seen: continue
+        seen.add(a["alias"].upper()); uniq.append(a)
+    return uniq
+
+
+_WB_PRIME = re.compile(r"Prime Contractor\(?s?\)?\s*:?\s*(.+)", re.S)
+
 def _weapon_book(root, pb):
-    """[{program_name, category, page_no}] for the PB(pb) weapons book, or []."""
+    """What the PB(pb) weapons book states, or empty structures.
+
+    Returns {systems, costs, aliases}: one system row per page as before, plus
+    the page's cost table -- the Department's own total for the same money the
+    -1 exhibits itemise -- and the abbreviations the book expands into a
+    system's own name, which is the only published source of the shorthand
+    people actually search for ("JSF", "FLRAA", "SDB")."""
     import glob, subprocess
+    empty = {"systems": [], "costs": [], "aliases": []}
     hits = sorted(glob.glob(os.path.join(
         root, f"FY{pb}/_Year-Level/Program-Acquisition-Costs-by-Weapons-System_*.pdf")))
-    if not hits: return []
+    if not hits: return empty
     try:
         txt = subprocess.run(["pdftotext", "-layout", hits[0], "-"],
                              capture_output=True, text=True, timeout=180).stdout
     except (OSError, subprocess.SubprocessError) as e:
-        print(f"  FY{pb} weapons book: pdftotext unavailable ({e}), skipped"); return []
+        print(f"  FY{pb} weapons book: pdftotext unavailable ({e}), skipped"); return empty
     head = f"FY {pb} Program Acquisition Cost"
-    out, seen = [], set()
+    systems, costs, aliases, seen = [], [], [], set()
+    unparsed = collections.Counter()
     for page in txt.split("\f"):
         ne = [l.strip() for l in page.split("\n") if l.strip()]
         if len(ne) < 3 or not ne[0].startswith(head): continue
         page_no = cat = None
         for i in range(len(ne) - 1, 0, -1):
             if _WB_PAGE.fullmatch(ne[i]):
-                page_no, cat = ne[i], ne[i - 1]
+                page_no, cat = ne[i], _wb_clean(ne[i - 1])
                 break
         if not page_no: continue                    # front matter
         # Every weapon-system page names a prime contractor; the section dividers
@@ -866,13 +1155,66 @@ def _weapon_book(root, pb):
         # That one string is what separates 86 real systems from 16 chapter heads
         # in the PB2026 book, and it needs no per-book list to maintain.
         if "Prime Contractor" not in page: continue
-        name = ne[1]
+        name = _wb_clean(ne[1])
         if name == cat or _WB_DIVIDER.match(name): continue   # category divider
         if (name, page_no) in seen: continue
         seen.add((name, page_no))
-        out.append({"pb_year": pb, "program_name": name, "category": cat,
-                    "page_no": page_no})
-    return out
+
+        prime = None
+        m = _WB_PRIME.search(page)
+        if m:
+            prime = _WS.sub(" ", m.group(1).split("Numbers may not")[0]).strip()
+            prime = prime.split("  ")[0][:400] or None
+
+        table, err = _wb_cost_table(page)
+        if err:
+            unparsed[err] += 1
+        else:
+            for r in table["rows"]:
+                for fy, v in sorted(r["years"].items()):
+                    costs.append({
+                        "pb_year": pb, "program_name": name, "page_no": page_no,
+                        "appropriation": (r["appropriation"] or "")[:120] or None,
+                        "service": (r["service"] or "")[:60] or None,
+                        "row_kind": r["row_kind"],
+                        "fiscal_year": fy,
+                        "fy_role": ("prior_actual" if fy == pb - 2 else
+                                    "enacted" if fy == pb - 1 else
+                                    "request" if fy == pb else "other"),
+                        "amount_m": v["amount_m"], "quantity": v["quantity"],
+                        "total_basis": v["total_basis"],
+                        "component_count": v["component_count"],
+                        "coverage_note": (table["note"] or "")[:300] or None})
+            # The page's own footing: the system total against the sum of its
+            # appropriation blocks. Published as a finding rather than fixed --
+            # a handful of pages are typeset so tightly that a figure cannot be
+            # assigned to a column with confidence, and saying which ones is
+            # more honest than quietly absorbing them.
+            tot = next((r for r in table["rows"] if r["row_kind"] == "total"), None)
+            for fy, v in (tot["years"].items() if tot else []):
+                if v["amount_m"] is None: continue
+                s = _wb_block_total(table["rows"], fy)
+                costs.append({
+                    "pb_year": pb, "program_name": name, "page_no": page_no,
+                    "appropriation": None, "service": None, "row_kind": "block_check",
+                    "fiscal_year": fy,
+                    "fy_role": ("prior_actual" if fy == pb - 2 else
+                                "enacted" if fy == pb - 1 else
+                                "request" if fy == pb else "other"),
+                    "amount_m": s, "quantity": None,
+                    "total_basis": v["total_basis"], "component_count": 0,
+                    "coverage_note": (table["note"] or "")[:300] or None})
+
+        body = " ".join(ne[2:16])
+        for a in _wb_aliases(name, body):
+            aliases.append({"pb_year": pb, **a})
+        systems.append({"pb_year": pb, "program_name": name, "category": cat,
+                        "page_no": page_no, "prime_contractor": prime,
+                        "coverage_note": ((table or {}).get("note") or "")[:300] or None})
+    if unparsed:
+        print(f"  FY{pb} weapons book: {sum(unparsed.values())} cost tables not read "
+              f"-- {dict(list(unparsed.items())[:3])}")
+    return {"systems": systems, "costs": costs, "aliases": aliases}
 
 
 # The weapons book's own introduction states the Department's investment request
@@ -923,32 +1265,89 @@ def _link_weapons(weapons, programs):
     by_pb = collections.defaultdict(list)
     for w in weapons:
         by_pb[w["pb_year"]].append((w, _designators(w["program_name"]), _words(w["program_name"])))
-    links = []
+    links, ambiguous = [], 0
     for p in programs:
         cand = by_pb.get(p["latest_pb"]) or by_pb.get(max(by_pb) if by_pb else None) or []
         pd, pw = _designators(p["program_name"]), _words(p["program_name"])
-        best = None
+        best, runner = None, None
         for w, wd, ww in cand:
+            if _variant_conflict(p["program_name"], w["program_name"]):
+                continue                     # SDB I is not SDB II
             hit = _designator_link(p["program_name"], w["program_name"])
             if hit:
                 token, how = hit
                 score = (200 if how == "designator" else 100) + len(pw & ww)
-                if not best or score > best[0]:
-                    best = (score, w, how, token)
-                continue
-            shared_w = pw & ww
-            if len(shared_w) >= 3 and not pd and not wd:
-                score = len(shared_w)
-                if not best or score > best[0]:
-                    best = (score, w, "phrase", ";".join(sorted(shared_w)[:4]))
+            else:
+                shared_w = pw & ww
+                if len(shared_w) < 3 or pd or wd: continue
+                score, how, token = len(shared_w), "phrase", ";".join(sorted(shared_w)[:4])
+            if not best or score > best[0]:
+                runner, best = best, (score, w, how, token)
+            elif not runner or score > runner[0]:
+                runner = (score, w, how, token)
         if not best: continue
+        # Two systems that fit equally well is not a match to be broken by
+        # iteration order. "Small Diameter Bomb", with no variant marker of its
+        # own, fits SDB I and SDB II exactly as well; naming one of them would be
+        # a guess wearing the same evidence string as a real match, so it gets
+        # no row -- the rule the designator matcher already follows.
+        if runner and runner[0] == best[0] and runner[1]["program_name"] != best[1]["program_name"]:
+            ambiguous += 1
+            continue
         _, w, how, ev = best
         links.append({"account": p["account"], "exhibit": p["exhibit"], "bli": p["bli"],
                       "pb_year": w["pb_year"], "weapon_program": w["program_name"],
                       "weapon_category": w["category"], "weapon_page": w["page_no"],
                       "match_method": how, "match_evidence": ev})
+    if ambiguous:
+        print(f"  weapons book: {ambiguous} budget lines fit two systems equally well "
+              f"and were left unlinked rather than assigned to one")
     return links
 
+
+# --------------------------------------------------- taxonomy and searching ---
+# Two published taxonomies sit over these lines and they answer different
+# questions, so both are carried and both are labelled:
+#
+#   the weapons book's category   -- the Department's own grouping of major
+#     systems (Aircraft & Related Systems, Missiles & Munitions, ...). It is
+#     authoritative and it is sparse: it covers only the lines that tie to a
+#     system page.
+#   the J-book's own hierarchy    -- appropriation, budget activity and budget
+#     sub-activity as printed in the -1 exhibits (Combat Aircraft, Rotary,
+#     Tactical Missiles, ...). It covers every line, because it is the
+#     structure the exhibit is organised by.
+#
+# Neither is invented here, and neither is presented as the other. What IS
+# derived is the choice of one spelling per account: the exhibits write the same
+# appropriation four ways across eight books ("Research, Development, Test &
+# Eval, AF" and "Research, Development, Test and Evaluation, Air Force" are one
+# account), so the canonical label is the longest spelling seen for that
+# Treasury account, and the account symbol -- not the label -- is the key.
+
+def _canonical_appropriations(lines):
+    """{treasury_account: the longest title the books give it}."""
+    best = {}
+    for l in lines:
+        k = l.get("treasury_account") or l.get("account")
+        t = (l.get("account_title") or "").strip()
+        if not k or not t: continue
+        if len(t) > len(best.get(k, "")): best[k] = t
+    return best
+
+
+# The exhibit a line is published in IS its appropriation class: the P-1 and the
+# P-1R are procurement exhibits and the R-1 is the research and development
+# exhibit. This is a restatement of the source, not a classification of it.
+FUND_TYPE = {"p1": "Procurement", "p1r": "Procurement", "r1": "RDT&E"}
+
+
+def _search_norm(*parts):
+    """Case, punctuation and spacing removed, so 'f35', 'F-35' and 'F 35' are one
+    string. This is what makes the roster findable without a fuzzy matcher
+    guessing: the normalisation is exact and reversible in the sense that
+    matters -- it never makes two different designators equal."""
+    return " ".join(re.sub(r"[^a-z0-9]+", "", (p or "").lower()) for p in parts if p)
 
 def step_exhibits(out):
     _exhibit_preflight()
@@ -1043,8 +1442,11 @@ def step_exhibits(out):
                         "program_name": title, "latest_pb": pb,
                         "organization": base["organization"],
                         "account_title": base["account_title"],
+                        "budget_activity": base["budget_activity"],
                         "budget_activity_title": base["budget_activity_title"],
-                        "is_memo": is_memo,
+                        "bsa": base["bsa"], "bsa_title": base["bsa_title"],
+                        "fund_type": FUND_TYPE.get(ex, "Other"),
+                        "is_memo": is_memo, "ba_weight": collections.Counter(),
                         "first_fiscal_year": fy, "last_fiscal_year": fy,
                         "latest_request_k": 0.0, "latest_request_pb": None,
                         "lifetime_amount_k": 0.0,
@@ -1052,7 +1454,19 @@ def step_exhibits(out):
                     if pb >= p["latest_pb"]:
                         p["latest_pb"], p["program_name"] = pb, title
                         p["account_title"] = base["account_title"]
-                        p["budget_activity_title"] = base["budget_activity_title"]
+                    # A budget line item is NOT confined to one budget activity.
+                    # In the PB2027 P-1, line ATA000 appears under BA 03 Tactical
+                    # Forces for $16.6B and again under BA 10 Aircraft Spares and
+                    # Repair Parts for $1.0B -- the same line, its airframe money
+                    # and its spares money filed in different activities. Taking
+                    # whichever row happened to be read last labelled the F-35
+                    # procurement line "Aircraft Spares and Repair Parts". So the
+                    # activity shown is the one carrying the most money in the
+                    # newest book, and how many the line spans is carried beside
+                    # it rather than hidden.
+                    p["ba_weight"][(pb, base["budget_activity"],
+                                    base["budget_activity_title"],
+                                    base["bsa"], base["bsa_title"])] += abs(amt)
                     p["first_fiscal_year"] = min(p["first_fiscal_year"], fy)
                     p["last_fiscal_year"]  = max(p["last_fiscal_year"], fy)
                     p["pb_years"].add(pb)
@@ -1089,6 +1503,13 @@ def step_exhibits(out):
     for p in prog.values():
         p = dict(p)
         p["pb_year_count"] = len(p.pop("pb_years"))
+        weight = p.pop("ba_weight")
+        newest = [k for k in weight if k[0] == p["latest_pb"]] or list(weight)
+        if newest:
+            best = max(newest, key=lambda k: weight[k])
+            _, p["budget_activity"], p["budget_activity_title"], bsa, bsa_title = best
+            p["bsa"], p["bsa_title"] = bsa, bsa_title
+            p["activity_count"] = len({(k[1], k[3]) for k in newest})
         p["latest_request_k"] = round(p["latest_request_k"], 3)
         p["lifetime_amount_k"] = round(p["lifetime_amount_k"], 3)
         p["slug"] = re.sub(r"[^a-z0-9]+", "-",
@@ -1096,11 +1517,15 @@ def step_exhibits(out):
         prog_rows.append(p)
     prog_rows.sort(key=lambda x: (x["exhibit"], x["account"], x["bli"]))
 
-    weapons = []
+    weapons, wb_costs, wb_aliases = [], [], []
     for pb in PB_YEARS:
         w = _weapon_book(root, pb)
-        if w: print(f"  FY{pb} weapons book: {len(w)} weapon systems")
-        weapons.extend(w)
+        if w["systems"]:
+            print(f"  FY{pb} weapons book: {len(w['systems'])} weapon systems, "
+                  f"{len(w['costs']):,} cost rows, {len(w['aliases'])} abbreviations")
+        weapons.extend(w["systems"])
+        wb_costs.extend(w["costs"])
+        wb_aliases.extend(w["aliases"])
     tieouts = []
     for pb in PB_YEARS:
         tieouts.extend(_weapon_book_totals(root, pb))
@@ -1110,9 +1535,50 @@ def step_exhibits(out):
             for t in tieouts if t["measure"] == "procurement"))
 
     links = _link_weapons(weapons, prog_rows)
-    linked = {(l["account"], l["exhibit"], l["bli"]) for l in links}
+    linked = {}
+    for l in sorted(links, key=lambda x: x["pb_year"]):
+        linked[(l["account"], l["exhibit"], l["bli"])] = l
+    canon = _canonical_appropriations(lines)
     for p in prog_rows:
-        p["in_weapons_book"] = (p["account"], p["exhibit"], p["bli"]) in linked
+        k = (p["account"], p["exhibit"], p["bli"])
+        l = linked.get(k)
+        p["in_weapons_book"] = l is not None
+        # The Department's own category, carried only where the Department's own
+        # book names the system. An empty cell here is not "uncategorised": it
+        # means this line is not one of the major systems the weapons book
+        # itemises, which is a fact about the book rather than about the line.
+        p["weapon_category"] = (l or {}).get("weapon_category")
+        p["weapon_program"] = (l or {}).get("weapon_program")
+        p["appropriation"] = canon.get(p["treasury_account"] or p["account"],
+                                       p["account_title"])
+        p["search_norm"] = _search_norm(
+            p["program_name"], p["bli"], p["account"], p["treasury_account"],
+            p["appropriation"], p.get("bsa_title"), p.get("weapon_program"))
+
+    # One row per abbreviation the weapons book expands into a system's own
+    # name. This is what lets "JSF" find the F-35 without the site inventing a
+    # synonym list: the book wrote the expansion, and the row carries it.
+    alias_rows, aseen = [], set()
+    wl_by_program = collections.defaultdict(set)
+    for l in links:
+        wl_by_program[l["weapon_program"]].add((l["exhibit"], l["account"], l["bli"]))
+    for a in sorted(wb_aliases, key=lambda x: -x["pb_year"]):
+        key = (a["alias"].upper(), a["expands_to"])
+        if key in aseen: continue
+        aseen.add(key)
+        alias_rows.append({
+            "alias": a["alias"][:60],
+            "alias_norm": re.sub(r"[^a-z0-9]+", "", a["alias"].lower()),
+            "weapon_program": a["expands_to"],
+            "pb_year": a["pb_year"],
+            "designator_norm": " ".join(sorted(
+                re.sub(r"[^a-z0-9]+", "", d.lower())
+                for d in _designators(a["expands_to"], True))) or None,
+            "linked_lines": len(wl_by_program.get(a["expands_to"], ())),
+            "match_method": a["match_method"],
+            "match_evidence": a["match_evidence"]})
+    print(f"  weapons book: {len(alias_rows)} abbreviations the book expands into a "
+          f"system's own name")
     print(f"  weapons book: {len(weapons)} system-years, {len(links):,} budget lines linked "
           + ", ".join(f"{n} {m}" for m, n in
                       sorted(collections.Counter(l["match_method"] for l in links).items())))
@@ -1130,6 +1596,8 @@ def step_exhibits(out):
          "dm_exhibit_program_fy": rollup_rows,
          "dm_exhibit_program": prog_rows,
          "dm_weapon_system": weapons,
+         "dm_weapon_system_cost": wb_costs,
+         "dm_weapon_alias": alias_rows,
          "dm_exhibit_weapon_link": links,
          "dm_exhibit_tieout": tieouts},
         source_path="knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification/_Archive",
