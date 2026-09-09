@@ -373,6 +373,24 @@
       "authority": "Program Acquisition Cost by Weapon System, FY2020-FY2026",
       "severity": "moderate",
       "sort_order": 290
+    },
+    {
+      "code": "FILEC-01",
+      "name": "The File C figure is never published without the snapshots it was chosen over",
+      "assertion": "Every fiscal year with a published File C linkage figure carries its full submission-period series, and the published period appears in that series flagged as chosen.",
+      "rationale": "The published linkage figure is the product of a choice: the warehouse holds four File C snapshots per fiscal year and the extract publishes the one with the most rows, on the reasoning that it is the most complete copy held. That is a defensible rule and it is still a rule. This control is a shape rather than a check, in the sense PROG-03 is: it makes it structurally impossible for a page to render the headline without the rejected alternatives beside it, because a reader who cannot see the alternatives cannot know the headline was chosen.",
+      "authority": "DATA Act File C (award financial), USASpending account-level submissions",
+      "severity": "high",
+      "sort_order": 300
+    },
+    {
+      "code": "FILEC-02",
+      "name": "How far the linkage figure moves between snapshots of the same year",
+      "assertion": "For each fiscal year, the linkage percentage is computed from every substantive File C snapshot held and the spread between the highest and lowest is published. A spread wider than a factor of two is reported as a finding.",
+      "rationale": "This control measures the size of the choice FILEC-01 exposes. Reading FY2022 at period 3 gives 1.4% linkage and at period 12 gives 11.6% — the same warehouse, the same year, an eight-fold difference. Where the spread is that wide, comparing one year's figure with another's is comparing two arbitrary picks, and a falling or rising line drawn through them measures the picks rather than the Department. The control does not fail because the data is wrong; it fails to stop the site asserting a trend the files cannot carry. It must never be satisfied by narrowing the series until the spread closes.",
+      "authority": "DATA Act File C (award financial); FPDS-NG contract actions",
+      "severity": "high",
+      "sort_order": 310
     }
   ],
   "audit_posture": {

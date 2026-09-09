@@ -699,6 +699,38 @@ CREATE INDEX IF NOT EXISTS dm_exhibit_program_norm_idx
 ALTER TABLE dm_weapon_system ADD COLUMN IF NOT EXISTS prime_contractor text;
 ALTER TABLE dm_weapon_system ADD COLUMN IF NOT EXISTS coverage_note text;
 
+
+-- Every File C submission period held for a fiscal year, not only the one that
+-- is published. This table exists because the published linkage figure is the
+-- product of a CHOICE, and the choice moves the answer by a factor of eight.
+--
+-- File C is a per-submission snapshot of the award-to-account linkage. The
+-- warehouse holds four of them per fiscal year -- periods 3, 6, 9 and 12; the
+-- other seven carry fewer than thirty rows -- and the extract publishes the one
+-- with the most rows, on the reasoning that it is the most complete copy held.
+-- That is a defensible rule and it is still a rule: reading FY2022 at period 3
+-- gives 1.4% linkage and at period 12 gives 11.6%, from the same warehouse, for
+-- the same year. Neither is wrong. What is wrong is comparing one year's period
+-- 6 with another's period 12 and calling the difference a trend.
+--
+-- So the whole series is loaded, the published row is flagged `is_chosen`, and
+-- no page may render the headline figure without the alternatives beside it.
+CREATE TABLE IF NOT EXISTS dm_filec_period (
+  id                bigserial PRIMARY KEY,
+  load_id           bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year       int  NOT NULL,
+  submission_period text NOT NULL,   -- FY2024P06 as the source writes it
+  period_no         int,             -- 6
+  obligation        numeric(20,2) NOT NULL DEFAULT 0,
+  filec_rows        bigint NOT NULL DEFAULT 0,
+  filec_awards      bigint NOT NULL DEFAULT 0,
+  award_obligation  numeric(20,2) NOT NULL DEFAULT 0,  -- the FPDS full-year denominator
+  is_chosen         boolean NOT NULL DEFAULT false,
+  UNIQUE (load_id, fiscal_year, submission_period)
+);
+CREATE INDEX IF NOT EXISTS dm_filec_period_idx
+  ON dm_filec_period (load_id, fiscal_year, period_no);
+
 -- --------------------------------------------------- oversight & knowledge --
 CREATE TABLE IF NOT EXISTS dm_audit_posture (
   id            bigserial PRIMARY KEY,

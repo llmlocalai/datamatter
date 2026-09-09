@@ -439,6 +439,67 @@ const CONTROLS = {
           + `$${Number(r.extracted_b).toFixed(1)}B against the $${Number(r.published_b).toFixed(1)}B `
           + `the Department publishes — a $${d.toFixed(1)}B difference the extract cannot explain.` };
   }),
+  // --------------------------------------------- File C, and what it can bear --
+  // FILEC-01 is a SHAPE, not a check, in the sense PROG-03 is: it asserts the
+  // data layer cannot render the published linkage figure without the
+  // alternatives that were rejected to produce it. Every fiscal year with a
+  // published figure must carry its full submission-period series, and the
+  // published period must be in that series.
+  'FILEC-01': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS years,
+             count(*) FILTER (WHERE p.periods IS NULL OR p.periods = 0)::int AS no_series,
+             count(*) FILTER (WHERE p.chosen IS DISTINCT FROM true)::int AS no_chosen
+        FROM dm_reconciliation r
+        JOIN dm_load l ON l.id = r.load_id AND l.is_current
+        LEFT JOIN LATERAL (
+          SELECT count(*)::int AS periods,
+                 bool_or(f.submission_period = r.submission_period AND f.is_chosen) AS chosen
+            FROM dm_filec_period f
+           WHERE f.load_id = r.load_id AND f.fiscal_year = r.fiscal_year) p ON true`);
+    const { years, no_series, no_chosen } = rows[0];
+    const bad = no_series + no_chosen;
+    return [{ observed: years - bad, expected: years, status: bad === 0 ? 'pass' : 'fail',
+      message: bad === 0
+        ? `All ${years} fiscal years carry the full File C submission-period series behind the `
+          + 'figure published for them, with the published period flagged inside it. The headline '
+          + 'cannot be rendered without the snapshots it was chosen over.'
+        : `${bad} fiscal years publish a File C figure with no series behind it, or name a period `
+          + 'that is not in the series.' }];
+  },
+  // FILEC-02 is the finding itself. It is not an error to be fixed: it measures
+  // how much the answer moves when a different snapshot of the SAME year is
+  // read. Where that spread is large, a year-over-year comparison of linkage is
+  // not supportable at all, and the site must not draw a trend line through it.
+  'FILEC-02': async (c) => (await c.query(`
+    WITH sub AS (
+      SELECT f.fiscal_year, f.period_no, f.obligation, f.award_obligation, f.filec_rows,
+             max(f.filec_rows) OVER (PARTITION BY f.fiscal_year) AS max_rows
+        FROM dm_filec_period f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+       WHERE f.award_obligation > 0),
+    keep AS (SELECT * FROM sub WHERE filec_rows >= max_rows * 0.05)
+    SELECT fiscal_year,
+           count(*)::int AS snapshots,
+           min(obligation / award_obligation * 100) AS lo,
+           max(obligation / award_obligation * 100) AS hi
+      FROM keep GROUP BY 1 ORDER BY 1`)).rows.map((r) => {
+    const lo = Number(r.lo), hi = Number(r.hi);
+    const ratio = lo > 0 ? hi / lo : null;
+    const ok = r.snapshots < 2 || (ratio !== null && ratio <= 2);
+    return { fiscal_year: r.fiscal_year, observed: hi.toFixed(2), expected: lo.toFixed(2),
+      variance_pct: ratio === null ? null : (ratio - 1) * 100,
+      status: ok ? 'pass' : 'fail',
+      message: r.snapshots < 2
+        ? `FY${r.fiscal_year}: only one substantive File C snapshot is held, so the linkage figure `
+          + 'has no alternative to be compared against and no spread can be measured.'
+        : ok
+        ? `FY${r.fiscal_year}: ${r.snapshots} snapshots put linkage between ${lo.toFixed(1)}% and `
+          + `${hi.toFixed(1)}%, within a factor of two of each other.`
+        : `FY${r.fiscal_year}: reading a different File C snapshot of the same year puts linkage `
+          + `anywhere between ${lo.toFixed(1)}% and ${hi.toFixed(1)}% — a factor of `
+          + `${ratio.toFixed(1)}. The published figure is one of ${r.snapshots} defensible answers, `
+          + 'so no year-over-year trend in linkage is supportable from these files.' };
+  }),
   // ------------------------------------------- the weapons book's own totals --
   // WBC-01 is an INTERNAL check on the cost-table extract: the book prints a
   // total for each system and the appropriation blocks above it, and they must
@@ -673,6 +734,8 @@ const CONTROLS = {
         'program_code','program_name','is_featured','match_method','match_evidence'],
       dm_exhibit_weapon_link: ['account','exhibit','bli','pb_year','weapon_program','weapon_category',
         'weapon_page','match_method','match_evidence'],
+      dm_filec_period: ['fiscal_year','submission_period','period_no','obligation','filec_rows',
+        'filec_awards','award_obligation','is_chosen'],
       dm_definition: ['slug','term','definition','why_it_matters','key_rules','authorities','related',
         'source_file','last_verified','topic'],
       dm_kb_inventory: ['collection','folder','label','doc_count','authority_tier','note','sort_order'],

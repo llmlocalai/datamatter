@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
 import Shell, { PageHeader, Section } from '@/components/Shell';
 import { ProvenanceBar, Caveat } from '@/components/Provenance';
-import { StatTile, LineTrend, DataTable, DriftBars, BarList, Empty } from '@/components/charts';
+import { StatTile, DataTable, DriftBars, BarList, Empty } from '@/components/charts';
 import { fmtT, fmtB, fmtM, fmtPct, fmtInt, fmtCount, fmtSignedM } from '@/components/format';
-import { getProvenance, getReconciliation, getVintageDrift, getAwardYears } from '@/lib/analytics';
+import Link from 'next/link';
+import { getProvenance, getReconciliation, getVintageDrift, getAwardYears,
+         getFilecSpread } from '@/lib/analytics';
 import { NotLoaded } from '../execution/page';
 
 export const metadata: Metadata = {
@@ -14,22 +16,27 @@ export const metadata: Metadata = {
 export const revalidate = 900;
 
 export default async function ReconciliationPage() {
-  const [prov, provAward, rec, drift, awards] = await Promise.all([
+  const [prov, provAward, rec, drift, awards, spread] = await Promise.all([
     getProvenance('file_c_reconciliation'), getProvenance('contract_awards'),
-    getReconciliation(), getVintageDrift(), getAwardYears(),
+    getReconciliation(), getVintageDrift(), getAwardYears(), getFilecSpread(),
   ]);
   if (!rec.length) return <Shell><NotLoaded /></Shell>;
 
   const closed = rec.filter((r) => !r.isPartialYear);
   const first = closed[0], last = closed[closed.length - 1];
-  const drop = first.linkagePct - last.linkagePct;
+  // Each published figure is read from ONE of the File C snapshots held for that
+  // year, and the snapshot held differs by year. The spread within a single year
+  // is therefore the first thing to know about any comparison between years.
+  const multi = spread.filter((s) => s.snapshots > 1);
+  const widest = [...multi].sort((a, b) =>
+    (Number(b.hi) / Number(b.lo)) - (Number(a.hi) / Number(a.lo)))[0];
 
   return (
     <Shell>
       <PageHeader
         eyebrow="Reconciliation · award files to File C"
         title={<>Two reporting chains for the same contract dollar, and the gap between them</>}
-        lede="Contract obligations reach the public record twice: as FPDS award actions, and as account-linked transactions that components tie to a Treasury account. They do not agree, the gap is widening, and that is the most consequential thing this dataset says."
+        lede="Contract obligations reach the public record twice: as FPDS award actions, and as account-linked transactions that components tie to a Treasury account. They do not agree, and the size of the disagreement depends on which File C snapshot of the year is read — by as much as a factor of eight. What follows is the reconciliation, and the reason no trend can be drawn through it."
       />
 
       <div className="mt-6"><ProvenanceBar p={prov} /></div>
@@ -43,25 +50,55 @@ export default async function ReconciliationPage() {
             sub={`${fmtCount(last.filecRows)} rows across ${fmtCount(last.filecAwards)} awards`} />
           <StatTile label="Linkage" value={fmtPct(last.linkagePct)}
             sub="Share of award-file obligations that carry a Treasury account link" tone="critical" />
-          <StatTile label={`Change since FY${first.fiscalYear}`} value={`−${drop.toFixed(1)} pts`}
-            sub={`Linkage fell from ${fmtPct(first.linkagePct)} to ${fmtPct(last.linkagePct)} across closed years`}
+          <StatTile label="Spread within a single year"
+            value={widest ? `${(Number(widest.hi) / Number(widest.lo)).toFixed(1)}×` : '—'}
+            sub={widest
+              ? `FY${widest.fiscalYear} reads ${fmtPct(Number(widest.lo))} at period ${widest.loPeriod} and ${fmtPct(Number(widest.hi))} at period ${widest.hiPeriod}`
+              : 'only one snapshot held per year'}
             tone="warning" />
         </div>
       </Section>
 
-      <Section title="Linkage completeness is falling, not holding"
-        note="The share of award-file contract obligations that File C ties to an account, by fiscal year.">
-        <LineTrend
-          label="Account linkage rate"
-          points={rec.map((r) => ({ x: r.fiscalYear, y: r.linkagePct, partial: r.isPartialYear }))}
-          format="pct0"
-          reference={{ y: first.linkagePct, label: `FY${first.fiscalYear} level` }}
+      <Section title="Whether linkage is falling cannot be read from these files"
+        note="This page used to draw a trend line through the yearly figures. It no longer does, because the figures are not comparable with each other: File C states a fiscal year as of a submission period, the warehouse holds four snapshots of each year, and the snapshot published differs by year. A line through them measures which copy was opened.">
+        <DataTable
+          caption="Each year read from every substantive snapshot the warehouse holds. The published column is the snapshot with the most rows — the most complete copy held — which is a defensible rule and still a rule."
+          head={['Fiscal year', 'Snapshots held', 'Lowest reading', 'Highest reading', 'Spread', 'Published']}
+          rows={spread.map((s) => {
+            const ratio = s.snapshots > 1 ? Number(s.hi) / Number(s.lo) : null;
+            return [
+              `FY${s.fiscalYear}`,
+              String(s.snapshots),
+              s.snapshots > 1
+                ? `${fmtPct(Number(s.lo))}  ·  period ${s.loPeriod}`
+                : <span key={`${s.fiscalYear}-l`} className="text-navy-500">—</span>,
+              s.snapshots > 1
+                ? `${fmtPct(Number(s.hi))}  ·  period ${s.hiPeriod}`
+                : <span key={`${s.fiscalYear}-h`} className="text-navy-500">—</span>,
+              ratio == null
+                ? <span key={`${s.fiscalYear}-r`} className="text-navy-500">single snapshot</span>
+                : <span key={`${s.fiscalYear}-r`} className={ratio > 2 ? 'text-amber-300' : 'text-navy-100'}>
+                    {ratio.toFixed(1)}×
+                  </span>,
+              <span key={`${s.fiscalYear}-c`} className="text-accent-300">
+                {s.chosenPct != null ? fmtPct(Number(s.chosenPct)) : '—'}
+                <span className="block text-[11px] text-navy-500">
+                  period {s.chosenPeriod ?? '—'}
+                </span>
+              </span>,
+            ];
+          })}
         />
         <Caveat>
-          Read this as a completeness indicator for the account-linkage submission, not as an audit finding
-          about the underlying obligations. A dollar absent from File C is not a dollar that was not obligated;
-          it is a dollar whose account linkage did not reach this dataset at this vintage. The direction and
-          the size of the move are what matter.
+          Read this as a completeness indicator for the account-linkage submission, not as an audit
+          finding about the underlying obligations. A dollar absent from File C is not a dollar that
+          was not obligated; it is a dollar whose account linkage did not reach this dataset in the
+          snapshot that was read. Controls{' '}
+          <Link href="/controls" className="underline">FILEC-01</Link> and{' '}
+          <Link href="/controls" className="underline">FILEC-02</Link> keep the whole series behind
+          every figure on this page, and{' '}
+          <Link href="/linkage#filec" className="underline">the linkage page</Link> shows the full
+          grid of year against snapshot.
         </Caveat>
       </Section>
 
@@ -85,8 +122,8 @@ export default async function ReconciliationPage() {
         </Caveat>
       </Section>
 
-      <Section title="Contract volume held steady while linkage fell"
-        note="If linkage were falling because there were fewer contracts to link, action counts would move with it. They do not.">
+      <Section title="Contract volume is steady; the File C row count is not the story either"
+        note="A natural next thought is that linkage moves because there is more or less contracting to link. There is not: contract actions per closed year barely move. Nor does the File C row count explain the swing — the snapshots hold a comparable number of rows and wildly different dollar totals, which is why the dollar figure is the volatile one.">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
           <BarList
             rows={awards.filter((a) => !a.isPartialYear).map((a) => ({
@@ -102,7 +139,7 @@ export default async function ReconciliationPage() {
               meta: `${fmtPct(r.linkagePct)} linkage · ${fmtB(r.filecObligation)}`,
             }))}
             format="int" colour="var(--series-2)"
-            caption="File C rows per closed fiscal year. The collapse is in the linkage submission, not in contracting."
+            caption="File C rows in the published snapshot for each closed fiscal year. Row counts sit within a narrow band while the dollars behind them move by a factor of eight, so the linkage percentage is driven by which snapshot is read rather than by how much was submitted."
           />
         </div>
       </Section>
@@ -144,7 +181,7 @@ export default async function ReconciliationPage() {
         <ol className="space-y-4 max-w-3xl">
           {[
             ['Decompose by component.', 'File C attribution is submitted by component. Splitting linkage by awarding sub-agency identifies whether the fall is department-wide or concentrated in a small number of submitters, which changes the remediation entirely.'],
-            ['Separate timing from completeness.', 'Re-run the ratio at successive vintages for the same fiscal year. If FY2024 linkage rises with each extract, the gap is submission lag; if it stays flat, it is a completeness failure.'],
+            ['Separate timing from completeness.', 'Half of this is now done: reading each fiscal year at every File C snapshot held shows the ratio moving by up to a factor of eight within one year, so within-year timing dominates. What remains is the other axis \u2014 re-running the same period across successive warehouse vintages, which would separate submission lag from a completeness failure. Neither can be read from a single published figure.'],
             ['Test modification handling.', 'Award files count every modification as an action. If File C attributes only base awards for some submitters, the two populations differ structurally and the ratio needs a like-for-like denominator.'],
             ['Tie to the audit trail.', 'Account linkage is what lets a contract obligation be traced to a Treasury account, which is the same evidence chain that supports the universe of transactions in the financial statement audit.'],
           ].map(([h, b]) => (

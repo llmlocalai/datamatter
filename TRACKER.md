@@ -1,6 +1,6 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-09 (the weapons-book cost spine: what a whole programme costs)
+- **Last updated:** 2026-09-09 (/linkage: every join measured, and what File C can actually bear)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (2026-09-09):** `tsc --noEmit` clean and `next build` green,
   21/21 routes, run against a full local Postgres load of every staged extract.
@@ -86,6 +86,57 @@
   against a running production build, all 200** — including every new filter,
   sort and system view.
 
+## Done — 2026-09-09 (fourth pass) — `/linkage`, and a correction to `/reconciliation`
+
+- [x] **New page `/linkage`** — every join the site depends on, measured in one
+  query, with the direction of loss named. Seven seams: budget line → Treasury
+  account (100%, exact), account → File A (32 of 34 accounts), contract action →
+  federal account (35.0% of dollars), contract action → acquisition program
+  (25.3% of dollars, 0.5% of actions), budget line → program code (58 of 2,725),
+  weapons system → budget line (71 of 161), award files → File C (4.0%). Each
+  seam names BOTH datasets it spans, so the page prints two vintages rather than
+  implying one.
+- [x] **The File C finding, and it is a real one.** The warehouse holds **four**
+  File C snapshots per fiscal year — periods 3, 6, 9 and 12; the other seven
+  periods carry fewer than thirty rows — and File C states a year *as of* a
+  submission period. The extract publishes the snapshot with the most rows, which
+  is defensible and is still a choice. **Reading FY2022 at period 3 gives 1.4%
+  linkage and at period 12 gives 11.6% — the same warehouse, the same year, an
+  8.3× difference.** Spread exceeds 2× in three of the four years that hold more
+  than one snapshot.
+- [x] **So the linkage trend was not a trend.** `/reconciliation` headlined
+  "Linkage completeness is falling, not holding" and drew a line through figures
+  read at period 6, period 6, period 12, period 6 and period 9 in successive
+  years. That line measured which copy was opened. The section is replaced by
+  "Whether linkage is falling cannot be read from these files", showing every
+  year at every snapshot; the lede, the change tile and the File C row-count
+  caption are corrected with it, and the LineTrend is gone.
+- [x] **New table `dm_filec_period`** (63 rows) carries every snapshot with the
+  linkage each would produce, and **`step_filec` now measures every period**
+  rather than only the published one.
+- [x] **`FILEC-01` is a shape, not a check**, in the sense PROG-03 is: it asserts
+  a page cannot render the published figure without the snapshots it was chosen
+  over. **`FILEC-02` is the finding** — it measures how far the answer moves
+  between snapshots of the same year and reports a spread wider than 2× as a
+  finding. It must never be satisfied by narrowing the series until the spread
+  closes. 3 of 6 years fail, as they should.
+- [x] **The traps section** collects every mistake this site made or nearly made,
+  each with its measured cost and the control that now stops it: the FPDS
+  sentinel `000`/`NONE` (74.7% of obligations carry no program, and a null test
+  reports full coverage), agency 011 inside File A ($108.7B), memo rows ($28.7B
+  restated across 208 lines in PB2027), the advance-procurement double count
+  ($14.4B, perfectly self-consistent), the File C snapshot choice (8.3×), and the
+  open fiscal year ($56.0B of movement between two vintages a month apart).
+- [x] **Restatement and the text layer.** Closed years drift by at most 0.011%
+  between vintages while the open year moved $56.0B; the budget books restate on
+  purpose and the execution files restate by correction, and the two look
+  identical in a table. The document corpus section states what a file count is
+  not: not quality, not a finding, and a filename is not a hearing date.
+- [x] **Verified**: `tsc --noEmit` clean, `next build` green **22/22**, load
+  committed against a local Postgres with `FILEC-01` passing and `FILEC-02`
+  publishing its findings, and 43 routes requested against a running production
+  build, all 200.
+
 ## Architecture
 
 ETL (Mac only, pyarrow) → staged JSON → transactional load → **Neon** → pages (ISR 900s).
@@ -111,6 +162,7 @@ No baked snapshots. A daily refresh reaches the live site without a redeploy.
 | 14 | `/program` — execution by acquisition program, account traceability | contracts + File C | 🆕 code shipped; ETL, load and controls verified against a local Postgres, **not yet loaded to Neon** |
 | 15 | `/traceability` — the F-35 budget → execution → accounts → audit chain | program tables + File C + audit register + `war_budget_line` | 🆕 code shipped, prerendered against a local Postgres, **not yet loaded to Neon** |
 | 16 | `/program` — the budget-line roster, one line's restatement history, and the chain into execution and contracts | `dm_exhibit_*` (P-1/P-1R/R-1, PB2020–PB2027) + weapons book + File A + contracts | 🆕 code shipped; ETL, load, all controls and every route verified against a local Postgres, **not yet loaded to Neon** |
+| 17 | `/linkage` — every join in the corpus measured, the File C snapshot finding, and the traps that make a naive read wrong | all datasets; `dm_filec_period` + `dm_seam` measures computed in `lib/analytics.ts` | 🆕 code shipped; ETL, load, controls and every route verified against a local Postgres, **not yet loaded to Neon** |
 
 ### What `/program` is now
 

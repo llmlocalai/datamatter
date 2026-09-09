@@ -1121,3 +1121,228 @@ export async function getAccountContracts(treasuryAccount: string, fiscalYear: n
       ORDER BY a.obligation DESC LIMIT $3`,
     [treasuryAccount, fiscalYear, limit]);
 }
+
+/* ==========================================================================
+   LINKAGE — every join in the corpus, measured
+
+   Nothing on this site is a single file read straight through. Every figure
+   that says anything interesting is the result of joining files that were
+   built by different chains, for different purposes, with no key in common.
+   The joins are where meaning is lost, and until a join is measured it is
+   impossible to say whether a number is a finding or an artefact of the seam
+   it came through.
+
+   Each seam names BOTH datasets it spans, so the page can print two vintages
+   rather than implying one. A seam is never scored: it reports what share of
+   the left side reaches the right side, in the unit that makes sense for it,
+   and says which direction the loss runs.
+   ========================================================================== */
+
+export type SeamUnit = 'lines' | 'accounts' | 'systems' | 'dollars' | 'actions';
+
+export interface Seam {
+  key: string;
+  fromLabel: string;
+  toLabel: string;
+  fromDataset: string;
+  toDataset: string;
+  joinKey: string;
+  unit: SeamUnit;
+  denominator: number;
+  numerator: number;
+  pct: number | null;
+  /** true where the join is by construction exact rather than inferred. */
+  isExact: boolean;
+  /** Whether the crosswalk is derived here rather than published by anyone. */
+  isDerived: boolean;
+  note: string;
+}
+
+/**
+ * Every join the site depends on, measured in one query.
+ *
+ * The unit differs by seam on purpose. A budget line either resolves to a
+ * Treasury account or it does not, so that one is counted in lines; the
+ * contract-to-account seam loses money rather than rows, so it is counted in
+ * dollars. Forcing them onto one scale would make the smallest seam look like
+ * the largest.
+ */
+export async function getSeams(): Promise<Seam[]> {
+  return query<Seam>(
+    `WITH exhibit_accounts AS (
+        SELECT DISTINCT p.treasury_account AS ta
+          FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+         WHERE NOT p.is_memo AND p.treasury_account IS NOT NULL),
+      newest_award_fy AS (
+        SELECT max(fiscal_year) AS fy FROM dm_program_fy f
+          JOIN dm_load l ON l.id = f.load_id AND l.is_current
+         WHERE NOT f.is_partial_year)
+
+    -- 1. A budget line to the Treasury account it is appropriated into. The
+    --    exhibit symbol 1506N and the Treasury symbol 017-1506 differ only by
+    --    the organisation letter, so this seam loses nothing.
+    SELECT 'bli_account' AS key,
+           'Budget line (P-1 / R-1)' AS "fromLabel",
+           'Treasury account' AS "toLabel",
+           'budget_exhibits' AS "fromDataset", 'budget_exhibits' AS "toDataset",
+           'exhibit account symbol -> Treasury account symbol' AS "joinKey",
+           'lines' AS unit,
+           (SELECT count(*)::numeric FROM dm_exhibit_program p
+              JOIN dm_load l ON l.id = p.load_id AND l.is_current WHERE NOT p.is_memo) AS denominator,
+           (SELECT count(*)::numeric FROM dm_exhibit_program p
+              JOIN dm_load l ON l.id = p.load_id AND l.is_current
+             WHERE NOT p.is_memo AND p.treasury_account IS NOT NULL) AS numerator,
+           NULL::numeric AS pct, true AS "isExact", false AS "isDerived",
+           'The two symbols are the same account written two ways. This is the one seam in the chain that loses nothing.' AS note
+
+    UNION ALL
+    -- 2. That account into the execution files. Exact, and no longer about the
+    --    budget line: several lines share an account and File A carries none.
+    SELECT 'account_filea', 'Treasury account', 'File A account balances',
+           'budget_exhibits', 'file_a_sbr',
+           'federal account symbol', 'accounts',
+           (SELECT count(*)::numeric FROM exhibit_accounts),
+           (SELECT count(*)::numeric FROM exhibit_accounts e
+             WHERE EXISTS (SELECT 1 FROM dm_sbr_dim d JOIN dm_load l ON l.id = d.load_id AND l.is_current
+                            WHERE d.dimension = 'federal_account' AND d.dim_key = e.ta)),
+           NULL, true, false,
+           'The join succeeds and the grain does not survive it: File A carries no budget line at all, so an account obligation cannot be attributed to one of the lines inside it.'
+
+    UNION ALL
+    -- 3. Contract action to the federal account that funded it, for the
+    --    acquisition programs the site carries. This is where the money stops
+    --    being followable, and it has been getting worse.
+    SELECT 'action_account', 'Contract action', 'Federal account',
+           'program_execution', 'program_execution',
+           'federal_accounts_funding_this_award', 'dollars',
+           (SELECT coalesce(sum(f.obligation),0) FROM dm_program_fy f
+              JOIN dm_load l ON l.id = f.load_id AND l.is_current
+             WHERE f.fiscal_year = (SELECT fy FROM newest_award_fy)),
+           (SELECT coalesce(sum(f.traceable_obligation),0) FROM dm_program_fy f
+              JOIN dm_load l ON l.id = f.load_id AND l.is_current
+             WHERE f.fiscal_year = (SELECT fy FROM newest_award_fy)),
+           NULL, true, false,
+           'The field is a semicolon-separated list of every account funding the award, with no apportionment between them. An obligation is counted as traceable only when the action names accounts; it is never split across them.'
+
+    UNION ALL
+    -- 4. Contract action to an acquisition program. The seam that looks dense
+    --    and is not, because the absence is written as a code rather than a null.
+    SELECT 'action_program', 'Contract action', 'Acquisition program',
+           'program_execution', 'program_execution',
+           'dod_acquisition_program_code', 'dollars',
+           (SELECT coalesce(sum(c.total_obligation),0) FROM dm_program_coverage c
+              JOIN dm_load l ON l.id = c.load_id AND l.is_current WHERE NOT c.is_partial_year
+              AND c.fiscal_year = (SELECT max(fiscal_year) FROM dm_program_coverage c2
+                                     JOIN dm_load l2 ON l2.id = c2.load_id AND l2.is_current
+                                    WHERE NOT c2.is_partial_year)),
+           (SELECT coalesce(sum(c.attributed_obligation),0) FROM dm_program_coverage c
+              JOIN dm_load l ON l.id = c.load_id AND l.is_current WHERE NOT c.is_partial_year
+              AND c.fiscal_year = (SELECT max(fiscal_year) FROM dm_program_coverage c2
+                                     JOIN dm_load l2 ON l2.id = c2.load_id AND l2.is_current
+                                    WHERE NOT c2.is_partial_year)),
+           NULL, true, false,
+           'FPDS records "no acquisition program" as the explicit code 000, description NONE. A null test finds nothing and reports full coverage; the field is a sentinel, not a key.'
+
+    UNION ALL
+    -- 5. Budget line to acquisition program code. Derived here, on evidence.
+    SELECT 'bli_program', 'Budget line (P-1 / R-1)', 'Acquisition program code',
+           'budget_exhibits', 'budget_execution_crosswalk',
+           'shared type designator or identical name', 'lines',
+           (SELECT count(*)::numeric FROM dm_exhibit_program p
+              JOIN dm_load l ON l.id = p.load_id AND l.is_current WHERE NOT p.is_memo),
+           (SELECT count(DISTINCT (x.exhibit, x.account, x.bli))::numeric
+              FROM dm_exhibit_program_link x JOIN dm_load l ON l.id = x.load_id AND l.is_current),
+           NULL, false, true,
+           'Neither source carries the other key, so every link records the evidence it rests on and an ambiguous designator produces no row. This is not a Department-published mapping and must never be presented as one.'
+
+    UNION ALL
+    -- 6. Weapons-book system to budget line. Also derived, also on evidence.
+    SELECT 'system_bli', 'Weapon system (weapons book)', 'Budget line (P-1 / R-1)',
+           'budget_exhibits', 'budget_exhibits',
+           'shared type designator or shared significant words', 'systems',
+           (SELECT count(DISTINCT s.program_name)::numeric FROM dm_weapon_system s
+              JOIN dm_load l ON l.id = s.load_id AND l.is_current),
+           (SELECT count(DISTINCT w.weapon_program)::numeric FROM dm_exhibit_weapon_link w
+              JOIN dm_load l ON l.id = w.load_id AND l.is_current),
+           NULL, false, true,
+           'A system whose budget lines carry names no shared designator or phrase reaches is listed with nothing behind it rather than matched on a guess.'
+
+    UNION ALL
+    -- 7. Award file to File C. The seam the site is most often asked about,
+    --    and the one whose measurement depends on a choice — see getFilecPeriods.
+    SELECT 'award_filec', 'Contract action (award files)', 'File C award financial',
+           'contract_awards', 'file_c_reconciliation',
+           'award_unique_key', 'dollars',
+           (SELECT coalesce(sum(r.award_obligation),0) FROM dm_reconciliation r
+              JOIN dm_load l ON l.id = r.load_id AND l.is_current WHERE NOT r.is_partial_year),
+           (SELECT coalesce(sum(r.filec_obligation),0) FROM dm_reconciliation r
+              JOIN dm_load l ON l.id = r.load_id AND l.is_current WHERE NOT r.is_partial_year),
+           NULL, true, false,
+           'Two reporting chains, not one chain measured twice. A dollar absent from File C is not a dollar that was not obligated, and the figure moves by up to a factor of eight depending which snapshot of the year is read.'
+    `).then((rows) => rows.map((r) => ({
+      ...r,
+      denominator: Number(r.denominator), numerator: Number(r.numerator),
+      pct: Number(r.denominator) ? Number(r.numerator) / Number(r.denominator) * 100 : null,
+    })));
+}
+
+export interface FilecPeriod {
+  fiscalYear: number; submissionPeriod: string; periodNo: number | null;
+  obligation: number; filecRows: number; filecAwards: number;
+  awardObligation: number; isChosen: boolean; linkagePct: number | null;
+  isSubstantive: boolean;
+}
+
+/**
+ * Every File C snapshot held for every fiscal year, with the linkage each one
+ * would produce.
+ *
+ * `isSubstantive` marks the snapshots that carry real volume. Seven of the
+ * eleven periods held for a year carry fewer than thirty rows, so treating the
+ * series as twelve monthly observations would read noise as a time series; the
+ * warehouse holds four snapshots per year, at periods 3, 6, 9 and 12.
+ */
+export async function getFilecPeriods(): Promise<FilecPeriod[]> {
+  return query<FilecPeriod>(
+    `SELECT f.fiscal_year AS "fiscalYear", f.submission_period AS "submissionPeriod",
+            f.period_no AS "periodNo", f.obligation, f.filec_rows AS "filecRows",
+            f.filec_awards AS "filecAwards", f.award_obligation AS "awardObligation",
+            f.is_chosen AS "isChosen",
+            CASE WHEN f.award_obligation > 0
+                 THEN f.obligation / f.award_obligation * 100 END AS "linkagePct",
+            f.filec_rows >= max(f.filec_rows) OVER (PARTITION BY f.fiscal_year) * 0.05
+              AS "isSubstantive"
+       FROM dm_filec_period f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      ORDER BY f.fiscal_year, f.period_no`);
+}
+
+/** How far the linkage answer moves between snapshots of the same fiscal year. */
+export async function getFilecSpread() {
+  return query<{ fiscalYear: number; snapshots: number; lo: number; hi: number;
+                 loPeriod: number; hiPeriod: number; chosenPeriod: number | null;
+                 chosenPct: number | null }>(
+    `WITH s AS (
+       SELECT f.*, f.obligation / nullif(f.award_obligation,0) * 100 AS pct,
+              max(f.filec_rows) OVER (PARTITION BY f.fiscal_year) AS max_rows
+         FROM dm_filec_period f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+        WHERE f.award_obligation > 0),
+     k AS (SELECT * FROM s WHERE filec_rows >= max_rows * 0.05)
+     SELECT fiscal_year AS "fiscalYear", count(*)::int AS snapshots,
+            min(pct) AS lo, max(pct) AS hi,
+            (array_agg(period_no ORDER BY pct))[1] AS "loPeriod",
+            (array_agg(period_no ORDER BY pct DESC))[1] AS "hiPeriod",
+            max(period_no) FILTER (WHERE is_chosen) AS "chosenPeriod",
+            max(pct) FILTER (WHERE is_chosen) AS "chosenPct"
+       FROM k GROUP BY 1 ORDER BY 1`);
+}
+
+/** The memo rows the exhibits publish and every total on this site excludes. */
+export async function getMemoWeight() {
+  return query<{ pbYear: number; moneyK: number; memoK: number; memoLines: number }>(
+    `SELECT f.pb_year AS "pbYear",
+            sum(f.amount_k) FILTER (WHERE NOT f.is_memo AND f.fy_role = 'request') AS "moneyK",
+            sum(f.amount_k) FILTER (WHERE f.is_memo AND f.fy_role = 'request') AS "memoK",
+            count(DISTINCT (f.exhibit, f.account, f.bli)) FILTER (WHERE f.is_memo)::int AS "memoLines"
+       FROM dm_exhibit_program_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      GROUP BY 1 ORDER BY 1`);
+}

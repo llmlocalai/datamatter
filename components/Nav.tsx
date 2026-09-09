@@ -19,6 +19,7 @@ const GROUPS: { label: string; items: { href: string; label: string }[] }[] = [
       { href: '/assistance', label: 'Assistance' } ] },
   { label: 'Oversight', items: [
       { href: '/traceability', label: 'Traceability break' },
+      { href: '/linkage', label: 'Linkage' },
       { href: '/reconciliation', label: 'Reconciliation' },
       { href: '/audit', label: 'Audit posture' },
       { href: '/congressional', label: 'Congressional' } ] },

@@ -343,7 +343,7 @@ def step_filec(out):
     if os.path.exists(awards_path):
         a = json.load(open(awards_path))
         award_by_fy = {r["fiscal_year"]: r for r in a["rows"]["dm_award_fy"]}
-    rec = []
+    rec, periods = [], []
     for fy in FY_RANGE:
         p = os.path.join(base, f"fiscal_year={fy}")
         if not os.path.isdir(p): continue
@@ -356,11 +356,34 @@ def step_filec(out):
         keys = t["award_unique_key"].to_pylist()
         sper = t["submission_period"].to_pylist()
         tot = 0.0; rows = 0; uniq = set()
+        # Every period is measured, not only the one that is published. File C is
+        # a CUMULATIVE snapshot, so a figure read from period 6 states the year
+        # through March and a figure read from period 12 states the whole year.
+        # Dividing either by a full-year FPDS total gives a linkage percentage,
+        # but only the like periods are comparable across years -- and the period
+        # that happens to be held differs by year. Without this series the
+        # year-over-year trend cannot be read at all.
+        per_tot = collections.defaultdict(float)
+        per_rows = collections.Counter()
+        per_awards = collections.defaultdict(set)
         for c_, a_, k_, s_ in zip(code, amt, keys, sper):
             if c_ not in DOW_CODES: continue
+            if s_:
+                per_tot[s_] += (a_ or 0.0); per_rows[s_] += 1
+                if k_: per_awards[s_].add(k_)
             if best and s_ != best: continue     # one cumulative snapshot only
             tot += (a_ or 0.0); rows += 1
             if k_: uniq.add(k_)
+        for s_ in sorted(per_rows):
+            m = re.search(r"P(\d+)$", s_)
+            periods.append({
+                "fiscal_year": fy, "submission_period": s_,
+                "period_no": int(m.group(1)) if m else None,
+                "obligation": round(per_tot[s_], 2),
+                "filec_rows": per_rows[s_],
+                "filec_awards": len(per_awards[s_]),
+                "award_obligation": (award_by_fy.get(fy) or {}).get("obligation", 0.0),
+                "is_chosen": s_ == best})
         aw = award_by_fy.get(fy)
         awob = aw["obligation"] if aw else 0.0
         rec.append({"fiscal_year": fy, "award_obligation": awob,
@@ -375,8 +398,13 @@ def step_filec(out):
         print(f"  FY{fy}: File C snapshot {best} -> {tot/1e9:.2f}B over {rows:,} rows / "
               f"{len(uniq):,} awards  (linkage {rec[-1]['linkage_pct']:.1f}%; "
               f"{len(period_rows)} periods held, rows {min(period_rows.values()):,}-{max(period_rows.values()):,})")
+    subs = [x for x in periods if x["filec_rows"] > 1000]
+    print(f"  {len(periods)} submission periods held across {len(rec)} fiscal years; "
+          f"{len(subs)} carry more than a thousand rows "
+          f"({sorted({x['period_no'] for x in subs})} of 12)")
     write(out, "filec.json", payload("file_c_reconciliation", vintage,
-          {"dm_reconciliation": rec}, source_path="accounts/file_c_contracts"))
+          {"dm_reconciliation": rec, "dm_filec_period": periods},
+          source_path="accounts/file_c_contracts"))
 
 DOW_AGENCY_NAMES = {"Department of Defense", "Department of War"}
 ASSISTANCE_DIMS = [("assistance_type", "assistance_type_description"),
