@@ -24,8 +24,13 @@ load. **Never hand-edit data to correct a number.** Fix the extract and re-run:
 npm run refresh   # python3 scripts/etl_analytics.py --step all && node scripts/load_analytics.js
 ```
 
-The ETL needs `pyarrow` and reads `/Volumes/AI_DATA` directly, so it runs only on
-this Mac, never on Vercel. Because the app reads Neon, a refresh reaches the live
+The ETL needs `pyarrow` for the warehouse, `openpyxl` for the -1 exhibit
+workbooks and `pdftotext` (`brew install poppler`) for the weapons book, and it
+reads `/Volumes/AI_DATA` directly, so it runs only on this Mac, never on Vercel.
+A missing `pdftotext` does not fail the run — it produces a load with no
+weapons-book roster and no `EXH-08`, which is the only control here that checks
+these totals against a published figure, so the exhibit step warns loudly rather
+than letting that pass unnoticed. Because the app reads Neon, a refresh reaches the live
 site without a redeploy.
 
 ## Scope: the mistake that is easiest to make here

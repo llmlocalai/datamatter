@@ -713,6 +713,29 @@ def _exhibit_files(root, pb, ex):
     return None
 
 
+# The exhibit step needs two things that are not in the standard library and are
+# not Python packages you would install for the rest of this ETL. Both are
+# checked once, up front, and named -- a ModuleNotFoundError raised on the ninth
+# workbook after two minutes of parsing tells you what is missing but not that
+# the fix is one line, and the pdftotext one does not raise at all: it degrades
+# to a load with no weapons book and therefore no EXH-08, which is the only
+# control here that checks the extract against a published figure.
+def _exhibit_preflight():
+    import shutil
+    try:
+        import openpyxl  # noqa: F401
+    except ImportError:
+        raise SystemExit(
+            "The -1 exhibits are .xlsx workbooks and openpyxl is not installed.\n"
+            "  python3 -m pip install openpyxl")
+    if shutil.which("pdftotext") is None:
+        print("  WARNING: pdftotext is not on PATH, so the Program Acquisition Cost by")
+        print("           Weapon System books cannot be read. The load will still")
+        print("           succeed, but with no weapons-book roster and no EXH-08 --")
+        print("           the only control that ties these exhibit totals to a figure")
+        print("           the Department publishes. Install it with: brew install poppler")
+
+
 def _read_sheet(path):
     import openpyxl
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -928,6 +951,7 @@ def _link_weapons(weapons, programs):
 
 
 def step_exhibits(out):
+    _exhibit_preflight()
     root = os.path.join(KB, "11-Budget-Justification/_Archive")
     if not os.path.isdir(root):
         print("  no exhibit archive found, skipping"); return
