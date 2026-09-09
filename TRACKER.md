@@ -1,15 +1,20 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-08 (second pass: `/program`)
+- **Last updated:** 2026-09-09 (the exhibit spine: `/program` rebuilt on the -1 books)
 - **Live site:** https://datamatter.vercel.app
-- **Build status (as of 2026-08-27):** `tsc --noEmit` clean; `next build`
-  prerenders all 18 routes against a loaded database. The 2026-09-08 changes
-  below pass `tsc --noEmit` but have **not** been run through `next build` or
-  `npm run refresh` — that needs Neon/warehouse access this session did not
-  use. Run `npm run refresh && npm run verify` before treating them as shipped.
-- **Control status (as of 2026-08-27):** 85 of 87 assertions pass. The two
-  failures are `TIE-01` (File A vs File B obligations, FY2022 and FY2026) and
-  are published as findings. `ASSIST-01` (new, 2026-09-08) has not run yet.
+- **Build status (2026-09-09):** `tsc --noEmit` clean and `next build` green,
+  21/21 routes, run against a full local Postgres load of every staged extract.
+  Every `/program` route was requested against that build and returned 200 with
+  no server error. **Not yet loaded to Neon** — the ETL reads
+  `/Volumes/AI_DATA` and Neon is not reachable from the sandbox this session
+  used, so `npm run refresh` still has to be run on the Mac before the live site
+  shows any of it.
+- **Control status (2026-09-09):** 303 of 306 assertions pass. The three
+  failures are pre-existing and non-blocking: `TIE-01` (File A vs File B
+  obligations, FY2022 and FY2026) and one `ASSIST-01` bucket, all published as
+  findings. The nine new `EXH-*` assertions all pass, including `EXH-08`, which
+  ties the P-1 and R-1 request totals to the figures the Department publishes in
+  Program Acquisition Cost by Weapon System for all seven books that state them.
 
 ---
 
@@ -37,6 +42,21 @@ No baked snapshots. A daily refresh reaches the live site without a redeploy.
 | 13 | `/assistance` — grants, cooperative agreements, direct payments | financial-assistance warehouse | 🆕 code shipped, unverified — needs `npm run refresh` |
 | 14 | `/program` — execution by acquisition program, account traceability | contracts + File C | 🆕 code shipped; ETL, load and controls verified against a local Postgres, **not yet loaded to Neon** |
 | 15 | `/traceability` — the F-35 budget → execution → accounts → audit chain | program tables + File C + audit register + `war_budget_line` | 🆕 code shipped, prerendered against a local Postgres, **not yet loaded to Neon** |
+| 16 | `/program` — the budget-line roster, one line's restatement history, and the chain into execution and contracts | `dm_exhibit_*` (P-1/P-1R/R-1, PB2020–PB2027) + weapons book + File A + contracts | 🆕 code shipped; ETL, load, all controls and every route verified against a local Postgres, **not yet loaded to Neon** |
+
+### What `/program` is now
+
+| URL | What it shows |
+|---|---|
+| `/program` | the roster: 2,725 money budget lines (memo lines reachable by filter), searchable, filtered by component, exhibit and weapons-book presence; the department-wide restatement table; the `EXH-08` tie-out |
+| `/program?bli=p1:3010F:ATA000` | one budget line: the full `pb_year × fiscal_year` restatement matrix with the book beside every figure, the cost types behind it and which exhibit column each came from, the weapons-book entry, File A for its Treasury account, and the contract account sets that named it |
+| `/program?code=198` | the execution view for one FPDS acquisition program code — unchanged, plus the budget lines that reach it |
+
+The spine holds **eight President's Budget books** (PB2020–PB2027) describing
+**ten fiscal years** (FY2018–FY2027), each restated up to three times:
+50,619 exhibit rows, 46,195 line-years rolled up over cost type, 3,063 budget
+lines (2,725 of them money rather than memo), 542 weapons-book system-years and
+191 evidence-bearing links.
 
 ## Done — 2026-09-08 (second pass) — `/program` and the F-35 pilot
 

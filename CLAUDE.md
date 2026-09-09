@@ -65,6 +65,84 @@ decision, not a label:
 Controls and their rationale live in `database/seed_analytics.json`, the
 implementations in the `CONTROLS` map in the loader. Add both halves or neither.
 
+## The exhibit spine: rules that will silently produce wrong numbers if broken
+
+The President's Budget "-1" exhibits (`dm_exhibit_*`) are the only source here
+keyed to a **budget line** rather than to a Treasury account, which is why
+`/program` is built on them. Four things about them are not stylistic choices.
+
+**The grain is `(pb_year, fiscal_year)` and it is never collapsed.** Each book
+restates three fiscal years — FY(pb−2) actuals, FY(pb−1) enacted, FY(pb) request
+— so one fiscal year appears in three successive books with three different
+numbers. That spread is the restatement history and it exists in no other source
+here. A `GROUP BY fiscal_year` that drops `pb_year` destroys it and will look
+like a tidy-up. `EXH-01` and `EXH-02` block a load where it has happened.
+
+**Memo rows are kept, flagged, and never summed.** Four kinds restate money
+already counted elsewhere in the same book:
+
+| What | Where it hides |
+|---|---|
+| the whole **P-1R** exhibit | National Guard and Reserve equipment already inside the P-1 lines |
+| `Include in TOA = N` | R-1 lines outside total obligation authority |
+| `(MEMO NON ADD)` cost types | inside P-1 lines that are otherwise flagged `Add` — PB2021 line 5300 restates its own $369.1M by ship class |
+| `Advance Procurement (CY)` | the subtotal of that line's own `C (FY x for FY y) (M)` rows |
+
+They are flagged `is_memo` rather than dropped, because a total that silently
+omits a whole exhibit cannot be explained on the page. Every query filters
+`is_memo = false` by default, and `EXH-03` asserts nothing unflagged carries a
+memo cost type.
+
+**The fiscal-year figure is not always in the same column.** The exhibits change
+shape between eras (Base/OCO, Less Supplementals, Discretionary/Reconciliation).
+Two rules pick it, in order: the right-most column labelled *Total*, or — when
+the year has no total column — the sum of that year's components. The PB2026
+P-1R book stops at "FY 2026 Request" and "FY 2026 Reconciliation" with no total,
+so a right-most-column rule alone publishes the reconciliation add as the whole
+year. Which rule fired is recorded per row in `total_basis` (`EXH-05`).
+
+**`EXH-08` is the only control on this site that checks whether the extract is
+*right* rather than *self-consistent*.** The weapons book states the same request
+these exhibits itemise, totalled by the Department: for all seven books that
+state it, the non-memo P-1 and R-1 request lines equal the published procurement
+and RDT&E figures exactly. It is what caught the advance-procurement subtotal
+being counted alongside its own detail — $14.4B in PB2026 alone, in an extract
+that passed every internal check. Do not weaken its tolerance to make a load
+pass; a difference there means money has been gained or lost.
+
+### The crosswalks are derived, and say so
+
+Two joins leave the exhibits, and neither source carries the other's key:
+
+- **budget line → weapons-book system** (`dm_exhibit_weapon_link`)
+- **budget line → FPDS acquisition program code** (`dm_exhibit_program_link`)
+
+Every row records `match_method` and `match_evidence` so a reader can reject one
+match without distrusting the rest, and an ambiguous designator produces **no
+row** rather than a guess. A designator written as a single run of characters is
+not evidence on its own: "PATRIOT P3I" yields `P-3`, which is the Orion, and
+matching on it files an air-defence missile's contracts under a maritime patrol
+aircraft's budget line. It needs a shared significant word to corroborate it.
+`EXH-09` blocks a load where a link names no evidence. Never present either
+crosswalk as a Department-published mapping.
+
+### Where the chain narrows
+
+`/program` follows a budget line as far as these sources go, and the page says so
+at each step, because the loss happens in the sources rather than in the extract:
+
+1. **budget line → Treasury account** — exact. The exhibit symbol `1506N` and the
+   Treasury symbol `017-1506` differ only by the organisation letter.
+2. **account → File A execution** — exact, but no longer line-specific. File A
+   carries no budget line at all, and several lines share an account. Nothing may
+   attribute an account obligation to one of the lines inside it.
+3. **account → contract** — a window onto the quarter of the contract file that
+   carries an acquisition program code, and the obligation on an action is never
+   split across the accounts named on it.
+
+`/traceability` is the page about that break. Do not write copy on `/program`
+that implies the chain is tighter than this.
+
 ## Things the data will not support — do not assert them
 
 - **File C vs award files is not an error estimate.** They are two reporting
