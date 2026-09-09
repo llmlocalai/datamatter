@@ -46,7 +46,8 @@ def _pick(*cands):
         if os.path.isdir(c): return c
     return cands[0]
 
-WAREHOUSE = _pick(os.path.join(ROOT, "data/usaspending/warehouse"))
+WAREHOUSE = _pick(os.path.join(ROOT, "data/usaspending/warehouse"),
+                  os.path.join(ROOT, "warehouse"))
 KB        = _pick(os.path.join(ROOT, "knowledge-bank/DOD-FM-Knowledge-Bank"))
 WIKI      = _pick(os.path.join(ROOT, "knowledge-bank/Wiki/DOD-FM"))
 
@@ -149,7 +150,14 @@ def step_sbr(out):
                             "tas_count": counts[sc], **{k: round(v, 2) for k, v in m.items()}})
         for dimension, keys in dims.items():
             ranked = sorted(keys.items(), key=lambda kv: -kv[1]["obligations_incurred"])
-            keep = ranked if dimension in ("agency", "budget_function") else ranked[:40]
+            # Every federal account is kept, not just the largest forty. The -1
+            # exhibits resolve a budget line to a Treasury account, and a top-N
+            # cut would leave two thirds of those accounts with no File A row --
+            # which reads on the page as an execution gap rather than as a
+            # retention decision made here. TAS stays capped: it is an order of
+            # magnitude larger and nothing joins to it.
+            keep = (ranked if dimension in ("agency", "budget_function", "federal_account")
+                    else ranked[:40])
             for rank, (k, m) in enumerate(keep, 1):
                 dim_rows.append({"fiscal_year": fy, "scope": "DOW", "dimension": dimension,
                                  "dim_key": k, "dim_label": labels[(dimension,k)],
@@ -576,7 +584,7 @@ def step_knowledge(out):
 #     FY(pb)    budget-year REQUEST  -- what is being asked for
 # So a single fiscal year appears in three successive books, and its number is
 # expected to differ between them: a request becomes an enactment becomes an
-# actual. That is not drift to be averaged away — it is the restatement history,
+# actual. That is not drift to be averaged away -- it is the restatement history,
 # and it exists nowhere else in these sources. Every row therefore carries BOTH
 # pb_year (which book it was read from) and fiscal_year (which year it describes),
 # and no query may collapse the two.
@@ -586,12 +594,41 @@ def step_knowledge(out):
 #     FY2022-23  a single Actual / Enacted / Request column per year
 #     FY2024     Less Supplementals / Supplementals / Total Enacted
 #     FY2026-27  Discretionary / Reconciliation or Mandatory / Total
-# What is stable is the convention that the BROADEST figure for a fiscal year is
-# its LAST amount column. "Total OCO" precedes "Total (Base + OCO)"; "Discretionary"
-# and "Mandatory" precede "Total". So the fiscal-year figure is the right-most
-# amount column bearing that year, and the columns to its left are its components,
-# retained as detail rather than summed (summing them would double count the
-# subtotals).
+# Two rules, in order, pick the fiscal-year figure:
+#   1. If any column for that year is labelled "Total", the RIGHT-MOST such
+#      column is the year's figure. "Total OCO" precedes "Total (Base + OCO)";
+#      "Discretionary" and "Mandatory" precede "Total". The columns to its left
+#      are components and are never added to it.
+#   2. If no column for that year says "Total", the year's columns are disjoint
+#      components and are SUMMED. This case is real: the PB2026 P-1R book stops
+#      at "FY 2026 Request" and "FY 2026 Reconciliation" with no total, so a
+#      right-most-column rule alone would publish the reconciliation add as the
+#      whole year and drop the discretionary request.
+# Which rule fired is recorded per row in total_basis, so any figure on the site
+# can be traced back to the column it came from.
+#
+# WHAT IS MEMO, NOT MONEY. Three kinds of row restate funding that is already
+# counted elsewhere in the same book, and none may enter a total:
+#   * the whole P-1R exhibit -- verified across PB2020-PB2027, it is National
+#     Guard and Reserve equipment carried as "(MEMO NON ADD)" cost types;
+#   * P-1 rows flagged Add/Non-Add = "Non-Add";
+#   * R-1 rows flagged Include in TOA = "N";
+#   * P-1 rows whose COST TYPE says "(MEMO NON ADD)". These hide inside lines
+#     that are otherwise flagged Add: PB2021 line 5300, Completion of PY
+#     Shipbuilding Programs, carries $369.1M as Weapon System Cost and then
+#     restates exactly that $369.1M again as CVN, CVN RCOH, AUX, LPD 17 and DDG
+#     breakouts. Taking the Add flag at face value would double the line;
+#   * the P-1 "Advance Procurement (CY)" row, which is the subtotal of that
+#     line's "C (FY x for FY y) (M)" detail rows. Verified across all eight
+#     books: 520 line-years carry both, the subtotal equals the detail every
+#     time, and neither ever appears without the other. Keeping both put the
+#     PB2026 procurement request at $219.6B against the $205.2B the Department
+#     publishes in Program Acquisition Cost by Weapon System; dropping the
+#     subtotal and keeping the by-year detail reproduces $205.2B exactly.
+# Non-Add P-1 rows are dropped at read time. The other two are kept and flagged
+# is_memo, because dropping a whole exhibit would make its absence unexplainable
+# on the page. EXH-03 asserts nothing unflagged carries a memo cost type.
+#
 # Header spellings drift across books -- "Line Item" becomes "Budget Line Item",
 # "PE / BLI" loses its spaces, "Add/ Non-Add" closes up -- so columns are resolved
 # by normalised alias, never by exact string.
@@ -600,29 +637,50 @@ EXHIBIT_COLS = {
     "title": ("budgetlineitem(bli)title", "lineitemtitle",
               "programelementbudgetlineitem(bli)title", "programelement/budgetlineitem(bli)title"),
     "add":   ("addnonadd",),
+    "toa":   ("includeintoa",),
     "org":   ("organization",),
     "acct_title": ("accounttitle",),
     "ba":    ("budgetactivity",),
     "ba_title": ("budgetactivitytitle",),
+    "bsa":   ("bsa",),
+    "bsa_title": ("budgetsubactivity(bsa)title", "budgetsubactivity(bsa)title"),
+    "line_no": ("linenumber",),
     "cost_type": ("costtype",),
+    "cost_type_title": ("costtypetitle",),
 }
 EXHIBITS = ("p1", "p1r", "r1")
+# The P-1 advance-procurement subtotal, restated by year on the rows beneath it.
+AP_SUBTOTAL = "Advance Procurement (CY)"
+MEMO_EXHIBITS = ("p1r",)
+PB_YEARS = range(2020, 2028)
+
+# The exhibit account symbol is a four-digit main account plus a one-letter
+# organisation ("1506N" = Aircraft Procurement, Navy). The letter is the only
+# thing standing between it and the Treasury account symbol the execution files
+# are keyed on, so it is resolved here rather than at query time.
+ACCT_AGENCY = {"A": "021", "N": "017", "F": "057", "D": "097", "M": "017"}
+_ACCT = re.compile(r"^(\d{4})([A-Z])$")
+
+_WS = re.compile(r"\s+")
+_FY = re.compile(r"FY\s*(\d{4})")
+
+
+def _norm(h):
+    return _WS.sub(" ", str(h)).strip() if h is not None else ""
+
 
 def _key(h):
     return re.sub(r"[\s/]+", "", _norm(h)).lower()
+
 
 def _resolve(hdr, which):
     """First column index whose normalised header matches an alias for `which`."""
     keys = {_key(h): i for i, h in enumerate(hdr) if h}
     for alias in EXHIBIT_COLS[which]:
-        if alias in keys: return keys[alias]
+        if alias in keys:
+            return keys[alias]
     return None
-PB_YEARS = range(2020, 2028)
-_WS = re.compile(r"\s+")
-_FY = re.compile(r"FY\s*(\d{4})")
 
-def _norm(h):
-    return _WS.sub(" ", str(h)).strip() if h is not None else ""
 
 def _num(v):
     if v in (None, ""): return 0.0
@@ -631,12 +689,23 @@ def _num(v):
         try: return float(re.sub(r"[^0-9.\-]", "", str(v)) or 0)
         except ValueError: return 0.0
 
+
+def _account_parts(acct):
+    """('1506N') -> ('1506', 'N', '017', '017-1506'); unparsable -> (None,...)."""
+    m = _ACCT.match(acct or "")
+    if not m: return None, None, None, None
+    main, letter = m.group(1), m.group(2)
+    agency = ACCT_AGENCY.get(letter)
+    return main, letter, agency, (f"{agency}-{main}" if agency else None)
+
+
 def _exhibit_files(root, pb, ex):
     import glob
     for pat in (f"FY{pb}/_Year-Level/{ex}_display_*.xlsx", f"FY{pb}/_Year-Level/{ex}_*.xlsx"):
         hits = sorted(g for g in glob.glob(os.path.join(root, pat)) if "_ooc" not in g)
         if hits: return hits[0]
     return None
+
 
 def _read_sheet(path):
     import openpyxl
@@ -652,85 +721,342 @@ def _read_sheet(path):
     wb.close()
     return hdr, rows
 
+
 def _year_columns(hdr):
-    """{fiscal_year: {'total': idx, 'components': [(idx, label)], 'qty': idx|None}}"""
-    out = {}
+    """{fiscal_year: {'amount': [idx], 'qty': [idx], 'basis': str, 'label': str}}
+
+    'amount' is the set of columns to add for that year -- one element when a
+    "Total" column exists, otherwise every component column. See the header
+    comment for why both cases are real."""
+    seen = {}
     for i, h in enumerate(hdr):
-        m = _FY.search(h)
+        m = _FY.search(h or "")
         if not h or not m: continue
         fy = int(m.group(1))
-        e = out.setdefault(fy, {"total": None, "components": [], "qty": None})
-        if "Quantity" in h:
-            e["qty"] = i                      # last quantity column wins, same rule
+        e = seen.setdefault(fy, {"amt": [], "qty": []})
+        e["qty" if "Quantity" in h else "amt"].append((i, h))
+
+    out = {}
+    for fy, e in seen.items():
+        tot = [c for c in e["amt"] if "Total" in c[1]]
+        if tot:
+            amount, basis, label = [tot[-1][0]], "total_column", tot[-1][1]
+        elif len(e["amt"]) == 1:
+            amount, basis, label = [e["amt"][0][0]], "sole_column", e["amt"][0][1]
         else:
-            e["components"].append((i, h))
-            e["total"] = i                    # right-most amount column for the year
+            amount = [i for i, _ in e["amt"]]
+            basis = "sum_of_components"
+            label = " + ".join(h for _, h in e["amt"])
+        qtot = [c for c in e["qty"] if "Total" in c[1]]
+        qty = [qtot[-1][0]] if qtot else [i for i, _ in e["qty"]]
+        out[fy] = {"amount": amount, "qty": qty, "basis": basis,
+                   "label": label, "component_count": len(e["amt"])}
     return out
+
+
+# -- the weapons book -----------------------------------------------------------
+# Program Acquisition Cost by Weapon System, one PDF per PB year, one page per
+# weapon system. The page's first line after the running header is the program
+# name and the line above the page number is its category, so the roster comes
+# out of the page furniture rather than out of a hand-kept list.
+_WB_PAGE = re.compile(r"^\d+-\d+$")
+_WB_DIVIDER = re.compile(r"^FY \d{4} .*: \$", re.I)
+# Designators are what actually tie a weapons-book name to a budget line:
+# "F-35", "AH-64E", "DDG 51", "CVN 78", "SSN 774", "KC-46A".
+_DESIG = re.compile(r"\b([A-Z]{1,4})[-\s]?(\d{1,4})([A-Z]{0,2})\b")
+_STOP = {"THE", "AND", "FOR", "OF", "SYSTEM", "SYSTEMS", "PROGRAM", "PROGRAMS",
+         "PROJECTS", "RELATED", "NEW", "MOD", "MODS", "SUPPORT", "EQUIPMENT",
+         "US", "USA", "USAF", "USN", "USMC", "INC", "II", "III", "IV"}
+
+
+def _designators(name):
+    out = set()
+    for a, b, c in _DESIG.findall((name or "").upper()):
+        if a in _STOP: continue
+        out.add(f"{a}-{b}{c}")
+        if c: out.add(f"{a}-{b}")
+    return out
+
+
+def _words(name):
+    return {w for w in re.split(r"[^A-Z0-9]+", (name or "").upper())
+            if len(w) > 2 and w not in _STOP}
+
+
+def _weapon_book(root, pb):
+    """[{program_name, category, page_no}] for the PB(pb) weapons book, or []."""
+    import glob, subprocess
+    hits = sorted(glob.glob(os.path.join(
+        root, f"FY{pb}/_Year-Level/Program-Acquisition-Costs-by-Weapons-System_*.pdf")))
+    if not hits: return []
+    try:
+        txt = subprocess.run(["pdftotext", "-layout", hits[0], "-"],
+                             capture_output=True, text=True, timeout=180).stdout
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"  FY{pb} weapons book: pdftotext unavailable ({e}), skipped"); return []
+    head = f"FY {pb} Program Acquisition Cost"
+    out, seen = [], set()
+    for page in txt.split("\f"):
+        ne = [l.strip() for l in page.split("\n") if l.strip()]
+        if len(ne) < 3 or not ne[0].startswith(head): continue
+        page_no = cat = None
+        for i in range(len(ne) - 1, 0, -1):
+            if _WB_PAGE.fullmatch(ne[i]):
+                page_no, cat = ne[i], ne[i - 1]
+                break
+        if not page_no: continue                    # front matter
+        # Every weapon-system page names a prime contractor; the section dividers
+        # and the historical-profile pages that share their page furniture do not.
+        # That one string is what separates 86 real systems from 16 chapter heads
+        # in the PB2026 book, and it needs no per-book list to maintain.
+        if "Prime Contractor" not in page: continue
+        name = ne[1]
+        if name == cat or _WB_DIVIDER.match(name): continue   # category divider
+        if (name, page_no) in seen: continue
+        seen.add((name, page_no))
+        out.append({"pb_year": pb, "program_name": name, "category": cat,
+                    "page_no": page_no})
+    return out
+
+
+# The weapons book's own introduction states the Department's investment request
+# for the year it covers: "$384.3 billion, which includes $205.2 billion for
+# Procurement and $179.1 billion for RDT&E". Those two figures are the only
+# independent check available on the -1 extract, because they are the same
+# request totalled by the same Department from the same submission. Pulling them
+# out turns the exhibit spine from something that is merely internally consistent
+# into something that has been reconciled to a published number -- and it is what
+# caught the advance-procurement subtotal being double counted.
+_WB_TOTALS = re.compile(
+    r"totals\s*\$([\d,.]+)\s*billion.*?"
+    r"\$([\d,.]+)\s*billion for Procurement and\s*\$([\d,.]+)\s*billion for RDT&E",
+    re.S)
+
+
+def _weapon_book_totals(root, pb):
+    """The investment / procurement / RDT&E request the PB(pb) book states."""
+    import glob, subprocess
+    hits = sorted(glob.glob(os.path.join(
+        root, f"FY{pb}/_Year-Level/Program-Acquisition-Costs-by-Weapons-System_*.pdf")))
+    if not hits: return []
+    try:
+        txt = subprocess.run(["pdftotext", "-layout", "-f", "1", "-l", "8", hits[0], "-"],
+                             capture_output=True, text=True, timeout=120).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    m = _WB_TOTALS.search(_WS.sub(" ", txt))
+    if not m: return []
+    cite = (f"Program Acquisition Cost by Weapon System, FY{pb} Budget Request, "
+            "Introduction -- Major Weapon Systems Overview")
+    val = lambda g: float(m.group(g).replace(",", ""))
+    return [{"pb_year": pb, "measure": k, "exhibit": e, "published_b": val(g),
+             "citation": cite}
+            for k, e, g in (("investment", None, 1), ("procurement", "p1", 2),
+                            ("rdte", "r1", 3))]
+
+
+def _link_weapons(weapons, programs):
+    """Tie weapons-book program names to exhibit budget lines, with the evidence.
+
+    A link is only made on shared evidence and always records what that evidence
+    was, so a reader can reject an individual match without distrusting the rest:
+      designator  -- both names carry the same type designator (F-35, DDG 51)
+      phrase      -- three or more shared significant words and no designator on
+                     either side to contradict
+    Nothing is matched on a single common word."""
+    by_pb = collections.defaultdict(list)
+    for w in weapons:
+        by_pb[w["pb_year"]].append((w, _designators(w["program_name"]), _words(w["program_name"])))
+    links = []
+    for p in programs:
+        cand = by_pb.get(p["latest_pb"]) or by_pb.get(max(by_pb) if by_pb else None) or []
+        pd, pw = _designators(p["program_name"]), _words(p["program_name"])
+        best = None
+        for w, wd, ww in cand:
+            shared_d = pd & wd
+            if shared_d:
+                score = 100 + len(shared_d) * 10 + len(pw & ww)
+                if not best or score > best[0]:
+                    best = (score, w, "designator", sorted(shared_d)[0])
+                continue
+            shared_w = pw & ww
+            if len(shared_w) >= 3 and not pd and not wd:
+                score = len(shared_w)
+                if not best or score > best[0]:
+                    best = (score, w, "phrase", ";".join(sorted(shared_w)[:4]))
+        if not best: continue
+        _, w, how, ev = best
+        links.append({"account": p["account"], "exhibit": p["exhibit"], "bli": p["bli"],
+                      "pb_year": w["pb_year"], "weapon_program": w["program_name"],
+                      "weapon_category": w["category"], "weapon_page": w["page_no"],
+                      "match_method": how, "match_evidence": ev})
+    return links
+
 
 def step_exhibits(out):
     root = os.path.join(KB, "11-Budget-Justification/_Archive")
     if not os.path.isdir(root):
         print("  no exhibit archive found, skipping"); return
     vintage = mtime_date(root)
-    lines, prog = [], {}
+    lines, prog, rollup = [], {}, {}
+    unparsed_accounts = collections.Counter()
+
     for pb in PB_YEARS:
         for ex in EXHIBITS:
             path = _exhibit_files(root, pb, ex)
             if not path: continue
             hdr, rows = _read_sheet(path)
-            if not hdr: print(f"  FY{pb} {ex}: no header row, skipped"); continue
+            if not hdr:
+                print(f"  FY{pb} {ex}: no header row, skipped"); continue
             years = _year_columns(hdr)
             iB, iT = _resolve(hdr, "bli"), _resolve(hdr, "title")
-            iAdd = _resolve(hdr, "add")          # absent on some p1r books
+            iAdd, iToa = _resolve(hdr, "add"), _resolve(hdr, "toa")
             if iB is None or iT is None:
                 print(f"  FY{pb} {ex}: no line-item/title column, skipped"); continue
-            kept = 0
+            cols = {w: _resolve(hdr, w) for w in
+                    ("org", "acct_title", "ba", "ba_title", "bsa", "bsa_title",
+                     "line_no", "cost_type", "cost_type_title")}
+            kept = memo = 0
             for r in rows:
-                if iAdd is not None and r[iAdd] != "Add":
-                    continue                  # Non-Add rows are AP detail, not money
+                if iAdd is not None and r[iAdd] == "Non-Add":
+                    continue                      # AP detail already inside the line
                 title = _norm(r[iT])
                 if not title: continue
                 acct = _norm(r[0]); bli = _norm(r[iB])
-                cell = lambda w: (_norm(r[_resolve(hdr, w)])
-                                  if _resolve(hdr, w) is not None else "")
+                main, letter, agency, tas = _account_parts(acct)
+                if tas is None: unparsed_accounts[acct] += 1
+                cell = lambda w: (_norm(r[cols[w]]) if cols[w] is not None else "")
+                cost_type_title = (_norm(r[cols["cost_type_title"]])
+                                   if cols["cost_type_title"] is not None else "")
+                is_memo = (ex in MEMO_EXHIBITS
+                           or (iToa is not None and _norm(r[iToa]) == "N")
+                           or "MEMO NON ADD" in cost_type_title.upper()
+                           or cost_type_title == AP_SUBTOTAL)
                 base = {
                     "pb_year": pb, "exhibit": ex, "account": acct,
+                    "account_main": main, "treasury_agency": agency,
+                    "treasury_account": tas,
                     "account_title": cell("acct_title"), "organization": cell("org"),
                     "budget_activity": cell("ba"), "budget_activity_title": cell("ba_title"),
-                    "bli": bli, "bli_title": title, "cost_type": cell("cost_type"),
+                    "bsa": cell("bsa"), "bsa_title": cell("bsa_title"),
+                    "line_number": cell("line_no"),
+                    "bli": bli, "bli_title": title,
+                    "cost_type": cell("cost_type"),
+                    "cost_type_title": cost_type_title,
+                    "is_memo": is_memo,
                 }
-                for fy, cols in years.items():
+                for fy, c in years.items():
                     role = ("prior_actual" if fy == pb - 2 else
                             "enacted"      if fy == pb - 1 else
                             "request"      if fy == pb else "other")
-                    amt = _num(r[cols["total"]]) if cols["total"] is not None else 0.0
-                    qty = _num(r[cols["qty"]]) if cols["qty"] is not None else 0.0
+                    amt = sum(_num(r[i]) for i in c["amount"])
+                    qty = sum(_num(r[i]) for i in c["qty"])
                     if amt == 0 and qty == 0: continue
                     lines.append({**base, "fiscal_year": fy, "fy_role": role,
                         "amount_k": round(amt, 3), "quantity": qty,
-                        "total_column": _norm(hdr[cols["total"]]) if cols["total"] is not None else None,
-                        "component_count": len(cols["components"])})
+                        "total_column": c["label"][:200], "total_basis": c["basis"],
+                        "component_count": c["component_count"]})
                     kept += 1
+                    memo += 1 if is_memo else 0
+
+                    # Memo rows roll up separately from money rows. They share a
+                    # budget line -- the shipbuilding breakouts and the advance-
+                    # procurement subtotal sit on the same BLI as the weapon system
+                    # cost -- so a rollup keyed without is_memo would mix a
+                    # restatement into the figure it restates.
+                    rk = (acct, ex, bli, pb, fy, is_memo)
+                    ro = rollup.setdefault(rk, {
+                        "account": acct, "treasury_account": tas, "exhibit": ex, "bli": bli,
+                        "pb_year": pb, "fiscal_year": fy, "fy_role": role,
+                        "bli_title": title, "organization": base["organization"],
+                        "account_title": base["account_title"],
+                        "budget_activity": base["budget_activity"],
+                        "budget_activity_title": base["budget_activity_title"],
+                        "is_memo": is_memo, "amount_k": 0.0, "quantity": 0.0,
+                        "cost_type_count": 0, "total_basis": c["basis"]})
+                    ro["amount_k"] += amt
+                    ro["quantity"] += qty
+                    ro["cost_type_count"] += 1
+
                     k = (acct, ex, bli)
-                    p = prog.setdefault(k, {"account": acct, "exhibit": ex, "bli": bli,
+                    p = prog.setdefault(k, {"account": acct, "treasury_account": tas,
+                        "exhibit": ex, "bli": bli,
                         "program_name": title, "latest_pb": pb,
                         "organization": base["organization"],
                         "account_title": base["account_title"],
-                        "first_fiscal_year": fy, "last_fiscal_year": fy, "pb_years": set()})
+                        "budget_activity_title": base["budget_activity_title"],
+                        "is_memo": is_memo,
+                        "first_fiscal_year": fy, "last_fiscal_year": fy,
+                        "latest_request_k": 0.0, "lifetime_amount_k": 0.0,
+                        "pb_years": set()})
                     if pb >= p["latest_pb"]:
                         p["latest_pb"], p["program_name"] = pb, title
+                        p["account_title"] = base["account_title"]
+                        p["budget_activity_title"] = base["budget_activity_title"]
                     p["first_fiscal_year"] = min(p["first_fiscal_year"], fy)
                     p["last_fiscal_year"]  = max(p["last_fiscal_year"], fy)
                     p["pb_years"].add(pb)
             print(f"  FY{pb} {ex}: {kept:,} line-years from {len(rows):,} rows "
-                  f"({len(years)} fiscal years: {sorted(years)})")
+                  f"({memo:,} memo) -- fiscal years {sorted(years)}")
+
+    for ro in rollup.values():
+        ro["amount_k"] = round(ro["amount_k"], 3)
+
+    # The headline figure for a line is its newest REQUEST, not its newest number
+    # of any kind -- an actual and a request are different claims about a year.
+    for ro in rollup.values():
+        p = prog[(ro["account"], ro["exhibit"], ro["bli"])]
+        p["lifetime_amount_k"] += ro["amount_k"] if ro["fy_role"] == "request" else 0.0
+        if ro["fy_role"] == "request" and ro["pb_year"] == p["latest_pb"]:
+            p["latest_request_k"] += ro["amount_k"]
+
     prog_rows = []
-    for k, p in prog.items():
-        p = dict(p); p["pb_year_count"] = len(p.pop("pb_years"))
+    for p in prog.values():
+        p = dict(p)
+        p["pb_year_count"] = len(p.pop("pb_years"))
+        p["latest_request_k"] = round(p["latest_request_k"], 3)
+        p["lifetime_amount_k"] = round(p["lifetime_amount_k"], 3)
+        p["slug"] = re.sub(r"[^a-z0-9]+", "-",
+                           f"{p['exhibit']}-{p['account']}-{p['bli']}".lower()).strip("-")
         prog_rows.append(p)
     prog_rows.sort(key=lambda x: (x["exhibit"], x["account"], x["bli"]))
+
+    weapons = []
+    for pb in PB_YEARS:
+        w = _weapon_book(root, pb)
+        if w: print(f"  FY{pb} weapons book: {len(w)} weapon systems")
+        weapons.extend(w)
+    tieouts = []
+    for pb in PB_YEARS:
+        tieouts.extend(_weapon_book_totals(root, pb))
+    if tieouts:
+        print("  weapons-book totals: " + ", ".join(
+            f"PB{t['pb_year']} {t['measure']} ${t['published_b']}B"
+            for t in tieouts if t["measure"] == "procurement"))
+
+    links = _link_weapons(weapons, prog_rows)
+    linked = {(l["account"], l["exhibit"], l["bli"]) for l in links}
+    for p in prog_rows:
+        p["in_weapons_book"] = (p["account"], p["exhibit"], p["bli"]) in linked
+    print(f"  weapons book: {len(weapons)} system-years, "
+          f"{len(links):,} budget lines linked "
+          f"({sum(1 for l in links if l['match_method'] == 'designator'):,} by designator)")
+
+    if unparsed_accounts:
+        print(f"  {sum(unparsed_accounts.values())} rows carry an account symbol that is "
+              f"not four digits plus an organisation letter: "
+              f"{dict(list(unparsed_accounts.items())[:6])}")
+
+    rollup_rows = sorted(rollup.values(),
+                         key=lambda x: (x["exhibit"], x["account"], x["bli"],
+                                        x["pb_year"], x["fiscal_year"]))
     write(out, "exhibits.json", payload("budget_exhibits", vintage,
-        {"dm_exhibit_line": lines, "dm_exhibit_program": prog_rows},
+        {"dm_exhibit_line": lines,
+         "dm_exhibit_program_fy": rollup_rows,
+         "dm_exhibit_program": prog_rows,
+         "dm_weapon_system": weapons,
+         "dm_exhibit_weapon_link": links,
+         "dm_exhibit_tieout": tieouts},
         source_path="knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification/_Archive",
         pb_years=list(PB_YEARS)))
 

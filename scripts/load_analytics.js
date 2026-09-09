@@ -282,6 +282,163 @@ const CONTROLS = {
         : `FY${r.fiscal_year}: attributed + unattributed (${(parts / 1e9).toFixed(2)}B) does not foot to the `
           + `fiscal-year total (${(Number(r.total_obligation) / 1e9).toFixed(2)}B), so the coverage denominator is not trustworthy.` };
   }),
+
+  // ------------------------------------------------------------ exhibits --
+  // The -1 books are the only source here keyed on a budget line. Four of these
+  // five are critical, because each blocks a specific way the restatement
+  // structure can be flattened into a single wrong number.
+  'EXH-01': async (c) => (await c.query(`
+    WITH cover AS (
+      SELECT f.fiscal_year,
+             count(DISTINCT b.pb_year) AS books_held,
+             count(DISTINCT f.fy_role) AS roles_present
+        FROM dm_exhibit_program_fy f
+        JOIN dm_load l ON l.id = f.load_id AND l.is_current
+        LEFT JOIN (SELECT DISTINCT load_id, pb_year FROM dm_exhibit_program_fy) b
+               ON b.load_id = f.load_id
+              AND b.pb_year IN (f.fiscal_year, f.fiscal_year + 1, f.fiscal_year + 2)
+       GROUP BY f.fiscal_year)
+    SELECT fiscal_year, books_held, roles_present FROM cover ORDER BY fiscal_year`)).rows.map((r) => {
+    const ok = Number(r.roles_present) === Number(r.books_held);
+    return { fiscal_year: r.fiscal_year, observed: r.roles_present, expected: r.books_held,
+      status: ok ? 'pass' : 'fail',
+      message: ok
+        ? `FY${r.fiscal_year} is restated in all ${r.books_held} President's Budget book(s) that cover it `
+          + `(${r.roles_present} distinct role${Number(r.roles_present) === 1 ? '' : 's'} kept).`
+        : `FY${r.fiscal_year} appears in ${r.books_held} book(s) but only ${r.roles_present} role(s) survived `
+          + `— the restatement history has been collapsed.` };
+  }),
+  'EXH-02': async (c) => {
+    const q = (t) => `
+      SELECT count(*)::int AS n FROM ${t} x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+       WHERE x.fy_role <> CASE WHEN x.fiscal_year = x.pb_year - 2 THEN 'prior_actual'
+                               WHEN x.fiscal_year = x.pb_year - 1 THEN 'enacted'
+                               WHEN x.fiscal_year = x.pb_year     THEN 'request'
+                               ELSE 'other' END`;
+    const a = (await c.query(q('dm_exhibit_line'))).rows[0].n;
+    const b = (await c.query(q('dm_exhibit_program_fy'))).rows[0].n;
+    return [{ observed: a + b, expected: 0, status: a + b === 0 ? 'pass' : 'fail',
+      message: a + b === 0
+        ? "Every exhibit row's role — actual, enacted or request — is derived from the book year it was read from."
+        : `${a + b} exhibit rows carry a role that does not follow from their book year.` }];
+  },
+  'EXH-03': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS n FROM dm_exhibit_line x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+       WHERE x.is_memo = false
+         AND (x.exhibit = 'p1r' OR coalesce(x.cost_type_title,'') ILIKE '%MEMO NON ADD%')`);
+    const { rows: kept } = await c.query(`
+      SELECT count(*)::int AS n, coalesce(sum(x.amount_k),0) AS k
+        FROM dm_exhibit_line x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+       WHERE x.is_memo`);
+    return [{ observed: rows[0].n, expected: 0, status: rows[0].n === 0 ? 'pass' : 'fail',
+      message: rows[0].n === 0
+        ? `${kept[0].n} memo rows (${(kept[0].k / 1e6).toFixed(1)}B of reserve, guard and non-TOA restatement) `
+          + 'are flagged and held out of every total.'
+        : `${rows[0].n} memo rows are unflagged and would be summed into a published total.` }];
+  },
+  'EXH-04': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS n FROM (
+        SELECT r.amount_k AS rolled, coalesce(sum(x.amount_k), 0) AS detail
+          FROM dm_exhibit_program_fy r
+          JOIN dm_load l ON l.id = r.load_id AND l.is_current
+          LEFT JOIN dm_exhibit_line x
+                 ON x.load_id = r.load_id AND x.exhibit = r.exhibit AND x.account = r.account
+                AND x.bli = r.bli AND x.pb_year = r.pb_year AND x.fiscal_year = r.fiscal_year
+                AND x.is_memo = r.is_memo
+         GROUP BY r.id, r.amount_k) t
+       WHERE abs(t.rolled - t.detail) > greatest(0.001, abs(t.rolled) * 1e-5)`);
+    const { rows: tot } = await c.query(`
+      SELECT count(*)::int AS n FROM dm_exhibit_program_fy r
+        JOIN dm_load l ON l.id = r.load_id AND l.is_current`);
+    return [{ observed: rows[0].n, expected: 0, status: rows[0].n === 0 ? 'pass' : 'fail',
+      message: rows[0].n === 0
+        ? `All ${tot[0].n.toLocaleString()} rolled-up budget-line figures foot to the exhibit rows they came from.`
+        : `${rows[0].n} rolled-up figures do not foot to their own detail.` }];
+  },
+  'EXH-05': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS n FROM dm_exhibit_line x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+       WHERE x.total_basis NOT IN ('total_column','sole_column','sum_of_components')
+          OR coalesce(x.total_column,'') = ''`);
+    const { rows: mix } = await c.query(`
+      SELECT x.total_basis AS basis, count(*)::int AS n
+        FROM dm_exhibit_line x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+       GROUP BY 1 ORDER BY 2 DESC`);
+    return [{ observed: rows[0].n, expected: 0, status: rows[0].n === 0 ? 'pass' : 'fail',
+      message: rows[0].n === 0
+        ? 'Every exhibit figure names the column it came from: '
+          + mix.map((m) => `${m.n.toLocaleString()} ${m.basis.replace(/_/g, ' ')}`).join(', ') + '.'
+        : `${rows[0].n} exhibit figures do not name the column they came from.` }];
+  },
+  'EXH-06': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS n FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+       WHERE p.treasury_account IS NOT NULL AND p.treasury_account !~ '^[0-9]{3}-[0-9]{4}$'`);
+    const { rows: cov } = await c.query(`
+      SELECT count(*)::int AS n,
+             count(*) FILTER (WHERE p.treasury_account IS NOT NULL)::int AS resolved
+        FROM dm_exhibit_program p JOIN dm_load l ON l.id = p.load_id AND l.is_current`);
+    const pct = cov[0].n ? cov[0].resolved / cov[0].n * 100 : 0;
+    return [{ observed: cov[0].resolved, expected: cov[0].n, variance_pct: pct,
+      status: rows[0].n === 0 ? 'pass' : 'fail',
+      message: rows[0].n === 0
+        ? `${pct.toFixed(1)}% of budget lines (${cov[0].resolved.toLocaleString()} of `
+          + `${cov[0].n.toLocaleString()}) resolve to a Treasury account, and every one is well formed.`
+        : `${rows[0].n} budget lines carry a malformed Treasury account symbol.` }];
+  },
+  'EXH-07': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS n FROM dm_exhibit_weapon_link w JOIN dm_load l ON l.id = w.load_id AND l.is_current
+       WHERE coalesce(w.match_method,'') = '' OR coalesce(w.match_evidence,'') = ''`);
+    const { rows: cov } = await c.query(`
+      WITH newest AS (SELECT max(s.pb_year) AS pb FROM dm_weapon_system s
+                        JOIN dm_load l ON l.id = s.load_id AND l.is_current)
+      SELECT count(*)::int AS systems,
+             count(*) FILTER (WHERE EXISTS (
+               SELECT 1 FROM dm_exhibit_weapon_link w
+                WHERE w.load_id = s.load_id AND w.weapon_program = s.program_name
+                  AND w.pb_year = s.pb_year))::int AS linked
+        FROM dm_weapon_system s
+        JOIN dm_load l ON l.id = s.load_id AND l.is_current
+       WHERE s.pb_year = (SELECT pb FROM newest)`);
+    const pct = cov[0].systems ? cov[0].linked / cov[0].systems * 100 : 0;
+    return [{ observed: cov[0].linked, expected: cov[0].systems, variance_pct: pct,
+      status: rows[0].n === 0 ? 'pass' : 'fail',
+      message: rows[0].n === 0
+        ? `${cov[0].linked} of ${cov[0].systems} weapon systems in the newest book reach a budget line `
+          + `(${pct.toFixed(0)}%); every link names the evidence it rests on.`
+        : `${rows[0].n} weapons-book links do not name how they were made.` }];
+  },
+  // The only control here that reaches outside the extract for its expectation.
+  'EXH-08': async (c) => (await c.query(`
+    SELECT t.pb_year, t.measure, t.exhibit, t.published_b, t.citation,
+           coalesce(sum(f.amount_k), 0) / 1e6 AS extracted_b
+      FROM dm_exhibit_tieout t
+      JOIN dm_load l ON l.id = t.load_id AND l.is_current
+      LEFT JOIN dm_exhibit_program_fy f
+             ON f.load_id = t.load_id AND f.pb_year = t.pb_year
+            AND f.fy_role = 'request' AND f.is_memo = false
+            AND f.exhibit = t.exhibit
+     WHERE t.exhibit IS NOT NULL
+     GROUP BY t.pb_year, t.measure, t.exhibit, t.published_b, t.citation
+     ORDER BY t.pb_year, t.measure`)).rows.map((r) => {
+    // The book prints one decimal place, so anything inside half of that last
+    // digit is agreement and anything outside it is a real difference.
+    const d = Math.abs(Number(r.extracted_b) - Number(r.published_b));
+    const ok = d <= 0.05;
+    return { fiscal_year: r.pb_year, observed: r.extracted_b, expected: r.published_b,
+      tolerance: 0.05, variance_pct: Number(r.published_b) ? d / Number(r.published_b) * 100 : 0,
+      status: ok ? 'pass' : 'fail',
+      message: ok
+        ? `PB${r.pb_year} ${r.measure}: the ${r.exhibit.toUpperCase()} lines total `
+          + `$${Number(r.extracted_b).toFixed(1)}B, the figure the Department publishes in `
+          + `${r.citation.split(',')[0]}.`
+        : `PB${r.pb_year} ${r.measure}: the ${r.exhibit.toUpperCase()} lines total `
+          + `$${Number(r.extracted_b).toFixed(1)}B against the $${Number(r.published_b).toFixed(1)}B `
+          + `the Department publishes — a $${d.toFixed(1)}B difference the extract cannot explain.` };
+  }),
 };
 
 // -------------------------------------------------------------------- main --
@@ -329,6 +486,7 @@ const CONTROLS = {
       ['awards.json',     'contract_awards',       'scripts/etl_analytics.py --step awards'],
       ['filec.json',      'file_c_reconciliation', 'scripts/etl_analytics.py --step filec'],
       ['assistance.json', 'assistance_awards',     'scripts/etl_analytics.py --step assistance'],
+      ['exhibits.json',   'budget_exhibits',       'scripts/etl_analytics.py --step exhibits'],
       ['program.json',    'program_execution',     'scripts/etl_analytics.py --step program'],
       ['knowledge.json',  'knowledge_bank',        'scripts/etl_analytics.py --step knowledge'],
     ];
@@ -369,6 +527,20 @@ const CONTROLS = {
         'action_count','out_of_scope_accounts','has_out_of_scope','rank_in_fy'],
       dm_program_filec: ['program_code','fiscal_year','filec_obligation','filec_rows','filec_awards',
         'award_obligation','linkage_pct','submission_period','is_partial_year'],
+      dm_exhibit_line: ['pb_year','exhibit','account','account_main','treasury_agency','treasury_account',
+        'account_title','organization','budget_activity','budget_activity_title','bsa','bsa_title',
+        'line_number','bli','bli_title','cost_type','cost_type_title','is_memo','fiscal_year','fy_role',
+        'amount_k','quantity','total_column','total_basis','component_count'],
+      dm_exhibit_program_fy: ['account','treasury_account','exhibit','bli','pb_year','fiscal_year','fy_role',
+        'bli_title','organization','account_title','budget_activity','budget_activity_title','is_memo',
+        'amount_k','quantity','cost_type_count','total_basis'],
+      dm_exhibit_program: ['account','treasury_account','exhibit','bli','program_name','latest_pb',
+        'organization','account_title','budget_activity_title','is_memo','first_fiscal_year',
+        'last_fiscal_year','latest_request_k','lifetime_amount_k','pb_year_count','slug','in_weapons_book'],
+      dm_weapon_system: ['pb_year','program_name','category','page_no'],
+      dm_exhibit_tieout: ['pb_year','measure','exhibit','published_b','citation'],
+      dm_exhibit_weapon_link: ['account','exhibit','bli','pb_year','weapon_program','weapon_category',
+        'weapon_page','match_method','match_evidence'],
       dm_definition: ['slug','term','definition','why_it_matters','key_rules','authorities','related',
         'source_file','last_verified','topic'],
       dm_kb_inventory: ['collection','folder','label','doc_count','authority_tier','note','sort_order'],

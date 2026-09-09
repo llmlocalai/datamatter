@@ -397,6 +397,165 @@ CREATE TABLE IF NOT EXISTS dm_reconciliation (
   UNIQUE (load_id, fiscal_year)
 );
 
+-- ------------------------------------------------ budget exhibits (the -1s) --
+-- The President's Budget P-1, P-1R and R-1 exhibits are the only source here
+-- that is keyed on a BUDGET LINE rather than on a Treasury account, which makes
+-- them the spine every other table hangs from: a line item is what Congress
+-- appropriates against, what a program office executes, and what a contract is
+-- eventually written for.
+--
+-- THE GRAIN IS (pb_year, fiscal_year) AND IT IS NEVER COLLAPSED. Each PB book
+-- restates three fiscal years in three different roles -- FY(pb-2) actuals,
+-- FY(pb-1) enacted, FY(pb) request -- so one fiscal year appears in three
+-- successive books with three different numbers. Averaging or de-duplicating
+-- those would destroy the restatement history, which is the single most useful
+-- thing these exhibits carry: it is where a request becoming an enactment
+-- becoming an actual can actually be watched. EXH-01 asserts the diagonal
+-- survives the load; EXH-02 asserts the roles are assigned from the book year
+-- and not guessed.
+--
+-- MEMO ROWS ARE KEPT AND FLAGGED, NEVER SUMMED. The whole P-1R exhibit is
+-- National Guard and Reserve equipment already counted inside the P-1 lines,
+-- and R-1 rows marked Include-in-TOA = N are outside total obligation
+-- authority. Both are retained so their absence from a total is explainable,
+-- and every query filters is_memo = false by default. EXH-03 asserts no
+-- unflagged row carries a memo cost type.
+
+CREATE TABLE IF NOT EXISTS dm_exhibit_line (
+  id                    bigserial PRIMARY KEY,
+  load_id               bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  pb_year               int  NOT NULL,   -- which book this was read from
+  exhibit               text NOT NULL,   -- p1 | p1r | r1
+  account               text NOT NULL,   -- exhibit symbol, e.g. 1506N
+  account_main          text,            -- 1506
+  treasury_agency       text,            -- 017, derived from the organisation letter
+  treasury_account      text,            -- 017-1506, the key the execution files use
+  account_title         text,
+  organization          text,
+  budget_activity       text,
+  budget_activity_title text,
+  bsa                   text,
+  bsa_title             text,
+  line_number           text,
+  bli                   text NOT NULL,   -- budget line item / program element
+  bli_title             text NOT NULL,
+  cost_type             text,            -- A | AP CY | Less: AP PY | ...
+  cost_type_title       text,
+  is_memo               boolean NOT NULL DEFAULT false,
+  fiscal_year           int  NOT NULL,   -- which year this row describes
+  fy_role               text NOT NULL,   -- prior_actual | enacted | request | other
+  amount_k              numeric(20,3) NOT NULL DEFAULT 0,  -- thousands of dollars
+  quantity              numeric(16,3) NOT NULL DEFAULT 0,
+  total_column          text,            -- the exhibit column this figure came from
+  total_basis           text NOT NULL,   -- total_column | sole_column | sum_of_components
+  component_count       int  NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS dm_exhibit_line_idx
+  ON dm_exhibit_line (load_id, exhibit, account, bli, pb_year, fiscal_year);
+
+-- The same lines rolled up over cost type: one amount per budget line per book
+-- per fiscal year. This is what the restatement matrix on /program reads.
+CREATE TABLE IF NOT EXISTS dm_exhibit_program_fy (
+  id                    bigserial PRIMARY KEY,
+  load_id               bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  account               text NOT NULL,
+  treasury_account      text,
+  exhibit               text NOT NULL,
+  bli                   text NOT NULL,
+  pb_year               int  NOT NULL,
+  fiscal_year           int  NOT NULL,
+  fy_role               text NOT NULL,
+  bli_title             text NOT NULL,
+  organization          text,
+  account_title         text,
+  budget_activity       text,
+  budget_activity_title text,
+  is_memo               boolean NOT NULL DEFAULT false,
+  amount_k              numeric(20,3) NOT NULL DEFAULT 0,
+  quantity              numeric(16,3) NOT NULL DEFAULT 0,
+  cost_type_count       int  NOT NULL DEFAULT 0,
+  total_basis           text NOT NULL,
+  UNIQUE (load_id, exhibit, account, bli, pb_year, fiscal_year, is_memo)
+);
+CREATE INDEX IF NOT EXISTS dm_exhibit_program_fy_year_idx
+  ON dm_exhibit_program_fy (load_id, fiscal_year, fy_role, is_memo);
+
+-- One row per budget line across every book we hold: the roster.
+CREATE TABLE IF NOT EXISTS dm_exhibit_program (
+  id                    bigserial PRIMARY KEY,
+  load_id               bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  account               text NOT NULL,
+  treasury_account      text,
+  exhibit               text NOT NULL,
+  bli                   text NOT NULL,
+  program_name          text NOT NULL,   -- the title as of the newest book
+  latest_pb             int  NOT NULL,
+  organization          text,
+  account_title         text,
+  budget_activity_title text,
+  is_memo               boolean NOT NULL DEFAULT false,
+  first_fiscal_year     int  NOT NULL,
+  last_fiscal_year      int  NOT NULL,
+  latest_request_k      numeric(20,3) NOT NULL DEFAULT 0,
+  lifetime_amount_k     numeric(20,3) NOT NULL DEFAULT 0,
+  pb_year_count         int  NOT NULL DEFAULT 0,
+  slug                  text NOT NULL,
+  in_weapons_book       boolean NOT NULL DEFAULT false,
+  UNIQUE (load_id, exhibit, account, bli)
+);
+CREATE INDEX IF NOT EXISTS dm_exhibit_program_search_idx
+  ON dm_exhibit_program (load_id, is_memo, latest_request_k DESC);
+
+-- Program Acquisition Cost by Weapon System, one PDF per PB year. This is the
+-- Department's own answer to "which of these lines is a major program", so it
+-- is carried as its own roster rather than folded into a flag we invented.
+CREATE TABLE IF NOT EXISTS dm_weapon_system (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  pb_year       int  NOT NULL,
+  program_name  text NOT NULL,
+  category      text,
+  page_no       text,
+  UNIQUE (load_id, pb_year, program_name, page_no)
+);
+
+-- The weapons book names systems; the exhibits name budget lines; nothing in
+-- either source carries the other's key. Every link therefore records HOW it
+-- was made and on WHAT evidence, so a reader can reject one match without
+-- having to distrust the rest. match_method 'designator' means both names carry
+-- the same type designator (F-35, DDG 51); 'phrase' means three or more shared
+-- significant words with no designator on either side to contradict.
+CREATE TABLE IF NOT EXISTS dm_exhibit_weapon_link (
+  id              bigserial PRIMARY KEY,
+  load_id         bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  account         text NOT NULL,
+  exhibit         text NOT NULL,
+  bli             text NOT NULL,
+  pb_year         int  NOT NULL,
+  weapon_program  text NOT NULL,
+  weapon_category text,
+  weapon_page     text,
+  match_method    text NOT NULL,   -- designator | phrase
+  match_evidence  text NOT NULL,   -- the token or words the match rests on
+  UNIQUE (load_id, exhibit, account, bli, pb_year, weapon_program)
+);
+CREATE INDEX IF NOT EXISTS dm_exhibit_weapon_link_idx
+  ON dm_exhibit_weapon_link (load_id, exhibit, account, bli);
+
+-- The one external check on the exhibit extract. The weapons book states the
+-- same request the -1 books itemise, totalled by the Department itself, so a
+-- disagreement means the extract is wrong rather than that the sources differ.
+CREATE TABLE IF NOT EXISTS dm_exhibit_tieout (
+  id           bigserial PRIMARY KEY,
+  load_id      bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  pb_year      int  NOT NULL,
+  measure      text NOT NULL,          -- investment | procurement | rdte
+  exhibit      text,                   -- p1 | r1, null for the combined figure
+  published_b  numeric(12,3) NOT NULL, -- billions of dollars, as printed
+  citation     text NOT NULL,
+  UNIQUE (load_id, pb_year, measure)
+);
+
 -- --------------------------------------------------- oversight & knowledge --
 CREATE TABLE IF NOT EXISTS dm_audit_posture (
   id            bigserial PRIMARY KEY,

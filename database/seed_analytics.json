@@ -24,6 +24,17 @@
       "sort_order": 20
     },
     {
+      "key": "budget_exhibits",
+      "label": "President's Budget -1 exhibits (P-1, P-1R, R-1)",
+      "source_system": "DoD Comptroller President's Budget justification books, PB2020-PB2027",
+      "source_path": "knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification/_Archive",
+      "grain": "Budget line item x President's Budget year x fiscal year",
+      "description": "Every procurement (P-1), reserve-equipment (P-1R) and RDT&E (R-1) budget line in the eight President's Budget books held here, at the grain the exhibits themselves publish: a book year and a fiscal year. Because each book restates three fiscal years -- prior-year actuals, current-year enacted, budget-year request -- a single fiscal year appears in three successive books with three different numbers, and all three are kept. The exhibit account symbol is resolved to a Treasury account so a budget line can be carried into the execution files, and the Department's own Program Acquisition Cost by Weapon System book is carried alongside as its answer to which of these lines is a major program.",
+      "refresh_cadence": "annual, on publication of each President's Budget",
+      "limitations": "The P-1R exhibit is National Guard and Reserve equipment already counted inside the P-1 lines, and R-1 rows marked Include-in-TOA = N sit outside total obligation authority; both are kept, flagged is_memo, and excluded from every total. Amounts are in thousands of dollars as published, are total obligation authority rather than outlays, and are not comparable to the execution files without ageing prior-year balances. The link from a weapons-book system to a budget line is derived from shared type designators or shared significant words -- neither source carries the other's key -- and every link records the evidence it rests on.",
+      "sort_order": 20
+    },
+    {
       "key": "contract_awards",
       "label": "Contract award transactions (FPDS)",
       "source_system": "USASpending contract award archive, agency 097",
@@ -40,9 +51,9 @@
       "source_system": "USASpending financial assistance archive, Department of War / Department of Defense awarding agency",
       "source_path": "data/usaspending/warehouse/assistance",
       "grain": "Assistance transaction x fiscal year x vintage",
-      "description": "Federal action obligations for DoW financial-assistance awards \u2014 cooperative agreements, project and formula grants, and direct payments. A separate warehouse tree and reporting chain from contracts and File C; not account-linked and not reconciled against anything.",
+      "description": "Federal action obligations for DoW financial-assistance awards — cooperative agreements, project and formula grants, and direct payments. A separate warehouse tree and reporting chain from contracts and File C; not account-linked and not reconciled against anything.",
       "refresh_cadence": "as vintaged (two vintages currently retained)",
-      "limitations": "Rows are filtered to awarding-agency name \u2018Department of Defense\u2019 or \u2018Department of War\u2019 rather than an agency-identifier code, because this warehouse cut carries no code column. The assistance-type codes present are cooperative agreements, grants and direct payments \u2014 no loan or loan-guarantee type codes appear in this cut, so it is not a credit-programs picture and must not be described as one. Only two vintages are retained so far; vintage drift is measurable but thin.",
+      "limitations": "Rows are filtered to awarding-agency name ‘Department of Defense’ or ‘Department of War’ rather than an agency-identifier code, because this warehouse cut carries no code column. The assistance-type codes present are cooperative agreements, grants and direct payments — no loan or loan-guarantee type codes appear in this cut, so it is not a credit-programs picture and must not be described as one. Only two vintages are retained so far; vintage drift is measurable but thin.",
       "sort_order": 35
     },
     {
@@ -55,6 +66,17 @@
       "refresh_cadence": "daily",
       "limitations": "A low linkage percentage measures reporting completeness between two chains. It is not an estimate of unsupported or missing obligations, and must never be presented as one.",
       "sort_order": 40
+    },
+    {
+      "key": "program_execution",
+      "label": "Program execution and account traceability",
+      "source_system": "USASpending contract award archive; USASpending File C",
+      "source_path": "data/usaspending/warehouse/contracts + accounts/file_c_contracts",
+      "grain": "Acquisition program code x fiscal year",
+      "description": "Contract obligations cut by FPDS dod_acquisition_program_code -- the only field in this warehouse keyed to a budget line rather than to an account -- with the share of each total whose funding Treasury account is actually named, the accounts named on those actions, contract-level concentration, and the File C tie-out for the same contracts.",
+      "refresh_cadence": "daily",
+      "limitations": "FPDS records 'no acquisition program' as code 000 / description NONE, and roughly three quarters of DoD contract dollars carry that code, so this covers only the program-attributable quarter of the file -- dm_program_coverage states how much per year. federal_accounts_funding_this_award lists every account funding an award without apportioning the obligation across them, so no figure here is split by account. A program obligation total is not comparable to that program's appropriation: it draws on prior-year balances this cut cannot age, and Foreign Military Sales trust dollars (011-8242) sit on the same contract actions as Department appropriations.",
+      "sort_order": 45
     },
     {
       "key": "knowledge_bank",
@@ -77,17 +99,6 @@
       "refresh_cadence": "annual",
       "limitations": "Read via the curated wiki summary of the AFR, which is a secondary read of a primary document. Each row records which it is.",
       "sort_order": 60
-    },
-    {
-      "key": "program_execution",
-      "label": "Program execution and account traceability",
-      "source_system": "USASpending contract award archive; USASpending File C",
-      "source_path": "data/usaspending/warehouse/contracts + accounts/file_c_contracts",
-      "grain": "Acquisition program code x fiscal year",
-      "description": "Contract obligations cut by FPDS dod_acquisition_program_code -- the only field in this warehouse keyed to a budget line rather than to an account -- with the share of each total whose funding Treasury account is actually named, the accounts named on those actions, contract-level concentration, and the File C tie-out for the same contracts.",
-      "refresh_cadence": "daily",
-      "limitations": "FPDS records 'no acquisition program' as code 000 / description NONE, and roughly three quarters of DoD contract dollars carry that code, so this covers only the program-attributable quarter of the file -- dm_program_coverage states how much per year. federal_accounts_funding_this_award lists every account funding an award without apportioning the obligation across them, so no figure here is split by account. A program obligation total is not comparable to that program's appropriation: it draws on prior-year balances this cut cannot age, and Foreign Military Sales trust dollars (011-8242) sit on the same contract actions as Department appropriations.",
-      "sort_order": 45
     }
   ],
   "controls": [
@@ -243,6 +254,78 @@
       "authority": "Internal reporting standard",
       "severity": "high",
       "sort_order": 170
+    },
+    {
+      "code": "EXH-01",
+      "name": "The three-year restatement structure survives the load",
+      "assertion": "For every fiscal year in dm_exhibit_program_fy, the number of distinct fy_role values equals the number of President's Budget books held that cover that year (a year is covered by the books for pb = fy, fy+1 and fy+2).",
+      "rationale": "Each -1 book restates three fiscal years in three roles: prior-year actuals, current-year enacted, budget-year request. A fiscal year therefore appears in three successive books with three different numbers, and the difference between them is the restatement history -- the one thing these exhibits carry that exists in no other source here. Any de-duplication that leaves a year with fewer roles than the books we hold would silently destroy it, so the load is blocked rather than published.",
+      "authority": "DoD Financial Management Regulation Volume 2A/2B, exhibit formats",
+      "severity": "critical",
+      "sort_order": 180
+    },
+    {
+      "code": "EXH-02",
+      "name": "Every fiscal-year role is derived from the book it was read from",
+      "assertion": "For every row in dm_exhibit_line and dm_exhibit_program_fy, fy_role equals prior_actual when fiscal_year = pb_year - 2, enacted when fiscal_year = pb_year - 1, request when fiscal_year = pb_year, and other otherwise.",
+      "rationale": "The role is what turns a number into a claim: the same $6.9 billion is a request in one book, an enactment in the next and an actual in the third. If the role were inferred from a column heading it would drift with the heading, so it is derived arithmetically from the book year and this control asserts nothing overrode it.",
+      "authority": "Internal reporting standard",
+      "severity": "critical",
+      "sort_order": 190
+    },
+    {
+      "code": "EXH-03",
+      "name": "Memo-only lines are flagged and never enter a total",
+      "assertion": "No row of dm_exhibit_line with is_memo = false belongs to the P-1R exhibit or carries a cost type naming a memo non-add.",
+      "rationale": "The P-1R exhibit is National Guard and Reserve equipment already counted inside the P-1 lines, and R-1 rows outside total obligation authority are the same kind of restatement. Both are kept rather than dropped, because a total that silently omits an exhibit cannot be explained on the page; that only works if the flag is right, which is what this asserts.",
+      "authority": "DoD Financial Management Regulation Volume 2A, P-1R exhibit",
+      "severity": "critical",
+      "sort_order": 200
+    },
+    {
+      "code": "EXH-04",
+      "name": "The per-line rollup foots to the exhibit rows it came from",
+      "assertion": "For every budget line, book year and fiscal year, dm_exhibit_program_fy.amount_k equals the sum of dm_exhibit_line.amount_k for the same key, within a thousandth of a percent.",
+      "rationale": "The rollup is what the page reads; the line rows are what the exhibit published. A rollup that does not foot to its own detail is a fabricated figure with a citation attached, which is worse than no figure, so the load is blocked.",
+      "authority": "Internal reporting standard",
+      "severity": "critical",
+      "sort_order": 210
+    },
+    {
+      "code": "EXH-05",
+      "name": "Every fiscal-year figure names the exhibit column it came from",
+      "assertion": "Every row of dm_exhibit_line carries a total_basis of total_column, sole_column or sum_of_components and a non-empty total_column label.",
+      "rationale": "The exhibits change shape between eras -- Base and OCO, Less Supplementals, Discretionary and Reconciliation -- and the broadest figure for a year is not always in the same place. Two rules pick it, and which one fired changes what the number means, so the basis is recorded per row and asserted here rather than assumed.",
+      "authority": "Internal reporting standard",
+      "severity": "critical",
+      "sort_order": 220
+    },
+    {
+      "code": "EXH-06",
+      "name": "The Treasury-account crosswalk is shaped and its coverage stated",
+      "assertion": "Every non-null treasury_account in dm_exhibit_program is three digits, a hyphen and four digits, and the share of budget lines that resolved to one is reported.",
+      "rationale": "The exhibit account symbol (1506N) and the Treasury account symbol (017-1506) differ only by the organisation letter, and that crosswalk is the whole bridge from a budget line to the execution files. A malformed symbol would join to nothing and read as an execution gap rather than as a parsing failure, so the shape is asserted and the coverage published beside it.",
+      "authority": "Treasury Financial Manual, agency and account symbols",
+      "severity": "critical",
+      "sort_order": 230
+    },
+    {
+      "code": "EXH-07",
+      "name": "Weapons-book linkage is disclosed, not implied",
+      "assertion": "Every row of dm_exhibit_weapon_link names a match_method and the evidence it rests on, and the share of the newest book's weapon systems that reached a budget line is reported.",
+      "rationale": "Neither the weapons book nor the -1 exhibits carry the other's key, so every link here is derived. Publishing derived links without the evidence would let a reader mistake a name-similarity match for a Department-published mapping. Systems that reached no budget line are counted rather than hidden, because that count is the honest measure of how far this crosswalk goes.",
+      "authority": "Program Acquisition Cost by Weapon System, DoD Comptroller",
+      "severity": "moderate",
+      "sort_order": 240
+    },
+    {
+      "code": "EXH-08",
+      "name": "The exhibit request totals tie to the Department's own weapons book",
+      "assertion": "For every President's Budget year whose Program Acquisition Cost by Weapon System book states an investment breakdown, the non-memo P-1 request lines total the procurement figure it publishes and the non-memo R-1 request lines total the RDT&E figure, each within half of the last printed digit.",
+      "rationale": "Every other control here asks whether the extract is consistent with itself. This one asks whether it is right: the weapons book totals the same request from the same submission, so a disagreement means the extract has gained or lost money, not that the sources differ. It is what caught the P-1 advance-procurement subtotal being counted alongside the by-year detail it summarises -- a $14.4 billion double count in PB2026 alone that no internal check could have seen.",
+      "authority": "Program Acquisition Cost by Weapon System, DoD Comptroller, Introduction",
+      "severity": "critical",
+      "sort_order": 250
     }
   ],
   "audit_posture": {
@@ -355,7 +438,7 @@
         "metric_value": 28,
         "value_kind": "count",
         "citation": "DoD OIG report DODIG-2026-032, prior-year comparison as reported",
-        "note": "Carried here only to show the FY2025 auditor-identified count moved by \u22122 year over year. Verified 2026-09-08.",
+        "note": "Carried here only to show the FY2025 auditor-identified count moved by −2 year over year. Verified 2026-09-08.",
         "sort_order": 96
       },
       {
@@ -425,7 +508,7 @@
         "value_kind": "text",
         "value_text": "Established March 2026",
         "citation": "GAO-26-109115",
-        "note": "A centralized, substantive-testing effort \u2014 validating account balances directly rather than relying primarily on remediated internal controls \u2014 that supersedes the prior decentralized FIAR remediation approach for this push toward a clean opinion. GAO's report raises open questions about this approach; see the strategy section on this page. Verified 2026-09-08.",
+        "note": "A centralized, substantive-testing effort — validating account balances directly rather than relying primarily on remediated internal controls — that supersedes the prior decentralized FIAR remediation approach for this push toward a clean opinion. GAO's report raises open questions about this approach; see the strategy section on this page. Verified 2026-09-08.",
         "sort_order": 103
       },
       {
