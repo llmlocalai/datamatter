@@ -573,6 +573,36 @@ const CONTROLS = {
       dm_hearing: ['hearing_id','congress','chamber','title','ingest_date','defense_related'],
     };
 
+    // The schema is applied every load, but CREATE TABLE IF NOT EXISTS cannot add
+    // a column to a table that already exists -- that is what the upgrades
+    // section of the schema is for. This check is the backstop: it compares what
+    // the loader is about to insert against what the database actually has, and
+    // names EVERY missing column at once with the statement that fixes it,
+    // rather than failing on the first INSERT that hits one after seven tables
+    // of work have already been done.
+    const present = new Map();
+    for (const r of (await client.query(
+      `SELECT table_name, column_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = ANY($1)`,
+      [Object.keys(COLS)])).rows) {
+      if (!present.has(r.table_name)) present.set(r.table_name, new Set());
+      present.get(r.table_name).add(r.column_name);
+    }
+    const missing = [];
+    for (const [table, cols] of Object.entries(COLS)) {
+      const have = present.get(table);
+      if (!have) continue;   // table absent entirely is a schema problem, not a drift one
+      for (const c of ['load_id', ...cols]) if (!have.has(c)) missing.push(`${table}.${c}`);
+    }
+    if (missing.length) {
+      console.error('\nThis database is missing columns the loader writes:');
+      missing.forEach((m) => console.error(`   ${m}`));
+      console.error('\nAdd an idempotent ALTER for each to the upgrades section of');
+      console.error('database/schema.analytics.sql, then re-run. Nothing has been changed.');
+      await client.query('ROLLBACK');
+      process.exit(3);
+    }
+
     for (const [file, key, script] of FILES) {
       const p = path.join(STAGING, file);
       if (!fs.existsSync(p)) { console.log(`· ${file}: absent, skipped`); continue; }

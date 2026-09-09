@@ -148,6 +148,22 @@ at each step, because the loss happens in the sources rather than in the extract
 `/traceability` is the page about that break. Do not write copy on `/program`
 that implies the chain is tighter than this.
 
+### Schema changes on an already-loaded database
+
+`schema.analytics.sql` runs on every load and is `CREATE TABLE IF NOT EXISTS`
+throughout, which does nothing to a table that already exists. **A new column on
+an existing table therefore needs an idempotent `ALTER` in the upgrades section
+at the foot of that file**, or the load fails on an INSERT several tables in,
+after doing the work — which is how the File C submission-period columns reached
+Neon a load late. New tables need no entry. Keep the ALTERs rather than squashing
+them: a database that has not been loaded since before the change is exactly the
+one that still needs them, and a column added this way must be nullable or carry
+a default because the table is not empty.
+
+The loader compares its `COLS` map against `information_schema` before it writes
+anything and names every missing column at once, so drift is reported up front
+rather than discovered mid-load.
+
 ## Things the data will not support — do not assert them
 
 - **File C vs award files is not an error estimate.** They are two reporting

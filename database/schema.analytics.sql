@@ -579,6 +579,29 @@ CREATE TABLE IF NOT EXISTS dm_exhibit_program_link (
 CREATE INDEX IF NOT EXISTS dm_exhibit_program_link_idx
   ON dm_exhibit_program_link (load_id, exhibit, account, bli);
 
+-- ---------------------------------------------------------------- upgrades --
+-- Everything above is CREATE TABLE IF NOT EXISTS, which is exactly right for a
+-- fresh database and silently wrong for one that already holds the table: a
+-- column added later never arrives, and nothing says so until the load fails on
+-- an INSERT several tables in, having already done the work. Neon hit this on
+-- dm_reconciliation the first time the File C correction reached it.
+--
+-- So every column added to a table that already shipped gets an idempotent
+-- ALTER here, and they are KEPT rather than squashed once "everyone" has run
+-- them -- a database that has not been loaded since before the change is
+-- precisely the database that still needs them. New tables need no entry;
+-- CREATE TABLE IF NOT EXISTS handles those on its own.
+--
+-- A column added this way must be nullable or carry a DEFAULT, because the
+-- table it is being added to is not empty.
+
+-- 2026-09-08 -- File C is a monthly CUMULATIVE snapshot, so a row has to record
+-- which single submission period it was built from. Without these the published
+-- linkage figure summed four overlapping restatements of the same year.
+ALTER TABLE dm_reconciliation ADD COLUMN IF NOT EXISTS submission_period text;
+ALTER TABLE dm_reconciliation ADD COLUMN IF NOT EXISTS periods_available int;
+ALTER TABLE dm_reconciliation ADD COLUMN IF NOT EXISTS period_row_counts text;
+
 -- --------------------------------------------------- oversight & knowledge --
 CREATE TABLE IF NOT EXISTS dm_audit_posture (
   id            bigserial PRIMARY KEY,
