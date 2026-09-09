@@ -676,6 +676,7 @@ const CONTROLS = {
       ['crosswalk.json',  'budget_execution_crosswalk', 'scripts/etl_analytics.py --step crosswalk'],
       ['knowledge.json',  'knowledge_bank',        'scripts/etl_analytics.py --step knowledge'],
       ['catalog.json',    'source_catalog',        'scripts/etl_analytics.py --step catalog'],
+      ['jbook.json',      'jbook_corpus',          'scripts/etl_analytics.py --step jbook'],
     ];
     const COLS = {
       dm_sbr_fy: ['fiscal_year','scope','scope_label','submission_period','is_partial_year','tas_count',
@@ -738,6 +739,16 @@ const CONTROLS = {
       dm_source_field: ['source_key','source_label','fiscal_year','field_name','field_kind',
         'rows_scanned','populated_pct','distinct_count','sample_values','is_read','note'],
       dm_join_sample: ['seam_key','fiscal_year','verdict','why','record'],
+      dm_jbook_exhibit: ['slug','exhibit','exhibit_title','pb_year','book_date','component',
+        'fund_key','fund_label','appropriation_code','appropriation','budget_activity',
+        'budget_activity_title','pe','pe_title','project_number','project_title','r1_line',
+        'pages','page_of','source_file'],
+      dm_jbook_section: ['slug','letter','title','is_table','body','word_count',
+        'sentence_count','avg_sentence_words','opening'],
+      dm_jbook_skeleton: ['exhibit','letter','title','is_table','seen_count',
+        'exhibits_total','share_pct','is_required'],
+      dm_jbook_style: ['component','fund_label','letter','title','sample_size',
+        'median_words','min_words','max_words','avg_sentence_words','example_opening'],
       dm_source_row: ['source_key','source_label','row_label','why','record'],
       dm_trace_row: ['step','source_key','source_label','key_field','key_value','note',
         'is_present','record'],
@@ -835,6 +846,36 @@ const CONTROLS = {
            e.is_sloa !== false, e.candidate_fields ?? [], e.authority]);
       }
       if (load.rowCount) console.log(`· seed: ${seed.sfis_elements.length} SFIS/SLOA elements`);
+    }
+
+    // The forbidden-phrase lexicon is USER-OWNED, with one carefully drawn
+    // exception. A row the user added, or a seed row they have edited or
+    // deactivated, is never touched: added_by stops being 'seed' the moment a
+    // person changes it. An untouched seed row IS refreshed, because a seed that
+    // can only ever be inserted can never correct itself -- and the first cut of
+    // this list shipped with double-escaped patterns that silently matched
+    // nothing. is_active is never overwritten either way, so deactivating a seed
+    // phrase sticks.
+    if (seed.jbook_lexicon) {
+      let added = 0;
+      for (const e of seed.jbook_lexicon) {
+        const r = await client.query(
+          `INSERT INTO dm_jbook_lexicon (phrase, pattern, severity, category, rationale,
+                                         authority, suggestion, is_seed, added_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,true,'seed')
+           ON CONFLICT (lower(phrase)) DO UPDATE SET
+             pattern    = EXCLUDED.pattern,
+             severity   = EXCLUDED.severity,
+             category   = EXCLUDED.category,
+             rationale  = EXCLUDED.rationale,
+             authority  = EXCLUDED.authority,
+             suggestion = EXCLUDED.suggestion
+           WHERE dm_jbook_lexicon.is_seed AND dm_jbook_lexicon.added_by = 'seed'`,
+          [e.phrase, e.pattern ?? null, e.severity, e.category, e.rationale,
+           e.authority ?? null, e.suggestion ?? null]);
+        added += r.rowCount;
+      }
+      console.log(`· seed: jbook lexicon (${added} new, ${seed.jbook_lexicon.length - added} already present and left untouched)`);
     }
 
     // ------------------------------------------------------------ controls --

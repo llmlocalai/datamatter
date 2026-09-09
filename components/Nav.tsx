@@ -10,7 +10,8 @@ import { useState } from 'react';
 const GROUPS: { label: string; items: { href: string; label: string }[] }[] = [
   { label: 'Formulation', items: [
       { href: '/budget', label: 'FY2027 request' },
-      { href: '/ppbe', label: 'Justification' } ] },
+      { href: '/ppbe', label: 'Justification' },
+      { href: '/jbook', label: 'Write a J-book' } ] },
   { label: 'Execution', items: [
       { href: '/execution', label: 'Budget to execution' },
       { href: '/funds-control', label: 'Funds control' },

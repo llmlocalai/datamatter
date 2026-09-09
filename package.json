@@ -14,6 +14,7 @@
     "verify": "tsc --noEmit && next build"
   },
   "dependencies": {
+    "docx": "^9.7.1",
     "next": "14.2.35",
     "pg": "^8.23.0",
     "react": "^18.3.1",
@@ -25,12 +26,12 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.19",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "14.2.35",
+    "exceljs": "^4.4.0",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.4",
-    "typescript": "^5.5.2",
-    "exceljs": "^4.4.0",
-    "eslint": "^8.57.0",
-    "eslint-config-next": "14.2.35"
+    "typescript": "^5.5.2"
   },
   "description": "DoW budget formulation, execution, and audit analytics over the USASpending warehouse and the DoD-FM knowledge bank."
 }

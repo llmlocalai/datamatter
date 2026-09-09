@@ -838,6 +838,179 @@ CREATE TABLE IF NOT EXISTS dm_trace_row (
 );
 CREATE INDEX IF NOT EXISTS dm_trace_row_idx ON dm_trace_row (load_id, step);
 
+
+-- ====================================================== justification books ==
+-- Two halves that must never be confused.
+--
+-- The CORPUS tables below are extract-owned: they are replaced by every load
+-- exactly like every other measure table, because they are a reading of the
+-- published books.
+--
+-- The AUTHORING tables further down are USER-owned. They carry work a person
+-- did -- a forbidden phrase they added, a draft they wrote, a version they
+-- saved -- and the load transaction must never delete or replace them. They
+-- therefore carry no load_id and appear in no loader COLS map. A user's lexicon
+-- surviving a refresh is not a nicety; losing it would be data loss.
+
+CREATE TABLE IF NOT EXISTS dm_jbook_exhibit (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  slug           text NOT NULL,
+  exhibit        text NOT NULL,          -- R-2 (program element) | R-2A (project)
+  exhibit_title  text,
+  pb_year        int  NOT NULL,
+  book_date      text,
+  component      text NOT NULL,
+  fund_key       text NOT NULL,
+  fund_label     text NOT NULL,
+  appropriation_code    text,
+  appropriation         text,
+  budget_activity       text,
+  budget_activity_title text,
+  pe             text,
+  pe_title       text,
+  project_number text,
+  project_title  text,
+  r1_line        int,
+  pages          int NOT NULL DEFAULT 0,
+  page_of        int,
+  source_file    text,
+  UNIQUE (load_id, slug)
+);
+CREATE INDEX IF NOT EXISTS dm_jbook_exhibit_idx
+  ON dm_jbook_exhibit (load_id, component, exhibit, pe);
+
+CREATE TABLE IF NOT EXISTS dm_jbook_section (
+  id                bigserial PRIMARY KEY,
+  load_id           bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  slug              text NOT NULL,
+  letter            text NOT NULL,
+  title             text NOT NULL,
+  is_table          boolean NOT NULL DEFAULT false,
+  body              text NOT NULL,
+  word_count        int,
+  sentence_count    int,
+  avg_sentence_words numeric(8,1),
+  opening           text
+);
+CREATE INDEX IF NOT EXISTS dm_jbook_section_idx ON dm_jbook_section (load_id, slug, letter);
+
+-- The format, observed rather than asserted. The section letters SHIFT between
+-- exhibit types: a project-level R-2A carries no Program Change Summary, so
+-- Acquisition Strategy is section D there and section E on a program-element
+-- R-2. share_pct is how often the section appears across exhibits of that type.
+CREATE TABLE IF NOT EXISTS dm_jbook_skeleton (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  exhibit        text NOT NULL,
+  letter         text NOT NULL,
+  title          text NOT NULL,
+  is_table       boolean NOT NULL DEFAULT false,
+  seen_count     int NOT NULL DEFAULT 0,
+  exhibits_total int NOT NULL DEFAULT 0,
+  share_pct      numeric(6,1),
+  is_required    boolean NOT NULL DEFAULT false
+);
+
+-- House voice, measured. A draft can be compared with what the component
+-- actually writes rather than with somebody's impression of it.
+CREATE TABLE IF NOT EXISTS dm_jbook_style (
+  id                 bigserial PRIMARY KEY,
+  load_id            bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  component          text NOT NULL,
+  fund_label         text NOT NULL,
+  letter             text NOT NULL,
+  title              text NOT NULL,
+  sample_size        int NOT NULL DEFAULT 0,
+  median_words       int,
+  min_words          int,
+  max_words          int,
+  avg_sentence_words numeric(8,1),
+  example_opening    text
+);
+
+-- ---------------------------------------------------- authoring (user-owned) --
+
+-- Words and phrases that must not appear in a justification narrative.
+--
+-- The rule these encode is editorial, not statutory, and the distinction
+-- matters: the FMR REQUIRES a PBD or PDM number in the internal SNaP data
+-- submission that drives the change tables, and the same reference must not
+-- surface in the narrative that goes to Congress, because it exposes
+-- predecisional deliberation. So this table carries an authority where one
+-- exists and says "component editorial standard" where it does not, rather than
+-- dressing a house rule as a regulation.
+--
+-- Seeded rows arrive with is_seed = true and are inserted ON CONFLICT DO
+-- NOTHING, so a refresh never overwrites an edit or removes a user's addition.
+CREATE TABLE IF NOT EXISTS dm_jbook_lexicon (
+  id          bigserial PRIMARY KEY,
+  phrase      text NOT NULL,
+  pattern     text,                    -- optional regex; falls back to the phrase
+  severity    text NOT NULL DEFAULT 'block',   -- block | warn
+  category    text NOT NULL DEFAULT 'predecisional',
+  rationale   text NOT NULL,
+  authority   text,
+  suggestion  text,                    -- what to write instead
+  is_seed     boolean NOT NULL DEFAULT false,
+  is_active   boolean NOT NULL DEFAULT true,
+  added_by    text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+-- Uniqueness is case-insensitive, which Postgres expresses as an expression
+-- index rather than a table constraint; ON CONFLICT targets the same expression.
+CREATE UNIQUE INDEX IF NOT EXISTS dm_jbook_lexicon_phrase_key
+  ON dm_jbook_lexicon (lower(phrase));
+CREATE INDEX IF NOT EXISTS dm_jbook_lexicon_active ON dm_jbook_lexicon (is_active);
+
+CREATE TABLE IF NOT EXISTS dm_jbook_doc (
+  id             bigserial PRIMARY KEY,
+  doc_key        text NOT NULL UNIQUE,
+  exhibit        text NOT NULL DEFAULT 'R-2',
+  pb_year        int  NOT NULL,
+  component      text NOT NULL,
+  fund_label     text NOT NULL,
+  appropriation_code text,
+  appropriation  text,
+  budget_activity text,
+  budget_activity_title text,
+  pe             text,
+  pe_title       text,
+  project_number text,
+  project_title  text,
+  r1_line        int,
+  status         text NOT NULL DEFAULT 'draft',   -- draft | review | final
+  based_on_slug  text,                            -- the corpus exhibit it models
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS dm_jbook_version (
+  id           bigserial PRIMARY KEY,
+  doc_key      text NOT NULL REFERENCES dm_jbook_doc(doc_key) ON DELETE CASCADE,
+  version_no   int  NOT NULL,
+  content      jsonb NOT NULL,      -- {sections:[{letter,title,is_table,body}], cost_table:[...]}
+  note         text,
+  author       text,
+  origin       text NOT NULL DEFAULT 'app',   -- app | import
+  screen_hits  int NOT NULL DEFAULT 0,        -- forbidden phrases found when saved
+  word_count   int NOT NULL DEFAULT 0,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (doc_key, version_no)
+);
+CREATE INDEX IF NOT EXISTS dm_jbook_version_idx ON dm_jbook_version (doc_key, version_no DESC);
+
+CREATE TABLE IF NOT EXISTS dm_jbook_upload (
+  id           bigserial PRIMARY KEY,
+  doc_key      text NOT NULL REFERENCES dm_jbook_doc(doc_key) ON DELETE CASCADE,
+  name         text NOT NULL,
+  kind         text NOT NULL,        -- table | text | background | structured
+  content      text NOT NULL,
+  row_count    int,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS dm_jbook_upload_idx ON dm_jbook_upload (doc_key);
+
 -- --------------------------------------------------- oversight & knowledge --
 CREATE TABLE IF NOT EXISTS dm_audit_posture (
   id            bigserial PRIMARY KEY,

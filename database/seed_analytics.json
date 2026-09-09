@@ -121,6 +121,17 @@
       "refresh_cadence": "with the warehouse",
       "limitations": "populated_pct, distinct counts and sample values are measured on the first batch of rows of one partition rather than the whole file, and rows_scanned states how many. A parquet row group in these files is the whole file, so a complete profile costs more memory than the extract host has.",
       "sort_order": 95
+    },
+    {
+      "key": "jbook_corpus",
+      "label": "Justification book corpus (R-2 exhibits)",
+      "source_system": "DoD Component budget justification books, FY2027 President's Budget",
+      "source_path": "knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification",
+      "grain": "exhibit x section",
+      "description": "Every R-2 and R-2A exhibit parsed out of the Defense-Wide RDT&E justification books into its lettered sections, with the observed format skeleton and per-component style measurements.",
+      "refresh_cadence": "annual, on publication of each President's Budget",
+      "limitations": "Read from the published PDFs by layout extraction, so a table section keeps its source spacing rather than being re-tabulated. Covers the Defense-Wide RDT&E volumes only; military department books and other appropriations are not yet parsed.",
+      "sort_order": 96
     }
   ],
   "controls": [
@@ -1034,6 +1045,198 @@
       "is_sloa": true,
       "candidate_fields": [],
       "authority": "DoD Standard Line of Accounting/Accounting Classification memorandum, OUSD(C), 14 September 2012, as enumerated in DLMS Approved Change 1043"
+    }
+  ],
+  "jbook_lexicon": [
+    {
+      "phrase": "per issue paper",
+      "pattern": null,
+      "severity": "block",
+      "category": "predecisional",
+      "rationale": "An issue paper is an internal deliberative document. Citing it in a narrative that goes to Congress discloses predecisional deliberation and invites a question the exhibit cannot answer.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "State the programmatic effect of the change without naming the internal document that caused it.",
+      "is_seed": true
+    },
+    {
+      "phrase": "issue paper",
+      "pattern": null,
+      "severity": "warn",
+      "category": "predecisional",
+      "rationale": "Same reason as 'per issue paper'. Flagged rather than blocked because the phrase can appear legitimately in a title or a quoted requirement.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Describe what changed and why in programmatic terms.",
+      "is_seed": true
+    },
+    {
+      "phrase": "per program budget decision",
+      "pattern": null,
+      "severity": "block",
+      "category": "predecisional",
+      "rationale": "A Program Budget Decision is the internal document recording an OSD budget decision. The FMR requires its number in the internal SNaP data submission and it does not belong in the published narrative.",
+      "authority": "DoD 7000.14-R Vol 2A Ch 1 (PBD/PDM are budget decision documents); Vol 2B Ch 19 records PBD/PDM only in the internal SNaP submission",
+      "suggestion": "Use the Program Change Summary line that already carries the adjustment, and describe the resulting programme content.",
+      "is_seed": true
+    },
+    {
+      "phrase": "program budget decision",
+      "pattern": null,
+      "severity": "block",
+      "category": "predecisional",
+      "rationale": "As above. The narrative should state the effect on the programme, not the decision document that produced it.",
+      "authority": "DoD 7000.14-R Vol 2A Ch 1 (PBD/PDM are budget decision documents); Vol 2B Ch 19 records PBD/PDM only in the internal SNaP submission",
+      "suggestion": "Describe the effect on scope, schedule or quantity.",
+      "is_seed": true
+    },
+    {
+      "phrase": "PBD",
+      "pattern": "\\bPBD[- ]?\\d*\\b",
+      "severity": "block",
+      "category": "predecisional",
+      "rationale": "The abbreviation carries the same disclosure as the full phrase, and is easier to leave in by accident.",
+      "authority": "DoD 7000.14-R Vol 2A Ch 1 (PBD/PDM are budget decision documents); Vol 2B Ch 19 records PBD/PDM only in the internal SNaP submission",
+      "suggestion": "Remove the reference; the adjustment is already shown in the Program Change Summary.",
+      "is_seed": true
+    },
+    {
+      "phrase": "PDM",
+      "pattern": "\\bPDM[- ]?\\d*\\b",
+      "severity": "block",
+      "category": "predecisional",
+      "rationale": "A Program Decision Memorandum is the programming-phase equivalent of a PBD and is equally predecisional.",
+      "authority": "DoD 7000.14-R Vol 2A Ch 1 (PBD/PDM are budget decision documents); Vol 2B Ch 19 records PBD/PDM only in the internal SNaP submission",
+      "suggestion": "Describe the programme content that results, not the memorandum.",
+      "is_seed": true
+    },
+    {
+      "phrase": "program decision memorandum",
+      "pattern": null,
+      "severity": "block",
+      "category": "predecisional",
+      "rationale": "As above.",
+      "authority": "DoD 7000.14-R Vol 2A Ch 1 (PBD/PDM are budget decision documents); Vol 2B Ch 19 records PBD/PDM only in the internal SNaP submission",
+      "suggestion": "State the programmatic outcome.",
+      "is_seed": true
+    },
+    {
+      "phrase": "predecisional",
+      "pattern": null,
+      "severity": "block",
+      "category": "predecisional",
+      "rationale": "If the narrative is describing its own content as predecisional, that content does not belong in a justification book.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Remove the material or replace it with the decided position.",
+      "is_seed": true
+    },
+    {
+      "phrase": "pre-decisional",
+      "pattern": null,
+      "severity": "block",
+      "category": "predecisional",
+      "rationale": "Hyphenated spelling of the same term.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Remove the material.",
+      "is_seed": true
+    },
+    {
+      "phrase": "deliberative",
+      "pattern": null,
+      "severity": "warn",
+      "category": "predecisional",
+      "rationale": "Often signals internal deliberative material has been pasted in from a working document.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Check the surrounding sentence came from a releasable source.",
+      "is_seed": true
+    },
+    {
+      "phrase": "for official use only",
+      "pattern": null,
+      "severity": "block",
+      "category": "marking",
+      "rationale": "A control marking has no place in an unclassified justification narrative; its presence usually means text was copied from a controlled document.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Remove the marking and confirm the text itself is releasable.",
+      "is_seed": true
+    },
+    {
+      "phrase": "FOUO",
+      "pattern": "\\bFOUO\\b",
+      "severity": "block",
+      "category": "marking",
+      "rationale": "As above.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Remove the marking and verify releasability.",
+      "is_seed": true
+    },
+    {
+      "phrase": "CUI",
+      "pattern": "\\bCUI\\b",
+      "severity": "warn",
+      "category": "marking",
+      "rationale": "Controlled Unclassified Information marking. Flagged rather than blocked because the letters occur inside other words and acronyms.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Confirm the passage is releasable in an unclassified book.",
+      "is_seed": true
+    },
+    {
+      "phrase": "draft",
+      "pattern": null,
+      "severity": "warn",
+      "category": "status",
+      "rationale": "A justification narrative that still calls itself a draft has usually not been through component review.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Remove the word or finish the review.",
+      "is_seed": true
+    },
+    {
+      "phrase": "TBD",
+      "pattern": "\\bTBD\\b",
+      "severity": "warn",
+      "category": "completeness",
+      "rationale": "An unresolved placeholder in a submitted exhibit reads as an unanswered question to a reviewer.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Supply the value, or state the decision point and its date.",
+      "is_seed": true
+    },
+    {
+      "phrase": "placeholder",
+      "pattern": null,
+      "severity": "warn",
+      "category": "completeness",
+      "rationale": "As above.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Replace with the actual content.",
+      "is_seed": true
+    },
+    {
+      "phrase": "we believe",
+      "pattern": null,
+      "severity": "warn",
+      "category": "voice",
+      "rationale": "Justification narrative is written in the institutional third person. First-person opinion is out of voice and weakens the claim.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "State the fact or the requirement directly.",
+      "is_seed": true
+    },
+    {
+      "phrase": "I think",
+      "pattern": null,
+      "severity": "warn",
+      "category": "voice",
+      "rationale": "As above.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "State the requirement in institutional voice.",
+      "is_seed": true
+    },
+    {
+      "phrase": "etc.",
+      "pattern": "etc\\.",
+      "severity": "warn",
+      "category": "voice",
+      "rationale": "An open-ended list in a justification narrative invites the reviewer to ask what was omitted.",
+      "authority": "Component editorial standard for justification narrative",
+      "suggestion": "Name the items, or say 'including' and give the significant ones.",
+      "is_seed": true
     }
   ]
 }

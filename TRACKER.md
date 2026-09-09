@@ -1,6 +1,6 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-09 (/linkage: the trace, the element graph, and records quoted whole)
+- **Last updated:** 2026-09-09 (/jbook: learn the R-2 from the books, then write one)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (2026-09-09):** `tsc --noEmit` clean and `next build` green,
   21/21 routes, run against a full local Postgres load of every staged extract.
@@ -231,6 +231,62 @@ collapsed blocks, which is not the same thing.
 - [x] **Quoted records print verbatim.** A fiscal year is `2025`, not `2,025`; a
   field published in thousands is not rendered as dollars. Amounts get a grey
   gloss only where the field name says it is an amount.
+
+## Done — 2026-09-09 (seventh pass) — `/jbook`, the first write feature
+
+- [x] **New ETL step `jbook`** parses the published books rather than a template:
+  19 Defense-Wide RDT&E justification books → **540 exhibits, 1,615 sections,
+  9 skeleton rows, 37 style profiles**. The skeleton is *observed*, and it caught
+  what a hand-written template gets wrong: a project-level **R-2A carries no
+  Program Change Summary**, so Acquisition Strategy is section **D** there and
+  section **E** on a program-element R-2.
+- [x] **House voice, measured.** Median words, range and mean sentence length per
+  component × section. OSD writes a Mission Description at a median of **263
+  words**; DARPA at **356**. A draft is compared against that rather than against
+  an impression of it.
+- [x] **The forbidden lexicon.** 19 seeded phrases — `per issue paper`, `program
+  budget decision`, `PBD`, `PDM`, `predecisional`, `FOUO`, `TBD`, `we believe` —
+  each with a rationale, a suggested replacement, and an authority **where one
+  exists**. The regulatory nuance is stated rather than glossed: the FMR *requires*
+  a PBD/PDM number in the internal SNaP submission and the same reference must not
+  reach the published narrative, so most entries are labelled a component
+  editorial standard, not a regulation.
+- [x] **Screening runs server-side** on every pause in typing and again on save,
+  so the browser and the save can never disagree. Word-boundary matching, optional
+  per-entry regex. Nothing is stripped silently: a blocking hit **refuses the save
+  with HTTP 409**, and an override is recorded on the version with the hit count.
+- [x] **User-owned tables are outside the load transaction.** `dm_jbook_lexicon`,
+  `dm_jbook_doc`, `dm_jbook_version`, `dm_jbook_upload` carry no `load_id` and
+  appear in no loader COLS map. A refresh replaces the corpus and cannot touch a
+  phrase you added or a draft you wrote.
+- [x] **One carefully drawn exception to that**: an *untouched* seed row is
+  refreshed, because a seed that can only ever be inserted can never correct
+  itself — the first cut shipped double-escaped patterns (`\\bPBD\\b`) that
+  silently matched nothing. `added_by` stops being `'seed'` the moment a person
+  edits a row, and `is_active` is never overwritten, so a deactivation sticks.
+- [x] **`/api/jbook`** is the first write endpoint on the site, gated on
+  `JBOOK_TOKEN`. Screening is open (it writes nothing); everything touching
+  user tables is not. **`/api/jbook/export`** produces DOCX via the `docx`
+  package — UNCLASSIFIED banners in header and footer, the two-column
+  identification block, the cost table, lettered sections in corpus order, and a
+  `Component / Page n of m / R-1 Line #196` footer. Section headings carry their
+  letters so the import round trip can find them.
+- [x] **Verified end to end against a live server**: screen finds 5 blocking and 3
+  warnings in a test paragraph; an unauthenticated write is refused **401**; a
+  rule-breaking save is refused **409**; a clean save is v1; a forced save is v2
+  with `flagged=1` recorded; the DOCX opens as `Microsoft Word 2007+` with the
+  banners present. `tsc` clean, build green **23/23**, 44 routes all 200.
+
+### Open on this feature
+
+- Import currently accepts structured JSON back through the `import` action; a
+  DOCX *parser* that reads an edited file and re-splits it by section heading is
+  not built yet.
+- The corpus covers Defense-Wide RDT&E only. Military department books, and P-40
+  and O-1 exhibits, are not parsed.
+- Cost-table editing in the UI is free text; a typed table editor with the R-2
+  column set would be the next real improvement.
+- `JBOOK_TOKEN` must be set in Vercel or authoring stays closed — the page says so.
 
 ## Architecture
 

@@ -2452,11 +2452,238 @@ def step_catalog(out, only_fy=None):
            "dm_source_row": rows_out, "dm_trace_row": trace},
           source_path="accounts/ and contracts/"))
 
+# -------------------------------------------------------------------- jbook ---
+# Learning the justification book from the books themselves.
+#
+# An R-2 is not free prose. It is a fixed sequence of lettered sections wrapped
+# around a fixed cost table, and the letters SHIFT depending on the exhibit: a
+# program-element R-2 carries a Program Change Summary and a project-level R-2A
+# does not, so Acquisition Strategy is section E on one and section D on the
+# other. Reproducing the format means encoding that, not guessing it.
+#
+# What this step extracts is therefore three things: the skeleton (which sections
+# exist, in which order, for which exhibit type), the content (so a drafter can
+# read how the Department actually writes each section), and per-component style
+# measurements (so a new draft can be checked against the house voice rather than
+# against an opinion).
+
+_JB_HDR = re.compile(
+    r"Exhibit (R-2A?|P-40[A-Z]?), (.+?): PB (\d{4}) (.+?)\s{2,}Date:\s*(.+?)\s*$")
+_JB_PE = re.compile(r"\bPE (\d{7}[A-Z0-9]{0,3})\b")
+_JB_R1 = re.compile(r"R-1 (?:Line|Program Element) #\s*(\d+)")
+_JB_PAGE = re.compile(r"Page (\d+) of (\d+)")
+_JB_APPN = re.compile(r"^(\d{4}):\s*(.+?)\s*/\s*BA (\d+):\s*(.*)$")
+_JB_SECT = re.compile(r"^([A-H])\.\s+([A-Z][A-Za-z0-9 /&(),'\-\.]{3,80}?)\s*(\(\$ in Millions\))?(?:\s{2,}.*)?$")
+_JB_PROJECT = re.compile(r"^Project \(Number/Name\)\s*(\S+)\s*/\s*(.+?)\s*$")
+_JB_NOISE = re.compile(r"^\s*(UNCLASSIFIED|THIS PAGE INTENTIONALLY LEFT BLANK)\s*$")
+
+
+def _jb_pages(path):
+    import subprocess
+    try:
+        return subprocess.run(["pdftotext", "-layout", path, "-"],
+                              capture_output=True, text=True, timeout=300).stdout.split("\f")
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
+def _jb_sentences(text):
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text or "") if len(s.strip()) > 20]
+
+
+def _jb_parse_page(page, pb_default):
+    """One exhibit page -> (meta, sections) or None."""
+    lines = page.split("\n")
+    head = next((l for l in lines if "Exhibit R-2" in l or "Exhibit R-2A" in l), None)
+    if not head: return None
+    m = _JB_HDR.search(head)
+    if not m: return None
+    kind, title, pb, component, date = m.groups()
+    meta = {"exhibit": kind, "exhibit_title": title.strip(), "pb_year": int(pb),
+            "component": component.strip(), "book_date": date.strip(),
+            "appropriation_code": None, "appropriation": None,
+            "budget_activity": None, "budget_activity_title": None,
+            "pe": None, "pe_title": None, "project_number": None, "project_title": None,
+            "r1_line": None, "page_no": None, "page_of": None}
+    body = []
+    for l in lines:
+        if _JB_NOISE.match(l): continue
+        s = l.rstrip()
+        a = _JB_APPN.match(s.strip())
+        if a and not meta["appropriation"]:
+            meta["appropriation_code"], meta["appropriation"] = a.group(1), a.group(2).strip()
+            meta["budget_activity"] = a.group(3)
+            # The header is two columns: the appropriation and budget activity on
+            # the left, the programme element on the right. The budget activity
+            # TITLE wraps to the next line, so what follows "BA n:" on this line
+            # is the right-hand column, not the title.
+            tail = a.group(4).strip()
+            meta["budget_activity_title"] = None if (not tail or "PE " in tail) else tail
+            meta["_ba_pending"] = meta["budget_activity_title"] is None
+        elif meta.get("_ba_pending") and s.strip() and not _JB_PE.search(s):
+            cand = re.sub(r"\s{2,}.*$", "", s.strip())
+            if 3 < len(cand) < 80 and not _JB_SECT.match(cand):
+                meta["budget_activity_title"] = cand
+            meta["_ba_pending"] = False
+        pe = _JB_PE.search(s)
+        if pe and not meta["pe"]:
+            meta["pe"] = pe.group(1)
+            after = s.split(f"PE {pe.group(1)}", 1)[-1].lstrip(" :/")
+            meta["pe_title"] = re.sub(r"\s{2,}.*$", "", after).strip() or None
+        pr = _JB_PROJECT.match(s.strip())
+        if pr and not meta["project_number"]:
+            meta["project_number"], meta["project_title"] = pr.group(1), pr.group(2).strip()
+        r1 = _JB_R1.search(s)
+        if r1: meta["r1_line"] = int(r1.group(1))
+        pg = _JB_PAGE.search(s)
+        if pg: meta["page_no"], meta["page_of"] = int(pg.group(1)), int(pg.group(2))
+        body.append(s)
+
+    # sections: a lettered heading owns every line until the next heading
+    sections, cur = [], None
+    for s in body:
+        h = _JB_SECT.match(s.strip())
+        if h:
+            if cur: sections.append(cur)
+            cur = {"letter": h.group(1), "title": h.group(2).strip(),
+                   "is_table": bool(h.group(3)), "lines": []}
+            continue
+        if cur is not None: cur["lines"].append(s)
+    if cur: sections.append(cur)
+    meta.pop("_ba_pending", None)
+    for sec in sections:
+        raw = "\n".join(sec.pop("lines"))
+        # a table section keeps its layout; a prose section is unwrapped
+        sec["body"] = raw if sec["is_table"] else _WS.sub(" ", raw).strip()
+    return meta, sections
+
+
+JBOOK_DIRS = [("rdte", "03_RDT_and_E", "RDT&E")]
+JBOOK_MAX_PDF = 40
+
+
+def step_jbook(out):
+    """Learn the justification book from the books: skeleton, content, style."""
+    import glob
+    root = os.path.join(KB, "11-Budget-Justification")
+    if not os.path.isdir(root):
+        print("  no justification corpus found, skipping"); return
+    vintage = mtime_date(root)
+    exhibits, sections = {}, []
+    files_read = 0
+
+    for fund_key, folder, fund_label in JBOOK_DIRS:
+        pdfs = sorted(glob.glob(os.path.join(root, folder, "*.pdf")))[:JBOOK_MAX_PDF]
+        for path in pdfs:
+            src = os.path.basename(path)
+            pages = _jb_pages(path)
+            if not pages: continue
+            files_read += 1
+            found = 0
+            for page in pages:
+                r = _jb_parse_page(page, None)
+                if not r: continue
+                meta, secs = r
+                key = (meta["component"], meta["pe"], meta.get("project_number"),
+                       meta["exhibit"], meta["pb_year"])
+                ex = exhibits.setdefault(key, {
+                    **{k: v for k, v in meta.items() if k != "page_no"},
+                    "fund_key": fund_key, "fund_label": fund_label,
+                    "source_file": src, "pages": 0, "slug": None})
+                ex["pages"] = max(ex["pages"], meta["page_no"] or 0)
+                if meta.get("r1_line") and not ex.get("r1_line"): ex["r1_line"] = meta["r1_line"]
+                for s in secs:
+                    if not s["body"]: continue
+                    sections.append({"_key": key, "letter": s["letter"], "title": s["title"],
+                                     "is_table": s["is_table"], "page_no": meta["page_no"],
+                                     "body": s["body"][:12000]})
+                found += 1
+            if found:
+                print(f"  {src}: {found} exhibit pages")
+
+    # merge repeated sections (one section can run across pages)
+    merged = {}
+    for s in sections:
+        k = (s["_key"], s["letter"], s["title"])
+        m = merged.setdefault(k, {**s, "body": ""})
+        if s["body"] not in m["body"]:
+            m["body"] = (m["body"] + "\n" + s["body"]).strip()[:16000]
+
+    ex_rows, sec_rows = [], []
+    for i, (key, ex) in enumerate(sorted(exhibits.items(), key=lambda kv: str(kv[0]))):
+        slug = re.sub(r"[^a-z0-9]+", "-", "-".join(
+            str(x) for x in (ex["component"], ex["pe"], ex.get("project_number") or "",
+                             ex["exhibit"], ex["pb_year"])).lower()).strip("-")[:120]
+        ex["slug"] = slug
+        ex_rows.append({k: v for k, v in ex.items() if not k.startswith("_")})
+        for (k2, letter, title), m in merged.items():
+            if k2 != key: continue
+            words = len(re.findall(r"\b\w+\b", m["body"]))
+            sents = _jb_sentences(m["body"]) if not m["is_table"] else []
+            sec_rows.append({
+                "slug": slug, "letter": letter, "title": title, "is_table": m["is_table"],
+                "body": m["body"], "word_count": words,
+                "sentence_count": len(sents),
+                "avg_sentence_words": round(
+                    sum(len(re.findall(r"\b\w+\b", x)) for x in sents) / len(sents), 1)
+                    if sents else None,
+                "opening": (sents[0][:300] if sents else None)})
+
+    # -------------------------------------------------------------- skeleton --
+    # Which sections exist, in which order, for which exhibit type. Observed,
+    # not asserted: the letters shift because a project-level R-2A carries no
+    # Program Change Summary, so Acquisition Strategy is D there and E on an R-2.
+    order = collections.defaultdict(collections.Counter)
+    seen_in = collections.defaultdict(set)
+    for e in ex_rows:
+        mine = [s for s in sec_rows if s["slug"] == e["slug"]]
+        for s in sorted(mine, key=lambda x: x["letter"]):
+            order[e["exhibit"]][(s["letter"], s["title"], s["is_table"])] += 1
+            seen_in[e["exhibit"]].add(e["slug"])
+    skel = []
+    for exh, counter in order.items():
+        total = len(seen_in[exh]) or 1
+        for (letter, title, is_table), n in sorted(counter.items()):
+            skel.append({"exhibit": exh, "letter": letter, "title": title,
+                         "is_table": is_table, "seen_count": n,
+                         "exhibits_total": total,
+                         "share_pct": round(n / total * 100, 1),
+                         "is_required": n / total >= 0.9})
+
+    # ----------------------------------------------------------------- style --
+    # Measured, per component and section, so a draft can be compared with the
+    # house voice rather than with an opinion about it.
+    style = []
+    by = collections.defaultdict(list)
+    comp_of = {e["slug"]: e["component"] for e in ex_rows}
+    fund_of = {e["slug"]: e["fund_label"] for e in ex_rows}
+    for s in sec_rows:
+        if s["is_table"] or not s["sentence_count"]: continue
+        by[(comp_of.get(s["slug"]), fund_of.get(s["slug"]), s["letter"], s["title"])].append(s)
+    for (comp, fund, letter, title), rows in by.items():
+        wc = sorted(r["word_count"] for r in rows)
+        asw = [r["avg_sentence_words"] for r in rows if r["avg_sentence_words"]]
+        style.append({
+            "component": comp, "fund_label": fund, "letter": letter, "title": title,
+            "sample_size": len(rows),
+            "median_words": wc[len(wc) // 2],
+            "min_words": wc[0], "max_words": wc[-1],
+            "avg_sentence_words": round(sum(asw) / len(asw), 1) if asw else None,
+            "example_opening": rows[0]["opening"]})
+
+    print(f"  {files_read} books read, {len(ex_rows)} exhibits, {len(sec_rows)} sections, "
+          f"{len(skel)} skeleton rows, {len(style)} style profiles")
+    write(out, "jbook.json", payload("jbook_corpus", vintage,
+          {"dm_jbook_exhibit": ex_rows, "dm_jbook_section": sec_rows,
+           "dm_jbook_skeleton": skel, "dm_jbook_style": style},
+          source_path="knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification"))
+
 # ------------------------------------------------------------------- main ---
 STEPS = {"exhibits": step_exhibits, "sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
          "filec": step_filec, "assistance": step_assistance, "program": step_program,
          "knowledge": step_knowledge,
-         "crosswalk": step_crosswalk, "catalog": step_catalog}
+         "crosswalk": step_crosswalk, "catalog": step_catalog,
+         "jbook": step_jbook}
 
 def main():
     ap = argparse.ArgumentParser()
