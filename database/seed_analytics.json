@@ -152,7 +152,7 @@
       "grain": "fiscal year x Treasury account x object class x program activity x direct or reimbursable x emergency fund code",
       "description": "File B published at the grain it is reported at rather than as one row per fiscal year: obligations, undelivered and delivered orders unpaid, prepaid and paid outlays, deobligations, and the upward and downward adjustments to prior-year orders, for every Treasury account in Department scope. Each account carries the period of availability read as a fund life, because annual authority expires on 30 September and multi-year and no-year authority does not.",
       "refresh_cadence": "monthly, as the Department's submissions are published",
-      "limitations": "One submission per fiscal year is held, so there is no within-year series: FY2026 is period-to-date at P09 and is not comparable with a closed year without saying so. From the FY2026 submission the program activity name is null on every row, so an activity can be identified by its reporting key but not read. Rows that differ only by reporting key and repeat one figure are counted once, which is a repair of a source defect rather than a property of the file. Detail is carried for the three most recent fiscal years; earlier years are held as account and object-class rollups.",
+      "limitations": "One submission per fiscal year is held, so there is no within-year series in the account chain at all -- this file gives the Department's position, never a curve, and within-year timing can only be read from contract action dates, which cover a third of obligations. FY2026 is period-to-date: FY2026 is period-to-date at P09 and is not comparable with a closed year without saying so. From the FY2026 submission the program activity name is null on every row, so an activity can be identified by its reporting key but not read. Rows that differ only by reporting key and repeat one figure are counted once, which is a repair of a source defect rather than a property of the file. Detail is carried for the three most recent fiscal years; earlier years are held as account and object-class rollups.",
       "sort_order": 98
     },
     {
@@ -163,7 +163,7 @@
       "grain": "fiscal year x day, and fiscal year x month x category",
       "description": "When contract obligations moved: the day-by-day cumulative curve for each fiscal year, monthly totals by awarding sub-agency, office, product or service code and supply group, recipient, pricing type and extent of competition, the September and final-five-day concentration of each category, and a set of signals computed against each category's own prior years.",
       "refresh_cadence": "monthly, with each warehouse vintage",
-      "limitations": "Contract obligations are about a fifth of Department obligations and are not the whole of execution. A signal is a question rather than a finding: none of them observes impropriety, and a large September action is very often a multiyear definitisation or an exercised option with nothing unusual in it beyond its size. Deviations are measured against a category's own history, so a category held in fewer than three complete years produces none. The live fiscal year is shorter than the years it is compared with and every comparison is made over whole months only.",
+      "limitations": "Contract obligations are a third of Department obligations -- 33.9% in FY2025 -- and are not the whole of execution. The largest block they do not cover is personnel compensation and benefits, 40.4% of that year, which is paid on a schedule. There is no Department-wide within-year series in these sources to compare against: File A and File B each publish one submission per fiscal year, so the account chain gives a position and never a curve. A signal is a question rather than a finding: none of them observes impropriety, and a large September action is very often a multiyear definitisation or an exercised option with nothing unusual in it beyond its size. Deviations are measured against a category's own history, so a category held in fewer than three complete years produces none. The live fiscal year is shorter than the years it is compared with, and every comparison is made to the reporting frontier over whole months only.",
       "sort_order": 99
     }
   ],
@@ -554,6 +554,15 @@
       "authority": "USASpending contract award files; submission period conventions",
       "severity": "high",
       "sort_order": 335
+    },
+    {
+      "code": "TIME-04",
+      "name": "The extent of the contract file is derived from where the data is, not from its latest date",
+      "assertion": "Every fiscal year publishes a reporting frontier no later than its last action date, the count of whole months observed agrees with whether the year is complete, and fewer than 20% of the year's actions fall after the frontier.",
+      "rationale": "The FY2026 extract runs to 2026-08-04 and is substantially complete only to the end of April: October through April carry 280,000 to 400,000 actions a month, May carries 75,000, and June, July and August carry 180 between them. Taking the maximum action date as the extent of the file was wrong in three ways at once \u2014 the cumulative curve ran flat for three months, the year reported ten whole months observed where it had seven, and every pace comparison and September projection measured seven real months of the live year against ten of every prior year. That put each sub-agency's pace at 68\u201399% of its own norm when the true figures are 104\u2013127%: not a cosmetic error but the opposite conclusion, on a page built to support a decision. The frontier is the end of the last fiscal month, counting consecutively from October, that carries at least half the median month's action count. Consecutively, because a gap in the middle of a year is a hole in the data rather than the end of it, and treating it as the end would hide the hole. The 20% bound on the excluded tail is what distinguishes cutting off the end of a file from cutting into it.",
+      "authority": "USASpending contract award files (FPDS-NG); warehouse vintage extraction dates",
+      "severity": "critical",
+      "sort_order": 336
     }
   ],
   "audit_posture": {

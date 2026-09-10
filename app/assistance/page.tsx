@@ -5,6 +5,7 @@ import { StatTile, BarList, DataTable } from '@/components/charts';
 import { FyPicker } from '@/components/FyPicker';
 import { fmtB, fmtPct, fmtInt } from '@/components/format';
 import { getProvenance, getAssistanceYears, getAssistanceDim, getAssistanceVintageDrift } from '@/lib/analytics';
+import { pickFiscalYear } from '@/lib/fiscal';
 import { NotLoaded } from '../execution/page';
 
 export const metadata: Metadata = {
@@ -19,9 +20,11 @@ export default async function AssistancePage({ searchParams }: { searchParams: {
   ]);
   if (!years.length) return <Shell><NotLoaded /></Shell>;
 
-  const closed = years.filter((y) => !y.isPartialYear);
-  const requested = Number(searchParams.fy);
-  const row = years.find((y) => y.fiscalYear === requested) ?? closed[closed.length - 1] ?? years[years.length - 1];
+  // The page opens on the fiscal year the calendar is in, not on the last one
+  // that closed — see lib/fiscal. A year in progress needs every figure marked
+  // period-to-date, which the partial-year banner below does; opening on a
+  // closed year instead quietly answered a question nobody asked.
+  const row = pickFiscalYear(years, searchParams.fy) ?? years[years.length - 1];
 
   const [type, subAgency, recipients, cfda, state] = await Promise.all([
     getAssistanceDim(row.fiscalYear, 'assistance_type', 10),

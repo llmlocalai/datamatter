@@ -10,9 +10,11 @@ import ExecExplorer from '@/components/execution/ExecExplorer';
 import {
   getProvenance, getSbrSeries, getObligationStages, getSbrDim, getScopeComparison, getAwardYears,
 } from '@/lib/analytics';
+import { fiscalYearOf, dayOfFiscalYear, daysToFiscalYearEnd, pickFiscalYear } from '@/lib/fiscal';
 import {
   getExecFy, getExecObjectClasses, getExecFundLife, getFpdsYears, getFpdsPace,
   getFpdsTailDays, getEoy, getSignals, getSignalCounts, getExecutors, getFpdsActions,
+  getContractCoverage, getMajorClasses,
 } from '@/lib/execution';
 
 export const metadata: Metadata = {
@@ -29,21 +31,11 @@ export const revalidate = 900;
 const SIGNAL_KINDS = ['eoy_deviation', 'spike', 'pace', 'new_activity',
                       'eoy_projection', 'eoy_concentration'];
 
-/** The fiscal year a date falls in. October starts the next one. */
-function fiscalYearOf(d: Date) {
-  return d.getUTCMonth() >= 9 ? d.getUTCFullYear() + 1 : d.getUTCFullYear();
-}
-function dayOfFiscalYear(d: Date, fy: number) {
-  const start = Date.UTC(fy - 1, 9, 1);
-  return Math.floor((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - start) / 86400000) + 1;
-}
 
 export default async function ExecutionPage() {
   const now = new Date();
   const currentFy = fiscalYearOf(now);
-  const yearEnd = Date.UTC(currentFy, 8, 30);
-  const daysLeft = Math.max(0, Math.round((yearEnd - Date.UTC(
-    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) / 86400000));
+  const daysLeft = daysToFiscalYearEnd(now, currentFy);
 
   const [prov, provB, provT, sbr, stages, scope, awards, execFy, fpdsYears] = await Promise.all([
     getProvenance('file_a_sbr'), getProvenance('file_b_detail'), getProvenance('contract_timing'),
@@ -55,8 +47,7 @@ export default async function ExecutionPage() {
   // The page is centred on the fiscal year the calendar is in, not on the last
   // closed one. That year is period-to-date in every source here, and the whole
   // difficulty of the page is saying so on every figure rather than once.
-  const focus = sbr.find((r) => r.fiscalYear === currentFy)
-    ?? sbr[sbr.length - 1];
+  const focus = pickFiscalYear(sbr, undefined, now) ?? sbr[sbr.length - 1];
   const closed = sbr.filter((r) => !r.isPartialYear);
   const lastClosed = closed[closed.length - 1];
   const isFocusPartial = focus.isPartialYear;
@@ -72,6 +63,15 @@ export default async function ExecutionPage() {
       getExecutors(),
       getFpdsActions(undefined, undefined, 400),
     ]);
+  const [coverage, majorClasses] = await Promise.all([
+    getContractCoverage(), getMajorClasses(lastClosed?.fiscalYear ?? focus.fiscalYear),
+  ]);
+  // What the timing view below covers, measured rather than asserted. The last
+  // CLOSED year is the one to quote: the live year's share is depressed by the
+  // reporting frontier on one side of the ratio and not the other.
+  const cov = coverage.find((c) => c.fiscalYear === lastClosed?.fiscalYear);
+  const mcTotal = majorClasses.reduce((n, m) => n + Number(m.obligations), 0);
+  const personnel = majorClasses.find((m) => m.majorClass === 'Personnel compensation and benefits');
   // The board's filter chips have to count what EXISTS, not what was shipped to
   // the browser. Taking the most severe 400 signals overall and counting those
   // by kind told the reader there were 254 of one kind when the load holds far
@@ -98,8 +98,13 @@ export default async function ExecutionPage() {
   const scopeRow = scope.find((s) => s.fiscalYear === focus.fiscalYear);
   const award = awards.find((a) => a.fiscalYear === focus.fiscalYear);
 
-  // Same-date comparison, which is the only honest one for a year in progress.
-  const sameDay = fpdsFocus?.lastDayOfFy ?? 0;
+  // Same-date comparison, which is the only honest one for a year in progress --
+  // and it has to be measured to the REPORTING FRONTIER, not to the live year's
+  // last dated action. FY2026's file runs to 4 August and is complete to
+  // 30 April; comparing to 4 August put three empty months into the live year's
+  // total and none into anyone else's, which showed every organisation running
+  // behind when they are all running ahead.
+  const sameDay = fpdsFocus?.frontierDayOfFy ?? fpdsFocus?.lastDayOfFy ?? 0;
   const paceAt = (fy: number) => {
     const ps = pace.filter((p) => p.fiscalYear === fy && p.dayOfFy <= sameDay);
     return ps.length ? ps[ps.length - 1].cumObligation : 0;
@@ -110,7 +115,7 @@ export default async function ExecutionPage() {
         ? priorAtSameDay[(priorAtSameDay.length - 1) / 2]
         : (priorAtSameDay[priorAtSameDay.length / 2 - 1] + priorAtSameDay[priorAtSameDay.length / 2]) / 2)
     : 0;
-  const focusYtd = fpdsFocus?.obligation ?? 0;
+  const focusYtd = fpdsFocus?.frontierObligation ?? fpdsFocus?.obligation ?? 0;
 
   const projSep = executors.reduce((s, e) => s + (e.projectedSep ?? 0), 0);
   const projLow = executors.reduce((s, e) => s + (e.projectedSepLow ?? 0), 0);
@@ -191,9 +196,13 @@ export default async function ExecutionPage() {
 
       {/* ---------------------------------------------------------------- */}
       <Section title={`FY${currentFy} at ${daysLeft} days out`}
-        note="Four figures a review would start from on this date, each labelled with how far its source actually reaches.">
+        note={`Four figures a review would start from on this date, each labelled with how far its `
+          + `source actually reaches. The first two are the whole Department, from the account files. `
+          + `The second two are contract actions only`
+          + `${cov ? `, which are ${fmtPct(cov.contractPct)} of obligations` : ''} — the account files `
+          + `carry no date, so anything about timing can only be read from them.`}>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatTile label="Obligations incurred" value={fmtT(focus.obligationsIncurred)}
+          <StatTile label="Obligations incurred, all appropriations" value={fmtT(focus.obligationsIncurred)}
             sub={`${fmtPct(focus.obligationsIncurred / focus.totalBudgetaryResources * 100)} of `
               + `${fmtT(focus.totalBudgetaryResources)} available`
               + `${focus.submissionPeriod ? ` · File A at ${focus.submissionPeriod}` : ''}`}
@@ -202,11 +211,14 @@ export default async function ExecutionPage() {
             value={fmtT(Number(annual?.obligations ?? 0))}
             sub={`${fmtPct(annualPct)} of obligations are on annual appropriations`}
             tone="warning" />
-          <StatTile label="Contract obligations, year to date" value={fmtB(focusYtd)}
-            sub={medianPrior
+          <StatTile label={`Contract obligations to ${fpdsFocus?.frontierDate ?? 'the reporting frontier'}`}
+            value={fmtB(focusYtd)}
+            sub={(medianPrior
               ? `${fmtPct(focusYtd / medianPrior * 100)} of the median of FY`
-                + `${fpdsClosed[0]?.fiscalYear}–FY${fpdsClosed[fpdsClosed.length - 1]?.fiscalYear} at the same day`
-              : 'No same-day comparison available'} />
+                + `${fpdsClosed[0]?.fiscalYear}–FY${fpdsClosed[fpdsClosed.length - 1]?.fiscalYear} at the same point`
+                + ` · ${fpdsFocus?.fullMonthsObserved ?? 0} whole months`
+              : 'No same-point comparison available')
+              + (cov ? ` · a ${fmtPct(cov.contractPct, 0)} subset of obligations` : '')} />
           <StatTile label="September projects to" value={projSep ? fmtB(projSep) : '—'}
             sub={projSep ? `Range ${fmtB(projLow)}–${fmtB(projHigh)} across the sub-agencies` : 'Not computable'} />
         </div>
@@ -220,15 +232,138 @@ export default async function ExecutionPage() {
       </Section>
 
       {/* ---------------------------------------------------------------- */}
-      <Section title="Where the year stands against its own history"
-        note={`Cumulative contract obligations by day of the fiscal year. The FY${currentFy} line `
-          + `stops where the contract file stops — a few weeks behind today — and the gap between the `
-          + `two markers is the reporting lag rather than a fall in spending.`}>
+      <Section title={`The Department-wide position, FY${focus.fiscalYear}`}
+        note={isFocusPartial
+          ? `The whole of execution, not a subset — every appropriation, every account. Read top to `
+            + `bottom: the first three rows assemble the resources, the total is the footing, the next `
+            + `two are the flows against it. Every line is period-to-date`
+            + `${focus.submissionPeriod ? ` at ${focus.submissionPeriod}` : ''}.`
+          : 'The whole of execution, not a subset. Read top to bottom. The first three rows assemble the resources; the total is the footing; the next two are the flows against it.'}>
+        <Waterfall steps={steps} />
+        {isFocusPartial && lastClosed && (
+          <DataTable
+            head={['', `FY${focus.fiscalYear} (${focus.submissionPeriod ?? 'in progress'})`,
+                   `FY${lastClosed.fiscalYear} (closed)`, 'Difference']}
+            rows={[
+              ['Total budgetary resources', fmtT(focus.totalBudgetaryResources),
+               fmtT(lastClosed.totalBudgetaryResources),
+               fmtT(focus.totalBudgetaryResources - lastClosed.totalBudgetaryResources)],
+              ['Obligations incurred', fmtT(focus.obligationsIncurred),
+               fmtT(lastClosed.obligationsIncurred),
+               fmtT(focus.obligationsIncurred - lastClosed.obligationsIncurred)],
+              ['Obligation rate',
+               fmtPct(focus.obligationsIncurred / focus.totalBudgetaryResources * 100),
+               fmtPct(lastClosed.obligationsIncurred / lastClosed.totalBudgetaryResources * 100), '—'],
+              ['Gross outlays', fmtT(focus.grossOutlays), fmtT(lastClosed.grossOutlays),
+               fmtT(focus.grossOutlays - lastClosed.grossOutlays)],
+            ]}
+            caption={`These two columns are not like for like and the difference column is arithmetic `
+              + `rather than a finding: FY${focus.fiscalYear} is a part-year submission and `
+              + `FY${lastClosed.fiscalYear} is twelve months. The account files hold one submission per `
+              + `fiscal year, so there is no FY${lastClosed.fiscalYear} figure at the same period to `
+              + `compare against. The same-day comparison further up, on contract actions, is the one `
+              + `that is like for like.`}
+          />
+        )}
+        <Caveat>
+          <strong className="text-navy-200">This is a position, not a curve, and it cannot be made
+          into one.</strong> File A and File B each publish{' '}
+          <strong className="text-navy-200">one submission per fiscal year</strong> in this warehouse —
+          FY{focus.fiscalYear} at {focus.submissionPeriod ?? 'its current period'}, every closed year at
+          P12 — so there is no month-by-month Department-wide series in these sources to draw. The
+          timing section below is built on contract action dates because an action carries a date and
+          an account submission does not; it covers{' '}
+          <strong className="text-navy-200">{cov ? fmtPct(cov.contractPct) : 'about a third'}</strong>{' '}
+          of obligations, and that is stated there rather than left to be inferred.
+        </Caveat>
+        <Caveat>
+          Controls <strong className="text-navy-200">SBR-01</strong> and{' '}
+          <strong className="text-navy-200">SBR-02</strong> assert that obligations plus unobligated
+          balance equal total budgetary resources, and that the resource components sum to that same
+          total. Both foot to within 0.001% for every year shown.
+        </Caveat>
+      </Section>
+
+      {/* ---------------------------------------------------------------- */}
+      <Section title="How long the money lasts"
+        note="Obligations by period of availability, read off the beginning and ending periods on each account. This is the split the date at the top of this page is about.">
+        {fundLifeRows.length ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+            <BarList
+              rows={fundLifeRows}
+              caption={`Annual authority is the only row on this list that cannot be obligated after `
+                + `30 September. An outlay rate above 100% is not an error: outlays include payments `
+                + `against obligations incurred in prior years. Where a period of availability carries `
+                + `too little to divide by, no rate is shown rather than a very large one.`}
+            />
+            <div>
+              <h3 className="text-sm font-semibold text-navy-200 mb-4">
+                What the money bought, FY{focus.fiscalYear}
+              </h3>
+              <BarList
+                rows={objects.slice(0, 10).map((o) => ({
+                  key: o.code, label: `${o.code} · ${o.name}`, value: o.obligations,
+                  meta: `${o.majorClass} · outlaid ${fmtPct(
+                    o.obligations ? o.grossOutlays / o.obligations * 100 : 0)}`,
+                }))}
+                colour="var(--series-3)"
+                caption={`Top 10 of ${objects.length} object classes carried in the extract.`}
+              />
+            </div>
+          </div>
+        ) : <Empty />}
+      </Section>
+
+      {/* ---------------------------------------------------------------- */}
+      <Section title="When contract money moves"
+        note={`Cumulative CONTRACT obligations by day of the fiscal year — `
+          + `${cov ? fmtPct(cov.contractPct) : 'about a third'} of Department obligations in FY`
+          + `${cov?.fiscalYear ?? ''}, not the whole of execution. It is here because an action `
+          + `carries a date and an account submission does not. The FY${currentFy} line stops at the `
+          + `reporting frontier — ${fpdsFocus?.frontierDate ?? 'where the file is complete'}, `
+          + `${fpdsFocus?.fullMonthsObserved ?? 0} whole months in — and the gap between the two `
+          + `markers is the reporting lag, not a fall in spending.`}>
         {pace.length ? (
           <>
             <PaceChart points={pace} liveYear={currentFy}
               todayDayOfFy={dayOfFiscalYear(now, currentFy)}
-              dataEndsDay={fpdsFocus?.lastDayOfFy ?? dayOfFiscalYear(now, currentFy)} />
+              dataEndsDay={fpdsFocus?.frontierDayOfFy ?? dayOfFiscalYear(now, currentFy)} />
+            {fpdsFocus && !fpdsFocus.isCompleteYear && (
+              <Caveat>
+                The FY{fpdsFocus.fiscalYear} file carries actions dated as late as{' '}
+                <strong className="text-navy-200">{fpdsFocus.lastActionDate}</strong>, but it is
+                substantially complete only to{' '}
+                <strong className="text-navy-200">{fpdsFocus.frontierDate}</strong>: October through
+                April carry between 280,000 and 400,000 actions a month, and everything after the
+                frontier comes to {fmtInt(fpdsFocus.tailActions)} actions worth{' '}
+                {fmtT(fpdsFocus.tailObligation)}. Every figure on this page measures the live year to
+                the frontier and every prior year to the same point. Taking the last dated action as
+                the extent of the file instead put three near-empty months into FY
+                {fpdsFocus.fiscalYear}&rsquo;s total and none into anyone else&rsquo;s — which showed
+                every organisation running behind its own norm when all of them are running ahead.
+                Control <strong className="text-navy-200">TIME-04</strong> asserts the frontier and
+                publishes what it excludes.
+              </Caveat>
+            )}
+            {cov && (
+              <div className="mt-6">
+                <DataTable
+                  head={['Fiscal year', 'Department obligations', 'Contract obligations',
+                         'Share carrying a date']}
+                  rows={coverage.map((c) => [
+                    `FY${c.fiscalYear}${c.isPartialAccounts ? ' (in progress)' : ''}`,
+                    fmtT(c.departmentObligations), fmtT(c.contractObligations),
+                    fmtPct(c.contractPct),
+                  ])}
+                  caption={`What the curve above covers. The largest block it does not is personnel `
+                    + `compensation and benefits — ${personnel ? fmtT(Number(personnel.obligations)) : ''} `
+                    + `${personnel && mcTotal ? `(${fmtPct(Number(personnel.obligations) / mcTotal * 100)} of `
+                        + `FY${lastClosed?.fiscalYear})` : ''}, which is paid on a schedule and has no `
+                    + `year-end timing question in it. The in-progress year's share is lower on both `
+                    + `counts because its two sources reach different dates.`}
+                />
+              </div>
+            )}
             <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
               <div>
                 <h3 className="text-sm font-semibold text-navy-200 mb-3">
@@ -346,45 +481,6 @@ export default async function ExecutionPage() {
       </Section>
 
       {/* ---------------------------------------------------------------- */}
-      <Section title={`The chain, FY${focus.fiscalYear}`}
-        note={isFocusPartial
-          ? `Read top to bottom. Every line is period-to-date${focus.submissionPeriod ? ` at ${focus.submissionPeriod}` : ''} — the resources are the year's, the flows are only as far as the submission reaches.`
-          : 'Read top to bottom. The first three rows assemble the resources; the total is the footing; the next two are the flows against it.'}>
-        <Waterfall steps={steps} />
-        {isFocusPartial && lastClosed && (
-          <DataTable
-            head={['', `FY${focus.fiscalYear} (${focus.submissionPeriod ?? 'in progress'})`,
-                   `FY${lastClosed.fiscalYear} (closed)`, 'Difference']}
-            rows={[
-              ['Total budgetary resources', fmtT(focus.totalBudgetaryResources),
-               fmtT(lastClosed.totalBudgetaryResources),
-               fmtT(focus.totalBudgetaryResources - lastClosed.totalBudgetaryResources)],
-              ['Obligations incurred', fmtT(focus.obligationsIncurred),
-               fmtT(lastClosed.obligationsIncurred),
-               fmtT(focus.obligationsIncurred - lastClosed.obligationsIncurred)],
-              ['Obligation rate',
-               fmtPct(focus.obligationsIncurred / focus.totalBudgetaryResources * 100),
-               fmtPct(lastClosed.obligationsIncurred / lastClosed.totalBudgetaryResources * 100), '—'],
-              ['Gross outlays', fmtT(focus.grossOutlays), fmtT(lastClosed.grossOutlays),
-               fmtT(focus.grossOutlays - lastClosed.grossOutlays)],
-            ]}
-            caption={`These two columns are not like for like and the difference column is arithmetic `
-              + `rather than a finding: FY${focus.fiscalYear} is a part-year submission and `
-              + `FY${lastClosed.fiscalYear} is twelve months. The account files hold one submission per `
-              + `fiscal year, so there is no FY${lastClosed.fiscalYear} figure at the same period to `
-              + `compare against. The same-day comparison further up, on contract actions, is the one `
-              + `that is like for like.`}
-          />
-        )}
-        <Caveat>
-          Controls <strong className="text-navy-200">SBR-01</strong> and{' '}
-          <strong className="text-navy-200">SBR-02</strong> assert that obligations plus unobligated
-          balance equal total budgetary resources, and that the resource components sum to that same
-          total. Both foot to within 0.001% for every year shown.
-        </Caveat>
-      </Section>
-
-      {/* ---------------------------------------------------------------- */}
       <Section title="Execution detail" id="detail"
         note={`File B at the grain it is reported at: ${fmtInt(execRow?.detailRows ?? 0)} rows for `
           + `FY${focus.fiscalYear} across ${fmtInt(execRow?.accounts ?? 0)} Treasury accounts and `
@@ -409,36 +505,6 @@ export default async function ExecutionPage() {
           </Caveat>
         )}
         <div className="mt-4"><ProvenanceBar p={provB} /></div>
-      </Section>
-
-      {/* ---------------------------------------------------------------- */}
-      <Section title="How long the money lasts"
-        note="Obligations by period of availability, read off the beginning and ending periods on each account. This is the split the date at the top of this page is about.">
-        {fundLifeRows.length ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-            <BarList
-              rows={fundLifeRows}
-              caption={`Annual authority is the only row on this list that cannot be obligated after `
-                + `30 September. An outlay rate above 100% is not an error: outlays include payments `
-                + `against obligations incurred in prior years. Where a period of availability carries `
-                + `too little to divide by, no rate is shown rather than a very large one.`}
-            />
-            <div>
-              <h3 className="text-sm font-semibold text-navy-200 mb-4">
-                What the money bought, FY{focus.fiscalYear}
-              </h3>
-              <BarList
-                rows={objects.slice(0, 10).map((o) => ({
-                  key: o.code, label: `${o.code} · ${o.name}`, value: o.obligations,
-                  meta: `${o.majorClass} · outlaid ${fmtPct(
-                    o.obligations ? o.grossOutlays / o.obligations * 100 : 0)}`,
-                }))}
-                colour="var(--series-3)"
-                caption={`Top 10 of ${objects.length} object classes carried in the extract.`}
-              />
-            </div>
-          </div>
-        ) : <Empty />}
       </Section>
 
       {/* ---------------------------------------------------------------- */}

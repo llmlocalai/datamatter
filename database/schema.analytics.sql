@@ -1334,7 +1334,10 @@ CREATE TABLE IF NOT EXISTS dm_exec_fy (
 -- File B holds one submission per fiscal year, so it carries no within-year
 -- series at all and cannot answer when money moved. Contract actions carry a
 -- date, so timing is answered from FPDS and labelled as what it is: contract
--- obligations, roughly a fifth of Department obligations, not the whole.
+-- obligations: a THIRD of Department obligations (33.9% in FY2025), not the
+-- whole. There is no Department-wide within-year series in these sources at
+-- all -- File A and File B publish one submission per fiscal year -- so this is
+-- the only timing signal available, and the page states its coverage.
 CREATE TABLE IF NOT EXISTS dm_fpds_day (
   id             bigserial PRIMARY KEY,
   load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
@@ -1475,3 +1478,22 @@ CREATE TABLE IF NOT EXISTS dm_fpds_action (
 );
 CREATE INDEX IF NOT EXISTS dm_fpds_action_idx
   ON dm_fpds_action (load_id, fiscal_year, bucket, rank_in_bucket);
+
+-- The reporting frontier: where the contract file substantially IS, which is not
+-- where its maximum action date is.
+--
+-- The FY2026 extract runs to 2026-08-04 and is complete only to the end of
+-- April. October through April carry 280,000 to 400,000 actions a month; May
+-- carries 75,000 and June, July and August carry 180 between them. Reading the
+-- maximum date as the extent of the file drew the cumulative curve flat for
+-- three months, reported ten whole months observed where there were seven, and
+-- compared seven real months of the live year against ten of every prior year --
+-- which put every sub-agency's pace at 68-99% of its own norm when the true
+-- figures are 104-127%. That is a wrong answer on a decision page, not a
+-- cosmetic one, so the frontier is now derived and published.
+ALTER TABLE dm_fpds_year ADD COLUMN IF NOT EXISTS frontier_day_of_fy int;
+ALTER TABLE dm_fpds_year ADD COLUMN IF NOT EXISTS frontier_date date;
+ALTER TABLE dm_fpds_year ADD COLUMN IF NOT EXISTS frontier_obligation numeric(20,2);
+ALTER TABLE dm_fpds_year ADD COLUMN IF NOT EXISTS frontier_actions int;
+ALTER TABLE dm_fpds_year ADD COLUMN IF NOT EXISTS tail_actions int;
+ALTER TABLE dm_fpds_year ADD COLUMN IF NOT EXISTS tail_obligation numeric(20,2);

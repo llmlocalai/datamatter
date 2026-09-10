@@ -5,6 +5,7 @@ import { StatTile, BarList, DataTable, LineTrend } from '@/components/charts';
 import { FyPicker } from '@/components/FyPicker';
 import { fmtT, fmtPct, fmtInt } from '@/components/format';
 import { getProvenance, getSbrSeries, getSbrDim } from '@/lib/analytics';
+import { pickFiscalYear } from '@/lib/fiscal';
 import { NotLoaded } from '../execution/page';
 
 export const metadata: Metadata = {
@@ -19,9 +20,11 @@ export default async function FundsControlPage({ searchParams }: { searchParams:
 
   const years = series.map((s) => s.fiscalYear);
   const partial = series.filter((s) => s.isPartialYear).map((s) => s.fiscalYear);
-  const closed = series.filter((s) => !s.isPartialYear);
-  const requested = Number(searchParams.fy);
-  const row = series.find((s) => s.fiscalYear === requested) ?? closed[closed.length - 1] ?? series[series.length - 1];
+  // The page opens on the fiscal year the calendar is in, not on the last one
+  // that closed — see lib/fiscal. A year in progress needs every figure marked
+  // period-to-date, which the partial-year banner below does; opening on a
+  // closed year instead quietly answered a question nobody asked.
+  const row = pickFiscalYear(series, searchParams.fy) ?? series[series.length - 1];
 
   const [tas, accounts, functions] = await Promise.all([
     getSbrDim(row.fiscalYear, 'tas', 10),

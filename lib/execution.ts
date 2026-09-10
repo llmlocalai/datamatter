@@ -9,8 +9,10 @@
  *                         per fiscal year, so there is no within-year series in
  *                         it at all -- FY2026 is a single period-to-date
  *                         snapshot, not a curve.
- *   FPDS    (dm_fpds_*)   when contract money moved, to the day. About a fifth
- *                         of Department obligations, never the whole of them.
+ *   FPDS    (dm_fpds_*)   when contract money moved, to the day. A THIRD of
+ *                         Department obligations -- 33.9% in FY2025 -- never the
+ *                         whole of them. getContractCoverage measures it rather
+ *                         than leaving the page to assert it.
  *
  * Every function here returns the year's own completeness marker beside its
  * figures, because the live fiscal year is shorter than the years it is
@@ -178,16 +180,26 @@ export interface FpdsYear {
   fiscalYear: number; lastDayOfFy: number; lastActionDate: string | null;
   obligation: number; actionCount: number; isCompleteYear: boolean;
   fullMonthsObserved: number;
+  /** Where the file substantially IS, which is not where its latest date is. */
+  frontierDayOfFy: number; frontierDate: string | null;
+  frontierObligation: number; frontierActions: number;
+  /** What falls after the frontier and is excluded from every comparison. */
+  tailActions: number; tailObligation: number;
 }
 export async function getFpdsYears(): Promise<FpdsYear[]> {
   return query<FpdsYear>(
-    `SELECT fiscal_year AS "fiscalYear", last_day_of_fy AS "lastDayOfFy",
-            to_char(last_action_date,'YYYY-MM-DD') AS "lastActionDate",
-            obligation, action_count AS "actionCount",
-            is_complete_year AS "isCompleteYear",
-            full_months_observed AS "fullMonthsObserved"
+    `SELECT y.fiscal_year AS "fiscalYear", y.last_day_of_fy AS "lastDayOfFy",
+            to_char(y.last_action_date,'YYYY-MM-DD') AS "lastActionDate",
+            y.obligation, y.action_count AS "actionCount",
+            y.is_complete_year AS "isCompleteYear",
+            y.full_months_observed AS "fullMonthsObserved",
+            y.frontier_day_of_fy AS "frontierDayOfFy",
+            to_char(y.frontier_date,'YYYY-MM-DD') AS "frontierDate",
+            y.frontier_obligation AS "frontierObligation",
+            y.frontier_actions AS "frontierActions",
+            y.tail_actions AS "tailActions", y.tail_obligation AS "tailObligation"
        FROM dm_fpds_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
-      ORDER BY fiscal_year`);
+      ORDER BY y.fiscal_year`);
 }
 
 /** The cumulative curve, thinned to a step the page can draw without 2,000 points. */
@@ -243,6 +255,47 @@ export async function getFpdsMonthTotals() {
             sum(obligation) AS obligation, sum(action_count)::int AS "actionCount"
        FROM dm_fpds_day d JOIN dm_load l ON l.id = d.load_id AND l.is_current
       GROUP BY 1, 2 ORDER BY 1, 2`);
+}
+
+
+/**
+ * How much of execution the contract timing view actually covers.
+ *
+ * The pace chart, the year-end shares and every signal are built on contract
+ * actions, because an action carries a date and an account submission does not.
+ * That is a third of Department obligations, and the page has no business
+ * implying otherwise -- so the share is measured here, per year, from the two
+ * totals the site already publishes, rather than written into copy where it
+ * would drift.
+ *
+ * The largest block it does NOT cover is personnel compensation and benefits,
+ * which is 40.4% of FY2025 obligations and has no year-end timing question in
+ * it: pay is paid on a schedule. The share is reported, not excused.
+ */
+export async function getContractCoverage() {
+  return query<{ fiscalYear: number; departmentObligations: number; contractObligations: number;
+                 contractPct: number; submissionPeriod: string | null;
+                 isPartialAccounts: boolean; isPartialAwards: boolean }>(
+    `SELECT s.fiscal_year AS "fiscalYear",
+            s.obligations_incurred AS "departmentObligations",
+            a.obligation AS "contractObligations",
+            round(a.obligation / nullif(s.obligations_incurred, 0) * 100, 2) AS "contractPct",
+            s.submission_period AS "submissionPeriod",
+            s.is_partial_year AS "isPartialAccounts",
+            a.is_partial_year AS "isPartialAwards"
+       FROM dm_sbr_fy s JOIN dm_load ls ON ls.id = s.load_id AND ls.is_current
+       JOIN dm_award_fy a ON a.fiscal_year = s.fiscal_year
+       JOIN dm_load la ON la.id = a.load_id AND la.is_current
+      WHERE s.scope = $1 ORDER BY s.fiscal_year`, [SCOPE]);
+}
+
+/** Obligations by object-class group — what the timing view covers and what it does not. */
+export async function getMajorClasses(fy: number) {
+  return query<{ majorClass: string; obligations: number }>(
+    `SELECT major_class AS "majorClass", sum(obligations) AS obligations
+       FROM dm_exec_object_class_fy o JOIN dm_load l ON l.id = o.load_id AND l.is_current
+      WHERE fiscal_year = $1 AND scope = $2
+      GROUP BY 1 ORDER BY 2 DESC`, [fy, SCOPE]);
 }
 
 export interface EoyRow {

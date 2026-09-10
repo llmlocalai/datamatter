@@ -857,6 +857,74 @@ const CONTROLS = {
     message: `FY${r.fiscal_year}: ${r.is_complete_year ? 'complete' : 'in progress'}, last action `
       + `${r.last_date}, ${r.full_months_observed} whole fiscal months observed.` })),
 
+  // The frontier is what every pace figure and September projection on the
+  // execution page is measured over. If it were taken from the maximum action
+  // date instead, the live year would be compared over months it does not have.
+  // RECOMPUTED from dm_fpds_day, not read back from dm_fpds_year. A control
+  // that only bounds-checks the published frontier -- non-zero, no later than
+  // the last action, a small tail -- passes a frontier taken straight from the
+  // maximum action date, which is exactly the bug this control exists for. It
+  // was written that way first and a deliberate corruption walked through it.
+  // So the month rule is applied again here, in SQL, against the daily rows: a
+  // fiscal month is observed when it carries at least half the median month's
+  // action count, and the frontier is the end of the last observed month
+  // counting consecutively from October.
+  'TIME-04': async (c) => (await c.query(`
+    WITH months AS (
+      SELECT y.fiscal_year, g.fy_month,
+             coalesce(sum(d.action_count), 0) AS n
+        FROM (SELECT DISTINCT fiscal_year FROM dm_fpds_day dd
+               JOIN dm_load l ON l.id = dd.load_id AND l.is_current) y
+        CROSS JOIN generate_series(1, 12) AS g(fy_month)
+        LEFT JOIN dm_fpds_day d
+          ON d.fiscal_year = y.fiscal_year
+         AND ((extract(month from make_date(d.fiscal_year - 1, 10, 1) + (d.day_of_fy - 1))::int + 2) % 12) + 1
+             = g.fy_month
+         AND d.load_id = (SELECT id FROM dm_load WHERE is_current AND dataset_key = 'contract_timing' LIMIT 1)
+       GROUP BY 1, 2),
+    med AS (
+      SELECT fiscal_year, percentile_cont(0.5) WITHIN GROUP (ORDER BY n) AS med
+        FROM months WHERE n > 0 GROUP BY 1),
+    flagged AS (
+      SELECT m.fiscal_year, m.fy_month, (m.n > 0 AND m.n >= 0.5 * med.med) AS observed
+        FROM months m JOIN med ON med.fiscal_year = m.fiscal_year),
+    run AS (
+      SELECT fiscal_year,
+             coalesce(min(fy_month) FILTER (WHERE NOT observed), 13) - 1 AS full_months
+        FROM flagged GROUP BY 1)
+    SELECT y.fiscal_year, y.full_months_observed AS observed, run.full_months AS expected,
+           y.frontier_day_of_fy, y.tail_actions, y.tail_obligation, y.action_count,
+           to_char(y.frontier_date,'YYYY-MM-DD') AS frontier,
+           to_char(y.last_action_date,'YYYY-MM-DD') AS last_date,
+           (CASE WHEN run.full_months >= 12
+                 THEN make_date(y.fiscal_year, 9, 30)
+                 ELSE make_date(CASE WHEN run.full_months + 1 <= 3 THEN y.fiscal_year - 1 ELSE y.fiscal_year END,
+                                (10 + run.full_months - 1) % 12 + 1, 1) - 1 END
+            - make_date(y.fiscal_year - 1, 10, 1)) + 1 AS expected_day
+      FROM dm_fpds_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+      JOIN run ON run.fiscal_year = y.fiscal_year
+     ORDER BY y.fiscal_year`)).rows.map((r) => {
+    const tailPct = Number(r.action_count) ? Number(r.tail_actions) / Number(r.action_count) * 100 : 0;
+    const ok = Number(r.observed) === Number(r.expected)
+      && Number(r.frontier_day_of_fy) === Number(r.expected_day)
+      && tailPct < 20;
+    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      tolerance: 20, variance_pct: tailPct, status: ok ? 'pass' : 'fail',
+      message: ok
+        ? `FY${r.fiscal_year}: ${r.observed} whole months observed, frontier ${r.frontier}, `
+          + `last action dated ${r.last_date}; `
+          + (Number(r.tail_actions)
+              ? `${Number(r.tail_actions).toLocaleString()} straggler actions `
+                + `(${tailPct.toFixed(2)}% of the year, $${(Number(r.tail_obligation) / 1e6).toFixed(1)}M) `
+                + 'fall after it and are excluded from every pace and projection.'
+              : 'nothing falls after it.')
+        : `FY${r.fiscal_year}: the published frontier is ${r.frontier} (day ${r.frontier_day_of_fy}, `
+          + `${r.observed} whole months) but the daily rows put it at day ${r.expected_day} `
+          + `(${r.expected} whole months)`
+          + (tailPct >= 20 ? `, and ${tailPct.toFixed(1)}% of the year falls after it` : '')
+          + '. Every pace figure and September projection is measured over that window.' };
+  }),
+
 };
 
 // -------------------------------------------------------------------- main --
@@ -995,7 +1063,8 @@ const CONTROLS = {
         'sep_obligation','sep_share_pct','q4_obligation','q4_share_pct','last5_obligation',
         'last5_share_pct','months_observed','is_complete_year'],
       dm_fpds_year: ['fiscal_year','last_day_of_fy','last_action_date','obligation','action_count',
-        'is_complete_year','full_months_observed'],
+        'is_complete_year','full_months_observed','frontier_day_of_fy','frontier_date',
+        'frontier_obligation','frontier_actions','tail_actions','tail_obligation'],
       dm_exec_signal: ['signal_kind','dimension','dim_key','dim_label','fiscal_year','metric',
         'baseline','mad','deviation','amount','baseline_years','full_baseline','direction',
         'headline','evidence','method','severity_rank'],

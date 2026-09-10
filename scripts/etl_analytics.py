@@ -3298,7 +3298,11 @@ def step_execution(out):
 # ONE submission per fiscal year -- FY2026 at P09 -- so there is no within-year
 # series in it at all. The contract files do carry a date on every action, so
 # the timing question is answered from FPDS and labelled as what it is: contract
-# obligations, which are about a fifth of Department obligations, not the whole.
+# obligations, which are a THIRD of Department obligations -- 33.9% in FY2025 --
+# not the whole. The largest block they do not cover is personnel compensation
+# and benefits, 40.4% of the year, which is paid on a schedule and has no
+# year-end timing question in it. The share is measured on the page rather than
+# asserted here, so it cannot drift away from the data.
 #
 # WHY THIS MATTERS ON 10 SEPTEMBER. Annual appropriations expire on 30 September
 # and cannot be obligated afterwards, so the last weeks of a fiscal year carry a
@@ -3500,6 +3504,49 @@ def _mad_z(value, prior):
     return max(-_Z_CAP, min(_Z_CAP, z)), med, mad
 
 
+
+# The reporting frontier, and why the maximum action date is not it.
+#
+# The FY2026 contract file runs to 2026-08-04 and is substantially complete only
+# to the end of April. October through April carry 280,000 to 400,000 actions a
+# month; May carries 75,000, June 67, July 105 and August 8. Those last 180
+# actions are stragglers and forward-dated records, not activity, and taking the
+# maximum date as the extent of the file made the page wrong in three ways at
+# once: the cumulative curve ran flat for three months, the year looked like it
+# had ten months observed when it had seven, and every pace and projection
+# compared seven real months of FY2026 against ten of every prior year --
+# understating the live year by about a third.
+#
+# So the extent is derived from where the file actually IS. A fiscal month counts
+# as observed when it carries at least half the median month's action count for
+# that year, and the frontier is the end of the last observed month counting
+# CONSECUTIVELY from October -- consecutively, because a gap in the middle is a
+# hole in the data rather than the end of it, and treating it as the end would
+# hide the hole.
+FRONTIER_SHARE = 0.5
+
+
+def _fy_month_start(fy: int, m: int) -> dt.date:
+    """First calendar day of fiscal month m (1 = October) of fiscal year fy."""
+    mo = (10 + m - 2) % 12 + 1
+    return dt.date(fy - 1 if m <= 3 else fy, mo, 1)
+
+
+def _reporting_frontier(fy, month_actions):
+    """(full_months, frontier_day_of_fy, frontier_date).
+
+    A complete year returns 12 and its own last day."""
+    present = [n for n in month_actions.values() if n > 0]
+    med = _median(present) if present else 0.0
+    full = 0
+    for m in range(1, 13):
+        n = month_actions.get(m, 0)
+        if n > 0 and n >= FRONTIER_SHARE * med: full = m
+        else: break
+    end = (dt.date(fy, 9, 30) if full >= 12
+           else _fy_month_start(fy, full + 1) - dt.timedelta(days=1))
+    return full, (end - dt.date(fy - 1, 10, 1)).days + 1, end
+
 def step_timing(out, only_fy=None):
     import pyarrow as pa, pyarrow.dataset as ds, pyarrow.compute as pc
     base = os.path.join(WAREHOUSE, "contracts")
@@ -3549,15 +3596,27 @@ def step_timing(out, only_fy=None):
                          "n": r["federal_action_obligation_count"]}
                         for r in g.to_pylist() if r["day_of_fy"] is not None),
                        key=lambda r: r["d"])
+        daily = [r for r in daily if 1 <= r["d"] <= 366]   # an action dated outside its own year
         cum_o = cum_n = 0.0
         last_day = max((r["d"] for r in daily), default=0)
+        month_actions, month_obl = collections.Counter(), collections.Counter()
         for r in daily:
-            if r["d"] < 1 or r["d"] > 366: continue     # an action dated outside its own year
+            d0 = dt.date(fy - 1, 10, 1) + dt.timedelta(days=r["d"] - 1)
+            m = (d0.month - 10) % 12 + 1
+            month_actions[m] += r["n"]; month_obl[m] += r["o"]
             cum_o += r["o"]; cum_n += r["n"]
             day_rows.append({"fiscal_year": fy, "day_of_fy": r["d"],
                              "obligation": r["o"], "action_count": r["n"],
                              "cum_obligation": round(cum_o, 2), "cum_actions": int(cum_n)})
-        fy_meta[fy] = {"last_day": last_day, "obligation": round(cum_o, 2), "actions": int(cum_n)}
+        full_months, frontier_day, frontier_date = _reporting_frontier(fy, month_actions)
+        tail = [r for r in daily if r["d"] > frontier_day]
+        fy_meta[fy] = {"last_day": last_day, "obligation": round(cum_o, 2), "actions": int(cum_n),
+                       "full_months": full_months, "frontier_day": frontier_day,
+                       "frontier_date": frontier_date.isoformat(),
+                       "frontier_obligation": round(sum(r["o"] for r in daily if r["d"] <= frontier_day), 2),
+                       "frontier_actions": int(sum(r["n"] for r in daily if r["d"] <= frontier_day)),
+                       "tail_actions": int(sum(r["n"] for r in tail)),
+                       "tail_obligation": round(sum(r["o"] for r in tail), 2)}
 
         # -- month x dimension, and the year-end shares built from it ----------
         gd = t.group_by(["psc_class_key", "product_or_service_code_description"]).aggregate(
@@ -3610,8 +3669,11 @@ def step_timing(out, only_fy=None):
                     k = r[col]; k = "(not reported)" if k in (None, "") else str(k)
                     if k in keepset:
                         series[(dim, k)][fy]["last5"] = round(r["federal_action_obligation_sum"] or 0.0, 2)
-        print(f"  FY{fy}: {fy_meta[fy]['actions']:,} actions, "
-              f"${fy_meta[fy]['obligation']/1e9:,.1f}B, latest day-of-year {last_day}")
+        m = fy_meta[fy]
+        print(f"  FY{fy}: {m['actions']:,} actions, ${m['obligation']/1e9:,.1f}B; "
+              f"{m['full_months']} whole months observed, frontier {m['frontier_date']}"
+              + (f" ({m['tail_actions']:,} straggler actions dated after it, "
+                 f"${m['tail_obligation']/1e6:,.1f}M)" if m['tail_actions'] else ""))
         del t
 
     # A supply group the published list does not name takes its label from the
@@ -3656,18 +3718,14 @@ def step_timing(out, only_fy=None):
     # differ by three orders of magnitude in size and a shared threshold would
     # only ever select the largest of them.
     # =====================================================================
-    complete = sorted(fy for fy, m in fy_meta.items() if m["last_day"] >= 360)
+    complete = sorted(fy for fy, m in fy_meta.items() if m["full_months"] >= 12)
     partial = [fy for fy in sorted(fy_meta) if fy not in complete]
     live = partial[-1] if partial else (complete[-1] if complete else None)
-    # The months of the live year that are fully observed. FY2026 runs to
-    # 4 August 2026, so October through July are whole and August is not; a
-    # comparison that included August would read a five-day month as a month.
-    live_full_months = 0
-    if live is not None:
-        ld = fy_meta[live]["last_day"]
-        d0 = dt.date(live - 1, 10, 1) + dt.timedelta(days=ld - 1)
-        # month index of the last complete FY month before the cut-off
-        live_full_months = ((d0.month - 10) % 12)      # 0-based count of whole months
+    # The months of the live year that are fully observed -- derived by
+    # _reporting_frontier from where the file actually is, never from its maximum
+    # action date. Reading the maximum date as the extent put ten months against
+    # FY2026's seven and understated every pace figure by about a third.
+    live_full_months = fy_meta[live]["full_months"] if live is not None else 0
     signals, executors, action_rows = [], [], []
 
     def ytd(byfy, fy, months):
@@ -3926,9 +3984,14 @@ def step_timing(out, only_fy=None):
                   "last_action_date": (dt.date(fy - 1, 10, 1)
                                        + dt.timedelta(days=m["last_day"] - 1)).isoformat(),
                   "obligation": m["obligation"], "action_count": m["actions"],
-                  "is_complete_year": m["last_day"] >= 360,
-                  "full_months_observed": 12 if m["last_day"] >= 360 else
-                      ((dt.date(fy - 1, 10, 1) + dt.timedelta(days=m["last_day"] - 1)).month - 10) % 12}
+                  "is_complete_year": m["full_months"] >= 12,
+                  "full_months_observed": m["full_months"],
+                  "frontier_day_of_fy": m["frontier_day"],
+                  "frontier_date": m["frontier_date"],
+                  "frontier_obligation": m["frontier_obligation"],
+                  "frontier_actions": m["frontier_actions"],
+                  "tail_actions": m["tail_actions"],
+                  "tail_obligation": m["tail_obligation"]}
                  for fy, m in sorted(fy_meta.items())]
     print(f"  {len(signals):,} signals, {len(executors)} executor rows, "
           f"{len(action_rows):,} exemplar actions")

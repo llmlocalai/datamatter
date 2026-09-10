@@ -1,21 +1,123 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-10 (the display spine, execution detail, and year-end signals)
+- **Last updated:** 2026-09-10 (the reporting frontier, FY2026 as the default year, and what the timing view actually covers)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (2026-09-10):** `tsc --noEmit` clean and `next build` green, 27 routes,
   run against a full local Postgres load of every staged extract. All 18 pages and
   all four new API endpoints requested against that build and returned 200.
   **Not yet loaded to Neon** — the ETL reads `/Volumes/AI_DATA` and Neon is not
   reachable from the sandbox, so `npm run refresh` still has to be run on the Mac.
-- **Control status (2026-09-10):** 432 of 439 assertions pass across 43 controls.
+- **Control status (2026-09-10):** 438 of 445 assertions pass across 44 controls.
   The seven failures are all pre-existing published findings: `TIE-01` (File A vs
   File B, FY2026), `FILEB-01` (FY2026 PARK replication), one `ASSIST-01` bucket,
   three `FILEC-02` spreads and `WBC-02`. **All eleven new controls pass, and all
   eleven were proved able to fail** — each was run against a deliberately
-  corrupted extract and each caught it (see the note below on PB-01, which did
-  not, until it was rewritten).
+  corrupted extract and each caught it (see the notes below on PB-01 and
+  TIME-04, neither of which did until it was rewritten).
 
 ---
+
+## Done — 2026-09-10 (twelfth pass) — the timing view says what it covers
+
+Raised on reading the chart: *the chart should reflect File B execution, which is
+the overall Department position — contract execution is only a subportion.*
+Correct, and the framing was wrong in two ways.
+
+- [x] **The share was understated in the copy.** Every note said contract
+  obligations are "about a fifth" of Department obligations. Measured: **33.8%,
+  34.3%, 34.3%, 32.0%, 33.9%** for FY2021–25. About a **third**, not a fifth.
+  Corrected in the ETL header, the schema comment, the dataset limitations and
+  the page.
+- [x] **The share is now measured, not asserted.** `getContractCoverage` divides
+  the two totals the site already publishes, and the page prints the table:
+  Department obligations, contract obligations, share carrying a date, per year.
+  Copy cannot drift away from it.
+- [x] **The Department-wide position now leads the page.** The File A chain moved
+  above the timing section and is titled *The Department-wide position* — "the
+  whole of execution, not a subset — every appropriation, every account". The
+  contract curve follows it, retitled **"When contract money moves"**, opening
+  with its own coverage figure.
+- [x] **Why there is no Department-wide curve, stated where the question arises.**
+  Checked directly: `file_a` and `file_b` each hold **exactly one submission per
+  fiscal year** in this warehouse — FY2021–25 at P12, FY2026 at P09. There is no
+  month-by-month Department series in these sources to draw, and none can be
+  constructed from them. (File C *does* carry 11 periods a year, but it is
+  account-linked award data whose linkage falls to 3.1% by FY2025 — a far smaller
+  subset than FPDS, not a better one.) The caveat under the waterfall says this
+  plainly rather than leaving the contract curve to be read as the whole.
+- [x] **What the curve does not cover, named.** Personnel compensation and
+  benefits is **$586.2B, 40.4% of FY2025** — paid on a schedule, with no year-end
+  timing question in it. The timing view covers the part of execution where the
+  question is real; that is the argument for it, and it is now on the page
+  instead of implied.
+
+
+## Done — 2026-09-10 (eleventh pass) — the reporting frontier, and the default year
+
+Two defects, reported off the live site.
+
+### The FY2026 line on the pace chart ran flat for three months
+
+- [x] **The contract file's extent is not its latest action date.** The FY2026
+  extract runs to **2026-08-04** and is substantially complete only to
+  **30 April**. October through April carry 280,000 to 400,000 actions a month;
+  May carries 75,000, and June, July and August carry **180 between them**.
+  Taking the maximum date as the extent was wrong in three ways at once:
+  - the cumulative curve ran flat from May to August, which reads as spending
+    having stopped — the exact misreading the chart exists to prevent, produced
+    by the chart itself;
+  - the year reported **ten** whole months observed when it had **seven**;
+  - every pace comparison and September projection measured seven real months of
+    FY2026 against ten of every prior year.
+- [x] **That last one reversed the answer.** Sub-agency pace read **68–99%** of
+  each organisation's own norm — every one of them behind. The true figures are
+  **104–127%** — every one of them ahead. The projected September total went from
+  $53.7B to **$76.1B**. This was a wrong conclusion on a page built to support a
+  decision, not a cosmetic error.
+- [x] **`_reporting_frontier` derives the extent from where the file is.** A
+  fiscal month counts as observed when it carries at least half the median
+  month's action count; the frontier is the end of the last observed month
+  counting **consecutively** from October — consecutively, because a gap in the
+  middle is a hole in the data rather than the end of it, and treating it as the
+  end would hide the hole. `dm_fpds_year` now publishes the frontier, what falls
+  after it, and how much that tail is worth (75,264 actions, $9.0B, 2.98% of the
+  year's actions).
+- [x] The pace chart clips the live year's line at the frontier and labels the
+  marker "reporting frontier"; the page states the frontier, the last dated
+  action, and what was excluded.
+
+### `TIME-04` did not catch it either, at first
+
+Written first as a bounds check — frontier non-zero, no later than the last
+action, small tail — it **passed a frontier taken straight from the maximum
+action date**, which is the only thing it existed to catch. Rewritten to
+**recompute the month rule in SQL against `dm_fpds_day`** and compare, it now
+fails that corruption with the numbers in the message: *"the published frontier
+is 2026-08-04 (day 308, 10 whole months) but the daily rows put it at day 212
+(7 whole months)"*.
+
+Second time in two passes that a control was checking a published summary rather
+than the rows behind it — the same shape as PB-01. The rule is now in CLAUDE.md:
+**a control must recompute, not read back.**
+
+### Every execution page opens on the year being executed
+
+- [x] **`lib/fiscal.ts`** holds the rule once: `fiscalYearOf`, `dayOfFiscalYear`,
+  `daysToFiscalYearEnd`, `pickFiscalYear`. The last of those returns the year the
+  reader asked for, else the current fiscal year, else the newest the extract
+  holds — replacing four copies of `closed[closed.length - 1]`, which on
+  10 September 2026 opened the site on FY2025.
+- [x] Applied to `/funds-control`, `/contracting`, `/assistance` and
+  `/program`'s execution view; all four now open on FY2026 with the in-progress
+  marker.
+- [x] **The front page's four figures** now lead with FY2026 period-to-date for
+  the two File A tiles, and keep the two contract tiles on the last closed year
+  **with the year named on each tile** — a linkage share read off a part-year
+  snapshot is the one figure on this site that moves by a factor of eight
+  depending on which snapshot is picked (FILEC-02).
+- [x] `/traceability` deliberately still reads closed years: it is an analysis of
+  the F-35 break built on complete-year figures, not a status page.
+
 
 ## Done — 2026-09-10 (tenth pass) — the display spine, execution detail, year-end signals
 

@@ -6,6 +6,7 @@ import { fmtT, fmtB, fmtPct, fmtInt } from '@/components/format';
 import {
   getSbrSeries, getReconciliation, getControls, getAllProvenance, getDefinitions,
 } from '@/lib/analytics';
+import { pickFiscalYear } from '@/lib/fiscal';
 
 export const metadata: Metadata = {
   title: 'datamatter · Department of War budget analytics',
@@ -46,8 +47,13 @@ export default async function Home() {
   const [sbr, rec, controls, datasets, defs] = await Promise.all([
     getSbrSeries(), getReconciliation(), getControls(), getAllProvenance(), getDefinitions(),
   ]);
+  // The front page opens on the year being executed, not the last one that
+  // closed. The two File A tiles are that year, period-to-date; the two contract
+  // tiles stay on the last CLOSED year and say so, because a linkage percentage
+  // read off a part-year snapshot is the one figure on this site that moves by a
+  // factor of eight depending on which snapshot you pick — see FILEC-02.
   const closed = sbr.filter((s) => !s.isPartialYear);
-  const latest = closed[closed.length - 1];
+  const latest = pickFiscalYear(sbr) ?? closed[closed.length - 1];
   const closedRec = rec.filter((r) => !r.isPartialYear);
   const lastRec = closedRec[closedRec.length - 1];
   const assertions = controls.reduce((s, c) => s + c.total, 0);
@@ -83,17 +89,26 @@ export default async function Home() {
       </section>
 
       {latest && lastRec && (
-        <Section title={`FY${latest.fiscalYear}, in four figures`}
-          note="Department scope — agency codes 097, 021, 017 and 057. Agency 011, which appears in the same source file, is not the Department and is excluded.">
+        <Section title={`FY${latest.fiscalYear}${latest.isPartialYear ? ' so far' : ''}, in four figures`}
+          note={`Department scope — agency codes 097, 021, 017 and 057. Agency 011, which appears in `
+            + `the same source file, is not the Department and is excluded.`
+            + (latest.isPartialYear
+                ? ` The first two figures are FY${latest.fiscalYear} period-to-date; the second two `
+                  + `stay on FY${lastRec.fiscalYear}, the last closed year, because a linkage share `
+                  + `read off a part-year snapshot measures the snapshot.`
+                : '')}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatTile label="Total budgetary resources" value={fmtT(latest.totalBudgetaryResources)}
-              sub={`Across ${fmtInt(latest.tasCount)} Treasury accounts`} />
+              sub={`FY${latest.fiscalYear} across ${fmtInt(latest.tasCount)} Treasury accounts`
+                + (latest.submissionPeriod ? ` · ${latest.submissionPeriod}` : '')} />
             <StatTile label="Obligations incurred" value={fmtT(latest.obligationsIncurred)}
-              sub={`${fmtPct(latest.obligationsIncurred / latest.totalBudgetaryResources * 100)} of available resources`} tone="accent" />
+              sub={`${fmtPct(latest.obligationsIncurred / latest.totalBudgetaryResources * 100)} of `
+                + `available resources${latest.isPartialYear ? ', period-to-date' : ''}`} tone="accent" />
             <StatTile label="Contract obligations" value={fmtB(lastRec.awardObligation)}
-              sub={`${fmtInt(lastRec.awardActions)} contract actions`} />
+              sub={`FY${lastRec.fiscalYear} · ${fmtInt(lastRec.awardActions)} contract actions`} />
             <StatTile label="Traceable to an account" value={fmtPct(lastRec.linkagePct)}
-              sub="Share of contract obligations carrying a Treasury account link" tone="critical" />
+              sub={`FY${lastRec.fiscalYear} share of contract obligations carrying a Treasury account link`}
+              tone="critical" />
           </div>
         </Section>
       )}

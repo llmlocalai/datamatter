@@ -26,8 +26,15 @@ export function PaceChart({ points, liveYear, todayDayOfFy, dataEndsDay }: {
   liveYear: number;
   /** Where the calendar is today, which is not where the data ends. */
   todayDayOfFy: number;
+  /** The reporting frontier: where the file substantially IS. */
   dataEndsDay: number;
 }) {
+  if (!points.length) return null;
+  // The live year's line is CLIPPED at the frontier. Drawn to its last dated
+  // action it ran flat for three months across a tail of 180 straggler records,
+  // which reads as spending having stopped -- the exact misreading this chart
+  // exists to prevent, produced by the chart itself.
+  points = points.filter((p) => p.fiscalYear !== liveYear || p.dayOfFy <= dataEndsDay);
   if (!points.length) return null;
   const years = Array.from(new Set(points.map((p) => p.fiscalYear))).sort();
   const maxY = Math.max(...points.map((p) => p.cumObligation)) * 1.04;
@@ -78,7 +85,7 @@ export function PaceChart({ points, liveYear, todayDayOfFy, dataEndsDay }: {
           <line x1={x(dataEndsDay)} x2={x(dataEndsDay)} y1={T} y2={H - B}
                 stroke="currentColor" className="text-navy-600" strokeWidth="1" strokeDasharray="2 4" />
           <text x={x(dataEndsDay) - 6} y={T + 26} textAnchor="end"
-                className="fill-navy-500 text-[10px]">data ends</text>
+                className="fill-navy-500 text-[10px]">reporting frontier</text>
 
           {years.map((fy, i) => (
             <path key={fy} d={line(fy)} fill="none" stroke={shade(fy, i)}

@@ -172,6 +172,61 @@ the extract against itself and passed a deliberate $1M corruption of an O-1 line
   identifies an activity; nothing reads it. Do not borrow a name from another
   year's row that happens to share a key.
 
+### The account chain gives a position; only contracts give a curve
+
+`file_a` and `file_b` each hold **exactly one submission per fiscal year** in this
+warehouse — FY2021–25 at P12, FY2026 at P09. **There is no month-by-month
+Department-wide series in these sources and none can be built from them.** Do not
+try; do not imply one exists. The Statement of Budgetary Resources chain answers
+*where the year stands*, never *when the money moved*.
+
+Timing therefore comes from contract action dates, and that is a **third** of
+Department obligations — 33.8%, 34.3%, 34.3%, 32.0%, 33.9% for FY2021–25 — not a
+fifth, and not the whole. `getContractCoverage` measures the share from the two
+totals the site already publishes so the figure cannot drift away from the data;
+the page prints it beside the chart. The largest block the curve does not cover
+is personnel compensation and benefits, $586.2B or 40.4% of FY2025, which is paid
+on a schedule and has no year-end timing question in it — which is the honest
+argument for the curve, and it belongs on the page rather than in a defence of it.
+
+File C carries 11 submission periods a fiscal year and looks like a way round
+this. It is not: it is account-linked award data whose linkage falls to 3.1% by
+FY2025 (`FILEC-01`, `FILEC-02`), a far smaller subset than FPDS rather than a
+broader one.
+
+### The extent of a file is not its latest date
+
+The FY2026 contract extract runs to **2026-08-04** and is substantially complete
+only to **30 April**: October–April carry 280,000–400,000 actions a month, May
+carries 75,000, and June–August carry 180 between them. Reading the maximum
+action date as the extent of the file drew the cumulative curve flat for three
+months, reported ten whole months observed where there were seven, and compared
+seven real months of the live year against ten of every prior year — which put
+every sub-agency's pace at **68–99%** of its own norm when the true figures are
+**104–127%**.
+
+`_reporting_frontier` derives it instead: a fiscal month is observed when it
+carries at least half the median month's action count, and the frontier is the
+end of the last observed month counting **consecutively** from October. A gap in
+the middle of a year is a hole in the data, not the end of it, and stopping at
+the first gap surfaces the hole rather than hiding it. `TIME-04` recomputes the
+rule in SQL and blocks a load that publishes a different one. **Every pace,
+projection and same-point comparison is measured to the frontier.**
+
+### The default fiscal year is the one being executed
+
+`lib/fiscal.ts` holds it: `pickFiscalYear` returns the year the reader asked for,
+else the current fiscal year, else the newest the extract holds. Do not
+reintroduce `closed[closed.length - 1]` as a page default — it opened the whole
+site on the last year that closed, which in September is the wrong year to be
+looking at. The cost of the current year is that every figure on it is
+period-to-date and has to say so, on the tile rather than once at the top.
+
+The exception is a figure whose meaning depends on the year being complete: a
+File C linkage share read off a part-year snapshot measures the snapshot, not the
+Department (`FILEC-02`), so the front page keeps those two tiles on the last
+closed year and names the year on the tile.
+
 ### Signals are questions, and the statistics have to be robust
 
 Every signal compares a category with **its own prior years**, never with a
@@ -297,8 +352,14 @@ silently in either direction.
   staged extract, re-run the load, and confirm the control catches it. Bump
   `extracted_at` on every payload first — `dm_load` is unique on
   `(dataset_key, vintage, extracted_at)` and a rerun otherwise dies on the insert
-  before a single control has run. This is how `PB-01` was found to be checking
-  the extract against itself.
+  before a single control has run.
+- **A control must RECOMPUTE, not read back.** Both controls that failed this
+  test read a summary the ETL had already written: `PB-01` compared
+  `dm_pb_tieout`'s counted and memo columns with its own published column, all
+  three from the same in-memory sums; `TIME-04` bounds-checked a frontier instead
+  of re-deriving it. Each passed the exact corruption it existed to catch. A
+  control that reads the extract's own answer is a restatement with a pass/fail
+  printed on it.
 - Formatting crosses the server/client boundary as a **key** (`format="int"`),
   never as a function prop.
 - Vercel functions cannot scan the parquet warehouse. Do not "improve" a route by
