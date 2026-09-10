@@ -1,22 +1,169 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-09 (/jbook: learn the R-2 from the books, then write one)
+- **Last updated:** 2026-09-10 (the display spine, execution detail, and year-end signals)
 - **Live site:** https://datamatter.vercel.app
-- **Build status (2026-09-09):** `tsc --noEmit` clean and `next build` green,
-  21/21 routes, run against a full local Postgres load of every staged extract.
-  Every `/program` route was requested against that build and returned 200 with
-  no server error. **Not yet loaded to Neon** — the ETL reads
-  `/Volumes/AI_DATA` and Neon is not reachable from the sandbox this session
-  used, so `npm run refresh` still has to be run on the Mac before the live site
-  shows any of it.
-- **Control status (2026-09-09):** 303 of 306 assertions pass. The three
-  failures are pre-existing and non-blocking: `TIE-01` (File A vs File B
-  obligations, FY2022 and FY2026) and one `ASSIST-01` bucket, all published as
-  findings. The nine new `EXH-*` assertions all pass, including `EXH-08`, which
-  ties the P-1 and R-1 request totals to the figures the Department publishes in
-  Program Acquisition Cost by Weapon System for all seven books that state them.
+- **Build status (2026-09-10):** `tsc --noEmit` clean and `next build` green, 27 routes,
+  run against a full local Postgres load of every staged extract. All 18 pages and
+  all four new API endpoints requested against that build and returned 200.
+  **Not yet loaded to Neon** — the ETL reads `/Volumes/AI_DATA` and Neon is not
+  reachable from the sandbox, so `npm run refresh` still has to be run on the Mac.
+- **Control status (2026-09-10):** 432 of 439 assertions pass across 43 controls.
+  The seven failures are all pre-existing published findings: `TIE-01` (File A vs
+  File B, FY2026), `FILEB-01` (FY2026 PARK replication), one `ASSIST-01` bucket,
+  three `FILEC-02` spreads and `WBC-02`. **All eleven new controls pass, and all
+  eleven were proved able to fail** — each was run against a deliberately
+  corrupted extract and each caught it (see the note below on PB-01, which did
+  not, until it was rewritten).
 
 ---
+
+## Done — 2026-09-10 (tenth pass) — the display spine, execution detail, year-end signals
+
+Three asks, one pass. Ordered here as they were built, because each one depended
+on the extract underneath it.
+
+### 1. `/budget` was publishing a total that was $30.1B too high
+
+- [x] **The FY2027 page bypassed the whole provenance and control system.** It read
+  `war_budget_line` directly through `lib/fy27-data.ts`, with no memo rule of any
+  kind and no vintage on the page. Its grand total summed all seven display
+  tables, including the **P-1R** — Guard and Reserve equipment already inside the
+  P-1 lines — alongside the P-1 advance-procurement subtotals, the `(MEMO NON
+  ADD)` cost types and every `Include in TOA = N` row. Against what the exhibits
+  themselves foot to, that is **$30.1B of double counting in FY2027 alone**.
+- [x] **New `step_pb_display` reads all seven exhibits for the latest two books**
+  into `dm_pb_line` and `dm_pb_tieout`, keeping the hierarchy the exhibit is
+  printed in: appropriation, budget activity, sub-activity or activity group,
+  budget line item. Separate tables from `dm_exhibit_line` on purpose — that one
+  is the program spine for p1/p1r/r1 across eight books and `/program`, the
+  weapons-book crosswalk and EXH-01..09 all depend on its grain.
+- [x] **The memo rules are per exhibit, and one of them runs the other way.**
+  `Include in TOA = N` means outside total obligation authority on the R-1;
+  identifies the Indefinite Accounts block on the O-1, where the workbook settles
+  it by publishing "OM Title" and "OM Title plus Indefinite" as two sheets whose
+  difference is exactly those rows; and on the **M-1 marks five negative "Less
+  Reimbursables" offsets that the published total INCLUDES**. Applying one rule
+  across the seven is wrong in two directions at once and nothing in the column
+  says so.
+- [x] **The C-1 Mandatory Reconciliation sheets are a breakout, not money beside
+  the year.** Measured: all 25 FY2027 projects appear in the FY 2027 sheet, 19 at
+  the identical amount and 6 as part of a larger project total. Adding the sheet
+  would have counted $2.68B twice in FY2027 and $4.90B in FY2026. `PB-04` asserts
+  it and fails the moment a future book stops behaving that way.
+- [x] **Every sheet prints its own footer, so the extract is checkable against the
+  Department rather than against itself.** `PB-01` compares the published lines
+  with the "Total of Displayed Rows" line each sheet carries. **All 21 sheet-years
+  in the PB2027 book, and all 28 across both books, tie exactly.**
+- [x] **Discretionary is derived by subtraction, not by adding the columns that
+  look discretionary.** C-1 publishes Authorization, Authorization of
+  Appropriation, Appropriation and Total Obligation Authority for one project —
+  four measures, not four components. Adding them put every construction
+  project's discretionary figure at three times its own total. `PB-02` is the
+  control that stops that class of error returning.
+- [x] **The table is now a six-level drill-down**, server-side, with all three of
+  the book's fiscal years on every row and a level the exhibit does not use
+  skipped rather than drawn empty (the R-1 has no sub-activity, the C-1 no
+  activity group). Opening a budget line shows the rows behind it cost type by
+  cost type, memo rows visible and struck through rather than hidden.
+- [x] **`components/budget/Charts.tsx` had its own `fmtT`** which tested only the
+  positive branches, so a negative figure fell through every case and printed as
+  `$-549000000` — the raw number, unscaled. That was the long strings of zeros.
+  It now re-exports the site's formatter.
+- [x] Deleted `app/api/budget-fy27/route.ts`, `.../detail/route.ts` and
+  `components/budget/DetailTable.tsx`; `lib/fy27-data.ts` keeps only the document
+  catalog and the stored bytes the download route needs.
+
+### 2. `/execution` is centred on the year that is running
+
+- [x] **The page opened on the last CLOSED year.** It now opens on the fiscal year
+  the calendar is in, and the whole difficulty of that is saying "period-to-date"
+  on every figure rather than once: File A and File B are one submission per
+  fiscal year (FY2026 at P09), the contract files run to 2026-08-04, and neither
+  is a closed year. Where a prior-year comparison is possible at the same point
+  it is made at the same point; where it is not, the page says so instead of
+  drawing the line anyway.
+- [x] **New `step_execution` publishes File B at the grain it is reported at** —
+  76,119 rows over the three most recent years, plus account and object-class
+  rollups over the whole window. Object class, program activity, direct or
+  reimbursable, emergency fund code, and the USSGL expenditure stages: undelivered
+  and delivered orders unpaid, prepaid and paid outlays, deobligations, and the
+  upward and downward adjustments to prior-year orders.
+- [x] **`fund_life` is derived from the period of availability** and it is the
+  single most decision-relevant attribute in the file in September:
+  **$631.9B of FY2026 obligations, 51.4%, are on annual authority that expires on
+  30 September.** An obligation rate that mixes annual with no-year answers no
+  question at all.
+- [x] The PARK replication is handled at detail grain too, and it matters more
+  there: without it a drill-down would show the same money under four keys.
+
+### 3. Year-end timing and the signals
+
+- [x] **File B cannot answer "when".** One submission per fiscal year means no
+  within-year series exists in it. Timing is answered from contract action dates
+  and labelled as what it is — contract obligations, about a fifth of Department
+  obligations.
+- [x] **New `step_timing`** builds the day-by-day cumulative curve for each year,
+  monthly totals by sub-agency, contracting office, product or service code,
+  supply group, recipient, pricing type and extent of competition, and the
+  September, Q4 and final-five-day concentration of each.
+- [x] **1,236 signals, each computed against its own category's prior years** —
+  never against a Department-wide average, because these categories differ by
+  three orders of magnitude and a shared threshold would only ever select the
+  largest. Six kinds: year-end share out of pattern, month out of pattern, pace
+  against the same whole months, new activity, September projection, and the
+  descriptive concentration the others are read against.
+- [x] **Robust statistics, with a floor and a cap, and the reason on the page.**
+  Median and scaled median absolute deviation rather than mean and standard
+  deviation: with four or five observations one unusual year drags a mean far
+  enough to hide the year after it, and FY2021–22 carry supplemental money that
+  lands in months the base budget does not use. The scale is floored at 5% of the
+  median — an unfloored MAD produced a z of **416**, a number that says nothing
+  except that the denominator was small — and capped at 99.
+- [x] **A key must be present in every complete year to produce a comparative
+  signal.** A key tracked in four of five years is a five-year history with the
+  SMALL year missing, and leaving it out makes the rest look more alike than they
+  are and inflates every deviation measured against them.
+- [x] **The supply groups exist so the small classes are visible.** Furniture, food
+  and office supplies are far too small to reach the eighty largest four-digit
+  codes in a $490B year, so a threshold would quietly decide they do not exist.
+  They get their own dimension at supply-group grain and their own exemplar
+  bucket down to $250K. The page says plainly that buying supplies in September is
+  not itself a finding.
+- [x] **Exemplar actions carry the description the contracting officer wrote**, so
+  the next question — which action — has an answer on the page. FY2025's largest
+  September action is $14.1B on the day before the year ended, and its description
+  says what it is: "THIS MODIFICATION DEFINITIZES LOT 18 & 19 AIRCRAFT CLINS".
+  That is the point of showing them.
+- [x] **Executor scorecard** by sub-agency: year to date against that
+  organisation's own norm for the same whole months, its own September and
+  final-five-day dependence, and a September projection with the observed range.
+
+### The verification, and what it caught
+
+Ran the ETL on the Mac, loaded every staged extract into a throwaway Postgres in
+the sandbox, ran the control suite, then **corrupted the extract eleven times, once
+per new control, and re-ran the load each time.** Ten were caught immediately.
+
+**`PB-01` was not.** As first written it compared `dm_pb_tieout.counted_k +
+memo_k` against `published_k` — but all three come from the same in-memory sums
+in the ETL, so the control was checking the extract's bookkeeping against itself
+and passed however wrong the rows reaching the page were. Moving a single O-1
+line by $1M did not fail it. Rewritten to re-sum `dm_pb_line` in SQL, it catches
+that corruption to the dollar. **A control that reads the extract's own summary
+is not a control.**
+
+Also caught, by rendering rather than by a control:
+
+- the action table opened on a bucket and year combination that has no rows (the
+  live year has no September), which read as "no data" rather than "not yet";
+- both explorers rendered "Nothing matches that search" on the server, before the
+  first client fetch had been asked for;
+- the fund-life list printed outlay rates of 12,330,403,700% on periods of
+  availability carrying $0;
+- the signal board's filter counts were counts of what had been shipped to the
+  browser, not of what the load holds, and the descriptive kind sorted first
+  alphabetically and became the default tab.
+
 
 ## Done — 2026-09-09 (ninth pass) — the site's mark
 

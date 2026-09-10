@@ -115,6 +115,93 @@ being counted alongside its own detail — $14.4B in PB2026 alone, in an extract
 that passed every internal check. Do not weaken its tolerance to make a load
 pass; a difference there means money has been gained or lost.
 
+### The display spine is a second set of tables, and that is deliberate
+
+`dm_exhibit_*` is the PROGRAM spine: p1/p1r/r1 across eight books, so a weapon
+system's budget line can be followed through its restatements. `/program`, the
+weapons-book crosswalk and `EXH-01`..`EXH-09` all depend on its grain.
+
+`dm_pb_line` / `dm_pb_tieout` are the DISPLAY spine: all seven exhibits, the
+latest two books, carrying the hierarchy the exhibit is printed in —
+appropriation, budget activity, sub-activity or activity group, budget line item.
+`/budget` is built on it. Do not merge the two; adding O&M sub-activity groups to
+the program roster would flood it, and widening the program spine's account regex
+would move `treasury_account` on rows the program pages join on.
+
+**The memo rule is per exhibit and one of them runs the other way.**
+`Include in TOA = N` means three different things:
+
+| Exhibit | What the flag marks | Counted? |
+|---|---|---|
+| R-1 | rows outside total obligation authority | no |
+| O-1 | the Indefinite Accounts block — the workbook publishes "OM Title" and "OM Title plus Indefinite" as two sheets whose difference is exactly these rows | no |
+| M-1 | five negative **"Less Reimbursables"** offsets that the published M-1 total INCLUDES | **yes**, flagged `is_offset` |
+
+Applying one rule across the seven exhibits is wrong in two directions at once
+and nothing in the column itself says so. Likewise the **C-1 Mandatory
+Reconciliation sheets are a breakout of projects already in that year's sheet**,
+not money beside it: all 25 FY2027 projects appear in the FY 2027 sheet, 19 at
+the identical amount. Adding them counts $2.68B twice.
+
+**Discretionary is the year's total minus its mandatory columns, never the sum of
+the columns that look discretionary.** C-1 prints Authorization, Authorization of
+Appropriation, Appropriation and Total Obligation Authority for one project —
+four measures of the same money, not four components — and adding them put every
+construction project at three times its own total. `PB-02` blocks that.
+
+**Every "-1" sheet prints its own column totals** on a "Total of Displayed Rows"
+line above the header. `PB-01` re-sums `dm_pb_line` in SQL and compares. All 28
+sheet-years across the PB2026 and PB2027 books tie exactly. **`PB-01` must read
+the LINES, not `dm_pb_tieout`'s own counted and memo columns** — those come from
+the same in-memory sums as the footer figure, so a control reading them checks
+the extract against itself and passed a deliberate $1M corruption of an O-1 line.
+
+### Execution detail and execution timing answer different questions
+
+- **File B (`dm_exec_*`) cannot answer "when".** The warehouse holds **one
+  submission per fiscal year** — FY2026 at P09 — so there is no within-year series
+  in it at all. Never draw one.
+- **Timing comes from contract action dates (`dm_fpds_*`)** and is labelled as
+  contract obligations, about a fifth of Department obligations, never the whole.
+- **`fund_life` is derived from the period of availability**, not published as a
+  field, and it is the attribute that matters at a year end: annual authority
+  expires on 30 September, multi-year and no-year does not. $631.9B of FY2026
+  obligations, 51.4%, are annual. A year-end obligation rate that mixes the two
+  answers no question.
+- **From FY2026 the program activity NAME is null on every File B row.** The key
+  identifies an activity; nothing reads it. Do not borrow a name from another
+  year's row that happens to share a key.
+
+### Signals are questions, and the statistics have to be robust
+
+Every signal compares a category with **its own prior years**, never with a
+Department-wide average: these categories differ by three orders of magnitude and
+a shared threshold only ever selects the largest of them.
+
+- **Median and scaled MAD, not mean and standard deviation.** With four or five
+  observations one unusual year drags a mean far enough to hide the year after
+  it, and FY2021–22 carry supplemental money landing in months the base budget
+  does not use.
+- **Floor the scale and cap the result.** An unfloored MAD on a nearly flat
+  history produced a z of **416** — a number that says nothing except that the
+  denominator was small. Floored at 5% of the median, capped at 99, and the page
+  says a capped value means "far outside its own history" rather than a
+  measurement.
+- **A key must be present in every complete year to produce a comparative
+  signal.** A key kept in four of five years is a five-year history with the
+  *small* year missing, and dropping it inflates every deviation measured against
+  the rest.
+- **Concentration at a year end is the shape of an annual appropriation, not a
+  finding.** Publish it as the baseline the deviations are read against. Nothing
+  here observes impropriety; the page says "worth asking about" and prints the
+  evidence and the method beside every signal. Several of the largest signals are
+  certainly ordinary — a multiyear definitisation or an exercised option lands as
+  one very large action with nothing unusual in it beyond its size.
+- **Small categories need their own level.** Furniture, food and office supplies
+  cannot reach the eighty largest four-digit product codes in a $490B year, so a
+  dollar threshold quietly decides they do not exist. They get a supply-group
+  dimension and an exemplar bucket down to $250K.
+
 ### The crosswalks are derived, and say so
 
 Two joins leave the exhibits, and neither source carries the other's key:
@@ -198,7 +285,20 @@ silently in either direction.
   do not reintroduce `rejectUnauthorized: false`.
 - `npm run verify` = `tsc --noEmit && next build`. The build prerenders every
   page against the database, so a bad query or a non-serialisable prop fails the
-  build instead of the deploy. Run it before pushing.
+  build instead of the deploy. Run it before pushing. **It is not enough on its
+  own.** Route handlers under `app/api/` are never executed by a build, and a
+  page that reads `searchParams` opts out of static generation, so both can 500
+  at request time against a build that was green. Start the server and request
+  every page and every endpoint. An ambiguous column is the recurring shape of
+  this bug: `vintage` exists on `dm_program_fy` and `dm_load`, `row_count` on
+  `dm_pb_tieout` and `dm_load`. **Qualify every column in a query that joins
+  `dm_load`.**
+- **A new control is not finished until it has been made to fail.** Corrupt the
+  staged extract, re-run the load, and confirm the control catches it. Bump
+  `extracted_at` on every payload first — `dm_load` is unique on
+  `(dataset_key, vintage, extracted_at)` and a rerun otherwise dies on the insert
+  before a single control has run. This is how `PB-01` was found to be checking
+  the extract against itself.
 - Formatting crosses the server/client boundary as a **key** (`format="int"`),
   never as a function prop.
 - Vercel functions cannot scan the parquet warehouse. Do not "improve" a route by

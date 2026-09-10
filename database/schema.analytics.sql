@@ -1108,3 +1108,370 @@ ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS periods_available int;
 ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS source_rows int;
 ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS grain_rows int;
 ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS replicated_rows int;
+
+-- ===========================================================================
+-- The seven "-1" display tables, as the FY2027 request page reads them.
+--
+-- Separate from dm_exhibit_line on purpose. That table is the PROGRAM spine: it
+-- reads p1/p1r/r1 across eight books so a weapon-system budget line can be
+-- followed through its restatements, and /program, the weapons-book crosswalk
+-- and EXH-01..EXH-09 all depend on its grain. These tables are the DISPLAY
+-- spine: all seven exhibits, the latest two books, carrying the hierarchy the
+-- exhibit is printed in -- appropriation, budget activity, budget sub-activity
+-- or activity group, budget line item or sub-activity group -- so the request
+-- can be drilled into rather than listed flat.
+--
+-- The memo rules are per exhibit and each one is the source's own evidence, not
+-- a convention; the ETL header sets out all seven with what was measured for
+-- each. The one that reads like the others and is not: M-1's Include-in-TOA = N
+-- rows are five negative "Less Reimbursables" offsets that the published M-1
+-- total INCLUDES, so they are flagged is_offset and counted, while R-1's and
+-- O-1's Include-in-TOA = N rows really are outside total obligation authority
+-- and are flagged is_memo and excluded.
+CREATE TABLE IF NOT EXISTS dm_pb_line (
+  id                    bigserial PRIMARY KEY,
+  load_id               bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  pb_year               int  NOT NULL,   -- which book
+  exhibit               text NOT NULL,   -- c1 | m1 | o1 | p1 | p1r | r1 | rf1
+  sheet_name            text NOT NULL,   -- C-1 publishes one sheet per year
+  account               text NOT NULL,   -- exhibit symbol, e.g. 2020A, 493001A
+  account_main          text,            -- 2020
+  account_sub           text,            -- 01, where the symbol carries one
+  treasury_agency       text,            -- 021
+  treasury_account      text,            -- 021-2020
+  account_title         text,
+  component             text,            -- from the symbol, not the drifting Organization column
+  organization          text,            -- as published
+  budget_activity       text,
+  budget_activity_title text,
+  bsa                   text,            -- BSA, or AG/BSA on O-1 and RF-1
+  bsa_title             text,
+  line_number           text,
+  bli                   text,            -- BLI, SAG/BLI, PE/BLI, or the construction project
+  bli_title             text,
+  cost_type             text,
+  cost_type_title       text,
+  location              text,            -- C-1 only: installation, state or country
+  is_memo               boolean NOT NULL DEFAULT false,
+  is_offset             boolean NOT NULL DEFAULT false,
+  memo_reason           text,
+  include_in_toa        text,
+  fiscal_year           int  NOT NULL,
+  fy_role               text NOT NULL,   -- prior_actual | enacted | request | other
+  amount_k              numeric(20,3) NOT NULL DEFAULT 0,
+  discretionary_k       numeric(20,3) NOT NULL DEFAULT 0,
+  mandatory_k           numeric(20,3) NOT NULL DEFAULT 0,
+  quantity              numeric(16,3) NOT NULL DEFAULT 0,
+  total_column          text,
+  total_basis           text NOT NULL,
+  component_count       int  NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS dm_pb_line_year_idx
+  ON dm_pb_line (load_id, pb_year, fiscal_year, is_memo);
+CREATE INDEX IF NOT EXISTS dm_pb_line_tree_idx
+  ON dm_pb_line (load_id, pb_year, exhibit, account, budget_activity, bsa, bli);
+
+-- Every "-1" sheet states its own column totals on a "Total of Displayed Rows"
+-- line above the header. This table puts that published figure beside what the
+-- extract counted and what it set aside as memo, per sheet and fiscal year.
+-- PB-01 asserts the two agree to the dollar, which is what makes the memo rules
+-- checkable rather than merely argued: a rule that drops a row it should not
+-- stops matching the Department's own footer immediately.
+CREATE TABLE IF NOT EXISTS dm_pb_tieout (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  pb_year       int  NOT NULL,
+  exhibit       text NOT NULL,
+  sheet_name    text NOT NULL,
+  fiscal_year   int  NOT NULL,
+  published_k   numeric(20,3),           -- null where the sheet states no total
+  counted_k     numeric(20,3) NOT NULL DEFAULT 0,
+  memo_k        numeric(20,3) NOT NULL DEFAULT 0,
+  difference_k  numeric(20,3),
+  row_count     int NOT NULL DEFAULT 0,
+  UNIQUE (load_id, pb_year, exhibit, sheet_name, fiscal_year)
+);
+
+-- ===========================================================================
+-- Execution detail: File B at the grain it is reported at.
+--
+-- The rollup tables above answer "how much was obligated"; these answer "on
+-- what, out of which account, under what kind of money, and how far through the
+-- pipeline". The join key on every row is the Treasury account symbol, which is
+-- what ties this back to the Statement of Budgetary Resources and forward to
+-- the exhibit spine's treasury_account.
+--
+-- fund_life is derived, not published: it is read off the period of
+-- availability, because annual money expires on 30 September and multi-year and
+-- no-year money does not, and a year-end obligation rate that mixes the two
+-- answers no question at all. That single distinction is why this table exists
+-- in September.
+CREATE TABLE IF NOT EXISTS dm_exec_detail (
+  id                   bigserial PRIMARY KEY,
+  load_id              bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year          int  NOT NULL,
+  scope                text NOT NULL,
+  treasury_account     text NOT NULL,
+  object_class_code    text NOT NULL,
+  activity_id          text,
+  activity_kind        text,            -- code | park | collapsed | none
+  activity_count       int  NOT NULL DEFAULT 1,
+  funding_source       text,            -- D direct, R reimbursable
+  defc                 text,            -- disaster and emergency fund code
+  fund_life            text,            -- annual | multi-year (n) | no-year | unknown
+  source_rows          int  NOT NULL DEFAULT 1,
+  is_replicated        boolean NOT NULL DEFAULT false,
+  obligations          numeric(20,2) NOT NULL DEFAULT 0,
+  undelivered_unpaid   numeric(20,2) NOT NULL DEFAULT 0,
+  undelivered_unpaid_bf numeric(20,2) NOT NULL DEFAULT 0,
+  delivered_unpaid     numeric(20,2) NOT NULL DEFAULT 0,
+  gross_outlays        numeric(20,2) NOT NULL DEFAULT 0,
+  outlays_prepaid      numeric(20,2) NOT NULL DEFAULT 0,
+  outlays_paid         numeric(20,2) NOT NULL DEFAULT 0,
+  deobligations        numeric(20,2) NOT NULL DEFAULT 0,
+  upward_adjustments   numeric(20,2) NOT NULL DEFAULT 0,
+  downward_adjustments numeric(20,2) NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS dm_exec_detail_fy_idx
+  ON dm_exec_detail (load_id, fiscal_year, treasury_account);
+CREATE INDEX IF NOT EXISTS dm_exec_detail_oc_idx
+  ON dm_exec_detail (load_id, fiscal_year, object_class_code);
+
+CREATE TABLE IF NOT EXISTS dm_exec_account (
+  id                   bigserial PRIMARY KEY,
+  load_id              bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year          int  NOT NULL,
+  treasury_account     text NOT NULL,
+  treasury_account_name text,
+  federal_account      text,
+  federal_account_name text,
+  agency_code          text,
+  agency_name          text,
+  budget_function      text,
+  budget_subfunction   text,
+  fund_life            text,
+  UNIQUE (load_id, fiscal_year, treasury_account)
+);
+
+-- From the FY2026 submission the program activity NAME is null on every row --
+-- the key identifies the activity but nothing reads it. The dimension is kept
+-- so the page can say that rather than borrow a name from another year's row
+-- that happens to share a key.
+CREATE TABLE IF NOT EXISTS dm_exec_activity (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int  NOT NULL,
+  activity_id   text NOT NULL,
+  activity_kind text,
+  activity_name text,
+  UNIQUE (load_id, fiscal_year, activity_id)
+);
+
+CREATE TABLE IF NOT EXISTS dm_exec_account_fy (
+  id                   bigserial PRIMARY KEY,
+  load_id              bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year          int  NOT NULL,
+  scope                text NOT NULL,
+  treasury_account     text NOT NULL,
+  fund_life            text,
+  detail_rows          int  NOT NULL DEFAULT 0,
+  obligations          numeric(20,2) NOT NULL DEFAULT 0,
+  undelivered_unpaid   numeric(20,2) NOT NULL DEFAULT 0,
+  undelivered_unpaid_bf numeric(20,2) NOT NULL DEFAULT 0,
+  delivered_unpaid     numeric(20,2) NOT NULL DEFAULT 0,
+  gross_outlays        numeric(20,2) NOT NULL DEFAULT 0,
+  outlays_prepaid      numeric(20,2) NOT NULL DEFAULT 0,
+  outlays_paid         numeric(20,2) NOT NULL DEFAULT 0,
+  deobligations        numeric(20,2) NOT NULL DEFAULT 0,
+  upward_adjustments   numeric(20,2) NOT NULL DEFAULT 0,
+  downward_adjustments numeric(20,2) NOT NULL DEFAULT 0,
+  UNIQUE (load_id, fiscal_year, scope, treasury_account)
+);
+
+CREATE TABLE IF NOT EXISTS dm_exec_object_class_fy (
+  id                   bigserial PRIMARY KEY,
+  load_id              bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year          int  NOT NULL,
+  scope                text NOT NULL,
+  object_class_code    text NOT NULL,
+  object_class_name    text,
+  major_class          text,
+  detail_rows          int  NOT NULL DEFAULT 0,
+  obligations          numeric(20,2) NOT NULL DEFAULT 0,
+  undelivered_unpaid   numeric(20,2) NOT NULL DEFAULT 0,
+  undelivered_unpaid_bf numeric(20,2) NOT NULL DEFAULT 0,
+  delivered_unpaid     numeric(20,2) NOT NULL DEFAULT 0,
+  gross_outlays        numeric(20,2) NOT NULL DEFAULT 0,
+  outlays_prepaid      numeric(20,2) NOT NULL DEFAULT 0,
+  outlays_paid         numeric(20,2) NOT NULL DEFAULT 0,
+  deobligations        numeric(20,2) NOT NULL DEFAULT 0,
+  upward_adjustments   numeric(20,2) NOT NULL DEFAULT 0,
+  downward_adjustments numeric(20,2) NOT NULL DEFAULT 0,
+  UNIQUE (load_id, fiscal_year, scope, object_class_code)
+);
+
+CREATE TABLE IF NOT EXISTS dm_exec_fy (
+  id                 bigserial PRIMARY KEY,
+  load_id            bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year        int  NOT NULL,
+  scope              text NOT NULL,
+  submission_period  text,
+  source_rows        int  NOT NULL DEFAULT 0,
+  detail_rows        int  NOT NULL DEFAULT 0,
+  collapsed_rows     int  NOT NULL DEFAULT 0,
+  has_detail         boolean NOT NULL DEFAULT false,
+  accounts           int  NOT NULL DEFAULT 0,
+  object_classes     int  NOT NULL DEFAULT 0,
+  activities         int  NOT NULL DEFAULT 0,
+  has_activity_names boolean NOT NULL DEFAULT false,
+  obligations        numeric(20,2) NOT NULL DEFAULT 0,
+  UNIQUE (load_id, fiscal_year, scope)
+);
+
+-- ===========================================================================
+-- Execution timing, from the contract files.
+--
+-- File B holds one submission per fiscal year, so it carries no within-year
+-- series at all and cannot answer when money moved. Contract actions carry a
+-- date, so timing is answered from FPDS and labelled as what it is: contract
+-- obligations, roughly a fifth of Department obligations, not the whole.
+CREATE TABLE IF NOT EXISTS dm_fpds_day (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year    int NOT NULL,
+  day_of_fy      int NOT NULL,          -- 1 = 1 October
+  obligation     numeric(20,2) NOT NULL DEFAULT 0,
+  action_count   int NOT NULL DEFAULT 0,
+  cum_obligation numeric(20,2) NOT NULL DEFAULT 0,
+  cum_actions    int NOT NULL DEFAULT 0,
+  UNIQUE (load_id, fiscal_year, day_of_fy)
+);
+
+CREATE TABLE IF NOT EXISTS dm_fpds_month (
+  id           bigserial PRIMARY KEY,
+  load_id      bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year  int NOT NULL,
+  fy_month     int NOT NULL,            -- 1 = October, 12 = September
+  month_label  text NOT NULL,
+  dimension    text NOT NULL,
+  dim_key      text NOT NULL,
+  dim_label    text NOT NULL,
+  obligation   numeric(20,2) NOT NULL DEFAULT 0,
+  action_count int NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS dm_fpds_month_idx
+  ON dm_fpds_month (load_id, dimension, dim_key, fiscal_year, fy_month);
+
+CREATE TABLE IF NOT EXISTS dm_fpds_eoy (
+  id                bigserial PRIMARY KEY,
+  load_id           bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year       int NOT NULL,
+  dimension         text NOT NULL,
+  dim_key           text NOT NULL,
+  dim_label         text NOT NULL,
+  fy_obligation     numeric(20,2) NOT NULL DEFAULT 0,
+  fy_actions        int NOT NULL DEFAULT 0,
+  sep_obligation    numeric(20,2) NOT NULL DEFAULT 0,
+  sep_share_pct     numeric(12,4) NOT NULL DEFAULT 0,
+  q4_obligation     numeric(20,2) NOT NULL DEFAULT 0,
+  q4_share_pct      numeric(12,4) NOT NULL DEFAULT 0,
+  last5_obligation  numeric(20,2) NOT NULL DEFAULT 0,
+  last5_share_pct   numeric(12,4) NOT NULL DEFAULT 0,
+  months_observed   int NOT NULL DEFAULT 0,
+  is_complete_year  boolean NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS dm_fpds_eoy_idx
+  ON dm_fpds_eoy (load_id, dimension, fiscal_year, sep_obligation DESC);
+
+CREATE TABLE IF NOT EXISTS dm_fpds_year (
+  id                   bigserial PRIMARY KEY,
+  load_id              bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year          int NOT NULL,
+  last_day_of_fy       int NOT NULL,
+  last_action_date     date,
+  obligation           numeric(20,2) NOT NULL DEFAULT 0,
+  action_count         int NOT NULL DEFAULT 0,
+  is_complete_year     boolean NOT NULL DEFAULT false,
+  full_months_observed int NOT NULL DEFAULT 0,
+  UNIQUE (load_id, fiscal_year)
+);
+
+-- A signal is a question, not a finding. Every row carries the evidence it was
+-- computed from and the method that produced it, because a deviation from a
+-- category's own history has many innocent explanations -- a multiyear
+-- definitisation, an exercised option, a supplemental -- and the page has no
+-- way to tell them apart. Nothing here observes impropriety and the page must
+-- not write as if it does.
+CREATE TABLE IF NOT EXISTS dm_exec_signal (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  signal_kind    text NOT NULL,   -- eoy_deviation | spike | pace | new_activity | eoy_projection | eoy_concentration
+  dimension      text NOT NULL,
+  dim_key        text NOT NULL,
+  dim_label      text NOT NULL,
+  fiscal_year    int,
+  metric         numeric(20,4),
+  baseline       numeric(20,4),
+  mad            numeric(20,4),
+  deviation      numeric(12,4),   -- robust z, capped at +/-99; null where not computable
+  amount         numeric(20,2),
+  baseline_years int NOT NULL DEFAULT 0,
+  full_baseline  boolean NOT NULL DEFAULT true,
+  direction      text,
+  headline       text NOT NULL,
+  evidence       text NOT NULL,
+  method         text NOT NULL,
+  severity_rank  int NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS dm_exec_signal_idx
+  ON dm_exec_signal (load_id, signal_kind, severity_rank);
+
+CREATE TABLE IF NOT EXISTS dm_exec_executor (
+  id                     bigserial PRIMARY KEY,
+  load_id                bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year            int NOT NULL,
+  dim_key                text NOT NULL,
+  dim_label              text NOT NULL,
+  ytd_obligation         numeric(20,2) NOT NULL DEFAULT 0,
+  ytd_norm               numeric(20,2) NOT NULL DEFAULT 0,
+  pace_pct               numeric(12,4),
+  months_observed        int NOT NULL DEFAULT 0,
+  sep_share_median_pct   numeric(12,4),
+  last5_share_median_pct numeric(12,4),
+  projected_sep          numeric(20,2),
+  projected_sep_low      numeric(20,2),
+  projected_sep_high     numeric(20,2),
+  baseline_years         int NOT NULL DEFAULT 0,
+  actions_ytd            int NOT NULL DEFAULT 0,
+  rank_in_fy             int NOT NULL DEFAULT 0,
+  UNIQUE (load_id, fiscal_year, dim_key)
+);
+
+CREATE TABLE IF NOT EXISTS dm_fpds_action (
+  id                bigserial PRIMARY KEY,
+  load_id           bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year       int NOT NULL,
+  bucket            text NOT NULL,   -- largest | september | last5 | september_supplies
+  rank_in_bucket    int NOT NULL,
+  action_date       date,
+  day_of_fy         int,
+  days_to_year_end  int,
+  award_id_piid     text,
+  recipient_name    text,
+  recipient_state   text,
+  sub_agency        text,
+  office            text,
+  psc               text,
+  psc_description   text,
+  psc_class         text,
+  psc_class_label   text,
+  psc_kind          text,
+  naics_description text,
+  pricing           text,
+  competition       text,
+  action_type       text,
+  obligation        numeric(20,2) NOT NULL DEFAULT 0,
+  description       text
+);
+CREATE INDEX IF NOT EXISTS dm_fpds_action_idx
+  ON dm_fpds_action (load_id, fiscal_year, bucket, rank_in_bucket);

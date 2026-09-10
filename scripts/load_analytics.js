@@ -662,6 +662,201 @@ const CONTROLS = {
           + 'line with no link has none rather than a plausible one.'
         : `${rows[0].n} budget-line links name no evidence or no budget line.` }];
   },
+  // ---- the seven display tables ------------------------------------------
+  // PB-01 is the one that makes the memo rules on these exhibits checkable
+  // rather than merely argued: every sheet prints its own column totals, so an
+  // extract that drops a row it should not stops matching the Department's own
+  // footer straight away.
+  // The comparison is made against dm_pb_line, NOT against the counted and memo
+  // columns of dm_pb_tieout. Those two columns come from the same in-memory
+  // sums as the tieout's own footer figure, so a control reading them checks the
+  // extract's bookkeeping against itself and passes however wrong the rows that
+  // actually reach the page are. Re-summing the published lines is what makes
+  // this an assertion about the data rather than about the ETL -- and it is what
+  // a deliberate corruption of a single O-1 line proved: the earlier form of
+  // this control did not notice.
+  'PB-01': async (c) => (await c.query(`
+    WITH lines AS (
+      SELECT pb_year, exhibit, sheet_name, fiscal_year, sum(amount_k) AS got
+        FROM dm_pb_line p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+       GROUP BY 1, 2, 3, 4)
+    SELECT t.pb_year, t.exhibit, t.sheet_name, t.fiscal_year,
+           t.published_k AS expected, coalesce(lines.got, 0) AS observed
+      FROM dm_pb_tieout t JOIN dm_load l ON l.id = t.load_id AND l.is_current
+      LEFT JOIN lines ON lines.pb_year = t.pb_year AND lines.exhibit = t.exhibit
+                     AND lines.sheet_name = t.sheet_name AND lines.fiscal_year = t.fiscal_year
+     WHERE t.published_k IS NOT NULL
+     ORDER BY t.pb_year, t.exhibit, t.fiscal_year`)).rows.map((r) => {
+    const d = Math.abs(Number(r.observed) - Number(r.expected));
+    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      tolerance: 1, status: d <= 1 ? 'pass' : 'fail',
+      message: `PB${r.pb_year} ${r.exhibit.toUpperCase()} ${r.sheet_name}, FY${r.fiscal_year}: `
+        + `the published lines sum to $${(d / 1e3).toFixed(3)}M from the sheet's own published total.` };
+  }),
+  'PB-02': async (c) => (await c.query(`
+    SELECT pb_year, exhibit, fiscal_year,
+           sum(amount_k) AS expected, sum(discretionary_k) + sum(mandatory_k) AS observed
+      FROM dm_pb_line p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+     GROUP BY pb_year, exhibit, fiscal_year
+     ORDER BY pb_year, exhibit, fiscal_year`)).rows.map((r) => {
+    const d = Math.abs(Number(r.observed) - Number(r.expected));
+    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      tolerance: 1, status: d <= 1 ? 'pass' : 'fail',
+      message: `PB${r.pb_year} ${r.exhibit.toUpperCase()} FY${r.fiscal_year}: `
+        + `discretionary plus mandatory is $${(d / 1e3).toFixed(3)}M from the total.` };
+  }),
+  'PB-03': async (c) => {
+    const { rows } = await c.query(`
+      SELECT pb_year, count(*)::int AS n, coalesce(sum(amount_k),0) AS amt
+        FROM dm_pb_line p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+       WHERE exhibit = 'p1r' AND is_memo = false
+       GROUP BY pb_year ORDER BY pb_year`);
+    const held = await c.query(`
+      SELECT coalesce(sum(amount_k),0) AS amt
+        FROM dm_pb_line p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+       WHERE exhibit = 'p1r' AND fy_role = 'request'`);
+    if (!rows.length) return [{ observed: 0, expected: 0, status: 'pass',
+      message: 'No P-1R row is counted into a total. The exhibit holds $'
+        + (Number(held.rows[0].amt) / 1e6).toFixed(1) + 'B of equipment already inside the P-1 lines.' }];
+    return rows.map((r) => ({ fiscal_year: r.pb_year, observed: r.n, expected: 0, status: 'fail',
+      message: `PB${r.pb_year}: ${r.n} P-1R rows carrying $${(Number(r.amt) / 1e6).toFixed(1)}B `
+        + 'are not flagged memo and would be counted twice.' }));
+  },
+  'PB-04': async (c) => (await c.query(`
+    WITH recon AS (
+      SELECT p.pb_year, p.account, p.bli, p.fiscal_year, sum(p.amount_k) AS recon_k
+        FROM dm_pb_line p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+       WHERE p.exhibit = 'c1' AND p.memo_reason = 'c1_reconciliation_breakout'
+       GROUP BY 1,2,3,4),
+    yearsheet AS (
+      SELECT p.pb_year, p.account, p.bli, p.fiscal_year, sum(p.amount_k) AS year_k
+        FROM dm_pb_line p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+       WHERE p.exhibit = 'c1' AND p.memo_reason IS DISTINCT FROM 'c1_reconciliation_breakout'
+       GROUP BY 1,2,3,4)
+    SELECT r.pb_year, r.fiscal_year,
+           count(*)::int AS n,
+           count(*) FILTER (WHERE y.year_k IS NOT NULL AND y.year_k >= r.recon_k - 1)::int AS ok,
+           coalesce(sum(r.recon_k),0) AS recon_k
+      FROM recon r LEFT JOIN yearsheet y
+        ON y.pb_year=r.pb_year AND y.account=r.account AND y.bli=r.bli AND y.fiscal_year=r.fiscal_year
+     GROUP BY 1,2 ORDER BY 1,2`)).rows.map((r) => ({
+    fiscal_year: r.fiscal_year, observed: r.ok, expected: r.n,
+    status: r.ok === r.n ? 'pass' : 'fail',
+    message: `PB${r.pb_year} FY${r.fiscal_year}: ${r.ok} of ${r.n} reconciliation projects carrying `
+      + `$${(Number(r.recon_k) / 1e6).toFixed(2)}B are inside the year sheet at no less than the `
+      + 'reconciliation amount, so the sheet is a breakout rather than money beside it.' })),
+  'PB-05': async (c) => (await c.query(`
+    SELECT pb_year, count(*)::int AS n,
+           count(*) FILTER (WHERE treasury_account IS NOT NULL)::int AS resolved
+      FROM dm_pb_line p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+     WHERE is_memo = false
+     GROUP BY pb_year ORDER BY pb_year`)).rows.map((r) => ({
+    fiscal_year: r.pb_year, observed: r.resolved, expected: r.n,
+    status: r.resolved === r.n ? 'pass' : 'fail',
+    message: `PB${r.pb_year}: ${r.resolved} of ${r.n} counted rows resolve their exhibit account `
+      + 'symbol to a Treasury agency and account.' })),
+
+  // ---- execution detail and timing ---------------------------------------
+  // The detail is only worth having if it adds up to the figure the site
+  // already publishes. EXEC-01 is that assertion, and it is critical: a detail
+  // table that does not foot to its own total is worse than no detail table,
+  // because every drill-down built on it would disagree with the page above it.
+  'EXEC-01': async (c) => (await c.query(`
+    SELECT s.fiscal_year, s.obligations_incurred AS expected,
+           coalesce(sum(a.obligations), 0) AS observed
+      FROM dm_obligation_stage s
+      JOIN dm_load ls ON ls.id = s.load_id AND ls.is_current
+      LEFT JOIN dm_exec_account_fy a ON a.fiscal_year = s.fiscal_year AND a.scope = s.scope
+      LEFT JOIN dm_load la ON la.id = a.load_id AND la.is_current
+     WHERE s.scope = 'DOW'
+     GROUP BY s.fiscal_year, s.obligations_incurred
+     ORDER BY s.fiscal_year`)).rows.map((r) => {
+    const v = Math.abs(r.observed - r.expected) / Math.max(1, Math.abs(r.expected)) * 100;
+    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      tolerance: 0.01, variance_pct: v, status: v <= 0.01 ? 'pass' : 'fail',
+      message: `FY${r.fiscal_year}: account-level File B detail is ${v.toFixed(4)}% from the `
+        + 'Department obligation total the execution page publishes.' };
+  }),
+  'EXEC-02': async (c) => (await c.query(`
+    SELECT f.fiscal_year, f.obligations AS expected,
+           coalesce(sum(d.obligations), 0) AS observed, f.detail_rows, f.collapsed_rows
+      FROM dm_exec_fy f
+      JOIN dm_load lf ON lf.id = f.load_id AND lf.is_current
+      LEFT JOIN dm_exec_detail d ON d.fiscal_year = f.fiscal_year AND d.scope = f.scope
+      LEFT JOIN dm_load ld ON ld.id = d.load_id AND ld.is_current
+     WHERE f.scope = 'DOW' AND f.has_detail
+     GROUP BY f.fiscal_year, f.obligations, f.detail_rows, f.collapsed_rows
+     ORDER BY f.fiscal_year`)).rows.map((r) => {
+    const v = Math.abs(r.observed - r.expected) / Math.max(1, Math.abs(r.expected)) * 100;
+    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      tolerance: 0.01, variance_pct: v, status: v <= 0.01 ? 'pass' : 'fail',
+      message: `FY${r.fiscal_year}: ${Number(r.detail_rows).toLocaleString()} detail rows `
+        + `(${Number(r.collapsed_rows).toLocaleString()} PARK-replicated source rows counted once) `
+        + `sum to within ${v.toFixed(4)}% of the year's obligations.` };
+  }),
+  // Not a pass/fail on the Department: a measurement of how much of the year's
+  // money this extract can say expires on 30 September and how much it cannot.
+  'EXEC-03': async (c) => (await c.query(`
+    SELECT fiscal_year, sum(obligations) AS total,
+           sum(obligations) FILTER (WHERE fund_life = 'unknown') AS unknown,
+           sum(obligations) FILTER (WHERE fund_life = 'annual') AS annual
+      FROM dm_exec_account_fy a JOIN dm_load l ON l.id = a.load_id AND l.is_current
+     WHERE scope = 'DOW' GROUP BY fiscal_year ORDER BY fiscal_year`)).rows.map((r) => {
+    const unk = Number(r.unknown || 0), tot = Number(r.total || 1);
+    const pct = Math.abs(unk / tot * 100);
+    return { fiscal_year: r.fiscal_year, observed: unk, expected: 0, tolerance: 1,
+      variance_pct: pct, status: pct <= 1 ? 'pass' : 'fail',
+      message: `FY${r.fiscal_year}: $${(Number(r.annual || 0) / 1e9).toFixed(1)}B of obligations are `
+        + `on annual authority that expires 30 September; ${pct.toFixed(2)}% of the year could not `
+        + 'have its period of availability resolved.' };
+  }),
+  // The daily curve is the spine of every pace and year-end figure on the
+  // execution page. If it does not foot to the contract total the site already
+  // publishes, every projection drawn from it is wrong by the same amount.
+  'TIME-01': async (c) => (await c.query(`
+    SELECT y.fiscal_year, a.obligation AS expected, y.obligation AS observed,
+           y.last_day_of_fy, y.is_complete_year
+      FROM dm_fpds_year y JOIN dm_load ly ON ly.id = y.load_id AND ly.is_current
+      JOIN dm_award_fy a ON a.fiscal_year = y.fiscal_year
+      JOIN dm_load la ON la.id = a.load_id AND la.is_current
+     ORDER BY y.fiscal_year`)).rows.map((r) => {
+    const v = Math.abs(r.observed - r.expected) / Math.max(1, Math.abs(r.expected)) * 100;
+    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      tolerance: 0.01, variance_pct: v, status: v <= 0.01 ? 'pass' : 'fail',
+      message: `FY${r.fiscal_year}: the day-by-day curve sums to within ${v.toFixed(4)}% of the `
+        + `contract obligation total, through day ${r.last_day_of_fy}`
+        + `${r.is_complete_year ? '' : ' (year in progress)'}.` };
+  }),
+  // A signal computed against fewer than three of a category's own years is an
+  // anecdote with a z-score printed on it.
+  'TIME-02': async (c) => {
+    const { rows } = await c.query(`
+      SELECT count(*)::int AS n,
+             count(*) FILTER (WHERE baseline_years >= 3)::int AS ok,
+             count(*) FILTER (WHERE evidence = '' OR method = '')::int AS bare,
+             count(*) FILTER (WHERE abs(deviation) >= 99)::int AS capped
+        FROM dm_exec_signal s JOIN dm_load l ON l.id = s.load_id AND l.is_current`);
+    const r = rows[0];
+    if (!r || !r.n) return [];
+    return [{ observed: r.ok, expected: r.n,
+      status: (r.ok === r.n && r.bare === 0) ? 'pass' : 'fail',
+      message: `${r.ok} of ${r.n} signals are computed against at least three of the category's own `
+        + `years and every one names its evidence and method; ${r.capped} report a deviation at the `
+        + 'cap, which means far outside the category’s own history rather than a measurement.' }];
+  },
+  // The live year is shorter than the years it is compared with, and saying so
+  // is the whole difference between a pace figure and a false decline.
+  'TIME-03': async (c) => (await c.query(`
+    SELECT fiscal_year, is_complete_year, last_day_of_fy, full_months_observed,
+           to_char(last_action_date,'YYYY-MM-DD') AS last_date
+      FROM dm_fpds_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+     ORDER BY fiscal_year`)).rows.map((r) => ({
+    fiscal_year: r.fiscal_year, observed: r.last_day_of_fy,
+    expected: r.is_complete_year ? r.last_day_of_fy : null,
+    status: (r.is_complete_year === (r.last_day_of_fy >= 360)) ? 'pass' : 'fail',
+    message: `FY${r.fiscal_year}: ${r.is_complete_year ? 'complete' : 'in progress'}, last action `
+      + `${r.last_date}, ${r.full_months_observed} whole fiscal months observed.` })),
+
 };
 
 // -------------------------------------------------------------------- main --
@@ -710,6 +905,9 @@ const CONTROLS = {
       ['filec.json',      'file_c_reconciliation', 'scripts/etl_analytics.py --step filec'],
       ['assistance.json', 'assistance_awards',     'scripts/etl_analytics.py --step assistance'],
       ['exhibits.json',   'budget_exhibits',       'scripts/etl_analytics.py --step exhibits'],
+      ['pb_display.json', 'pb_display',            'scripts/etl_analytics.py --step pb_display'],
+      ['execution.json',  'file_b_detail',         'scripts/etl_analytics.py --step execution'],
+      ['timing.json',     'contract_timing',       'scripts/etl_analytics.py --step timing'],
       ['program.json',    'program_execution',     'scripts/etl_analytics.py --step program'],
       ['crosswalk.json',  'budget_execution_crosswalk', 'scripts/etl_analytics.py --step crosswalk'],
       ['knowledge.json',  'knowledge_bank',        'scripts/etl_analytics.py --step knowledge'],
@@ -773,6 +971,49 @@ const CONTROLS = {
         'fiscal_year','fy_role','amount_m','quantity','total_basis','component_count','coverage_note'],
       dm_weapon_alias: ['alias','alias_norm','weapon_program','pb_year','designator_norm','linked_lines',
         'match_method','match_evidence'],
+      dm_exec_detail: ['fiscal_year','scope','treasury_account','object_class_code','activity_id',
+        'activity_kind','activity_count','funding_source','defc','fund_life','source_rows',
+        'is_replicated','obligations','undelivered_unpaid','undelivered_unpaid_bf','delivered_unpaid',
+        'gross_outlays','outlays_prepaid','outlays_paid','deobligations','upward_adjustments',
+        'downward_adjustments'],
+      dm_exec_account: ['fiscal_year','treasury_account','treasury_account_name','federal_account',
+        'federal_account_name','agency_code','agency_name','budget_function','budget_subfunction','fund_life'],
+      dm_exec_activity: ['fiscal_year','activity_id','activity_kind','activity_name'],
+      dm_exec_account_fy: ['fiscal_year','scope','treasury_account','fund_life','detail_rows',
+        'obligations','undelivered_unpaid','undelivered_unpaid_bf','delivered_unpaid','gross_outlays',
+        'outlays_prepaid','outlays_paid','deobligations','upward_adjustments','downward_adjustments'],
+      dm_exec_object_class_fy: ['fiscal_year','scope','object_class_code','object_class_name',
+        'major_class','detail_rows','obligations','undelivered_unpaid','undelivered_unpaid_bf',
+        'delivered_unpaid','gross_outlays','outlays_prepaid','outlays_paid','deobligations',
+        'upward_adjustments','downward_adjustments'],
+      dm_exec_fy: ['fiscal_year','scope','submission_period','source_rows','detail_rows',
+        'collapsed_rows','has_detail','accounts','object_classes','activities','has_activity_names','obligations'],
+      dm_fpds_day: ['fiscal_year','day_of_fy','obligation','action_count','cum_obligation','cum_actions'],
+      dm_fpds_month: ['fiscal_year','fy_month','month_label','dimension','dim_key','dim_label',
+        'obligation','action_count'],
+      dm_fpds_eoy: ['fiscal_year','dimension','dim_key','dim_label','fy_obligation','fy_actions',
+        'sep_obligation','sep_share_pct','q4_obligation','q4_share_pct','last5_obligation',
+        'last5_share_pct','months_observed','is_complete_year'],
+      dm_fpds_year: ['fiscal_year','last_day_of_fy','last_action_date','obligation','action_count',
+        'is_complete_year','full_months_observed'],
+      dm_exec_signal: ['signal_kind','dimension','dim_key','dim_label','fiscal_year','metric',
+        'baseline','mad','deviation','amount','baseline_years','full_baseline','direction',
+        'headline','evidence','method','severity_rank'],
+      dm_exec_executor: ['fiscal_year','dim_key','dim_label','ytd_obligation','ytd_norm','pace_pct',
+        'months_observed','sep_share_median_pct','last5_share_median_pct','projected_sep',
+        'projected_sep_low','projected_sep_high','baseline_years','actions_ytd','rank_in_fy'],
+      dm_fpds_action: ['fiscal_year','bucket','rank_in_bucket','action_date','day_of_fy',
+        'days_to_year_end','award_id_piid','recipient_name','recipient_state','sub_agency','office',
+        'psc','psc_description','psc_class','psc_class_label','psc_kind','naics_description',
+        'pricing','competition','action_type','obligation','description'],
+      dm_pb_line: ['pb_year','exhibit','sheet_name','account','account_main','account_sub',
+        'treasury_agency','treasury_account','account_title','component','organization',
+        'budget_activity','budget_activity_title','bsa','bsa_title','line_number','bli','bli_title',
+        'cost_type','cost_type_title','location','is_memo','is_offset','memo_reason','include_in_toa',
+        'fiscal_year','fy_role','amount_k','discretionary_k','mandatory_k','quantity',
+        'total_column','total_basis','component_count'],
+      dm_pb_tieout: ['pb_year','exhibit','sheet_name','fiscal_year','published_k','counted_k',
+        'memo_k','difference_k','row_count'],
       dm_exhibit_tieout: ['pb_year','measure','exhibit','published_b','citation'],
       dm_exhibit_program_link: ['exhibit','account','bli','treasury_account','bli_title',
         'program_code','program_name','is_featured','match_method','match_evidence'],

@@ -3,20 +3,13 @@
 // ---------------------------------------------------------------------------
 // Formatting helpers (amounts are DOLLARS; DB was $K, already x1000 server-side).
 // ---------------------------------------------------------------------------
-export function fmtT(n: number): string {
-  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
-  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
-  return `$${n.toFixed(0)}`;
-}
-
-export function fmtM(n: number): string {
-  return `$${(n / 1e6).toFixed(1)}M`;
-}
-
-export function fmtPct(n: number): string {
-  return `${n.toFixed(1)}%`;
-}
+// Money formatting is the site's, not this component's. The local copy tested
+// only the positive branches, so a negative figure -- a "Less: Advance
+// Procurement (PY)" row, an M-1 reimbursable offset -- fell through every case
+// and printed as "$-549000000": the raw number, unscaled, which is what the
+// long strings of zeros on this page were.
+import { fmtT, fmtM, fmtPct } from '@/components/format';
+export { fmtT, fmtM, fmtPct };
 
 export function fmtBytes(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;

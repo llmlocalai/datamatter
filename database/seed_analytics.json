@@ -51,9 +51,9 @@
       "source_system": "USASpending financial assistance archive, Department of War / Department of Defense awarding agency",
       "source_path": "data/usaspending/warehouse/assistance",
       "grain": "Assistance transaction x fiscal year x vintage",
-      "description": "Federal action obligations for DoW financial-assistance awards — cooperative agreements, project and formula grants, and direct payments. A separate warehouse tree and reporting chain from contracts and File C; not account-linked and not reconciled against anything.",
+      "description": "Federal action obligations for DoW financial-assistance awards \u2014 cooperative agreements, project and formula grants, and direct payments. A separate warehouse tree and reporting chain from contracts and File C; not account-linked and not reconciled against anything.",
       "refresh_cadence": "as vintaged (two vintages currently retained)",
-      "limitations": "Rows are filtered to awarding-agency name ‘Department of Defense’ or ‘Department of War’ rather than an agency-identifier code, because this warehouse cut carries no code column. The assistance-type codes present are cooperative agreements, grants and direct payments — no loan or loan-guarantee type codes appear in this cut, so it is not a credit-programs picture and must not be described as one. Only two vintages are retained so far; vintage drift is measurable but thin.",
+      "limitations": "Rows are filtered to awarding-agency name \u2018Department of Defense\u2019 or \u2018Department of War\u2019 rather than an agency-identifier code, because this warehouse cut carries no code column. The assistance-type codes present are cooperative agreements, grants and direct payments \u2014 no loan or loan-guarantee type codes appear in this cut, so it is not a credit-programs picture and must not be described as one. Only two vintages are retained so far; vintage drift is measurable but thin.",
       "sort_order": 35
     },
     {
@@ -132,6 +132,39 @@
       "refresh_cadence": "annual, on publication of each President's Budget",
       "limitations": "Read from the published PDFs by layout extraction, so a table section keeps its source spacing rather than being re-tabulated. Covers the Defense-Wide RDT&E volumes only; military department books and other appropriations are not yet parsed.",
       "sort_order": 96
+    },
+    {
+      "key": "pb_display",
+      "label": "President's Budget \"-1\" display tables, all seven exhibits",
+      "source_system": "DoD Comptroller budget materials, FY2026 and FY2027 President's Budget",
+      "source_path": "knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification/_Archive",
+      "grain": "book x exhibit x appropriation x budget activity x sub-activity x budget line item x fiscal year",
+      "description": "All seven \"-1\" display tables -- C-1, M-1, O-1, P-1, P-1R, R-1, RF-1 -- for the latest two President's Budget books, keeping the hierarchy the exhibit is printed in so the request can be drilled into rather than listed flat. Each row carries the fiscal year's total, its mandatory half, the column the figure came from, and whether the row is money, a negative offset the published total includes, or a memo restatement that must never be summed.",
+      "refresh_cadence": "annual, on publication of each President's Budget",
+      "limitations": "A display table is what is being asked for, not what was executed or enacted; the FY(pb-1) column is an enacted position as of the book's own cut-off and is restated in the following book. The seven exhibits do not add to a Departmental topline: P-1R restates equipment already inside P-1, and RF-1 covers revolving funds outside the appropriation titles. Discretionary is derived as the year's total minus its mandatory columns, because several exhibits publish alternative measures of the same money side by side rather than components of a sum.",
+      "sort_order": 97
+    },
+    {
+      "key": "file_b_detail",
+      "label": "File B execution detail (object class, program activity, expenditure stage)",
+      "source_system": "USASpending account breakdown by program activity and object class (File B)",
+      "source_path": "data/usaspending/warehouse/accounts/file_b",
+      "grain": "fiscal year x Treasury account x object class x program activity x direct or reimbursable x emergency fund code",
+      "description": "File B published at the grain it is reported at rather than as one row per fiscal year: obligations, undelivered and delivered orders unpaid, prepaid and paid outlays, deobligations, and the upward and downward adjustments to prior-year orders, for every Treasury account in Department scope. Each account carries the period of availability read as a fund life, because annual authority expires on 30 September and multi-year and no-year authority does not.",
+      "refresh_cadence": "monthly, as the Department's submissions are published",
+      "limitations": "One submission per fiscal year is held, so there is no within-year series: FY2026 is period-to-date at P09 and is not comparable with a closed year without saying so. From the FY2026 submission the program activity name is null on every row, so an activity can be identified by its reporting key but not read. Rows that differ only by reporting key and repeat one figure are counted once, which is a repair of a source defect rather than a property of the file. Detail is carried for the three most recent fiscal years; earlier years are held as account and object-class rollups.",
+      "sort_order": 98
+    },
+    {
+      "key": "contract_timing",
+      "label": "Contract execution timing and year-end signals",
+      "source_system": "USASpending contract award files (FPDS-NG)",
+      "source_path": "data/usaspending/warehouse/contracts",
+      "grain": "fiscal year x day, and fiscal year x month x category",
+      "description": "When contract obligations moved: the day-by-day cumulative curve for each fiscal year, monthly totals by awarding sub-agency, office, product or service code and supply group, recipient, pricing type and extent of competition, the September and final-five-day concentration of each category, and a set of signals computed against each category's own prior years.",
+      "refresh_cadence": "monthly, with each warehouse vintage",
+      "limitations": "Contract obligations are about a fifth of Department obligations and are not the whole of execution. A signal is a question rather than a finding: none of them observes impropriety, and a large September action is very often a multiyear definitisation or an exercised option with nothing unusual in it beyond its size. Deviations are measured against a category's own history, so a category held in fewer than three complete years produces none. The live fiscal year is shorter than the years it is compared with and every comparison is made over whole months only.",
+      "sort_order": 99
     }
   ],
   "controls": [
@@ -418,10 +451,109 @@
       "code": "FILEC-02",
       "name": "How far the linkage figure moves between snapshots of the same year",
       "assertion": "For each fiscal year, the linkage percentage is computed from every substantive File C snapshot held and the spread between the highest and lowest is published. A spread wider than a factor of two is reported as a finding.",
-      "rationale": "This control measures the size of the choice FILEC-01 exposes. Reading FY2022 at period 3 gives 1.4% linkage and at period 12 gives 11.6% — the same warehouse, the same year, an eight-fold difference. Where the spread is that wide, comparing one year's figure with another's is comparing two arbitrary picks, and a falling or rising line drawn through them measures the picks rather than the Department. The control does not fail because the data is wrong; it fails to stop the site asserting a trend the files cannot carry. It must never be satisfied by narrowing the series until the spread closes.",
+      "rationale": "This control measures the size of the choice FILEC-01 exposes. Reading FY2022 at period 3 gives 1.4% linkage and at period 12 gives 11.6% \u2014 the same warehouse, the same year, an eight-fold difference. Where the spread is that wide, comparing one year's figure with another's is comparing two arbitrary picks, and a falling or rising line drawn through them measures the picks rather than the Department. The control does not fail because the data is wrong; it fails to stop the site asserting a trend the files cannot carry. It must never be satisfied by narrowing the series until the spread closes.",
       "authority": "DATA Act File C (award financial); FPDS-NG contract actions",
       "severity": "high",
       "sort_order": 310
+    },
+    {
+      "code": "PB-01",
+      "name": "Each display sheet foots to the total the workbook prints on it",
+      "assertion": "For every exhibit sheet and fiscal year, the rows counted into total obligation authority plus the rows set aside as memo equal the 'Total of Displayed Rows' figure the workbook itself states for that column, to within one thousand dollars.",
+      "rationale": "The memo rules on these seven exhibits are not one rule -- P-1R is a whole memo exhibit, P-1 hides memo cost types and an advance-procurement subtotal inside Add rows, R-1 and O-1 put rows outside total obligation authority, C-1 publishes a reconciliation breakout of projects already in the year sheet, and M-1's identically-flagged rows are negative reimbursable offsets the published total includes. Argued one at a time they are assertions. Checked against the footer the Department prints on each sheet they are verifiable: a rule that drops a row it should not, or keeps one it should not, stops matching immediately. Twenty-eight sheet-years across the FY2026 and FY2027 books tie exactly, and the single failure found while building this control was a real row -- $24K on account 5286A with every line-item column blank -- that a 'skip rows with no line item' guard was silently discarding.",
+      "authority": "DoD Comptroller \"-1\" display workbooks, 'Total of Displayed Rows' line",
+      "severity": "critical",
+      "sort_order": 320
+    },
+    {
+      "code": "PB-02",
+      "name": "Discretionary and mandatory foot to the year's total",
+      "assertion": "For every exhibit and fiscal year, the sum of the discretionary and mandatory figures equals the sum of the totals, to within one thousand dollars.",
+      "rationale": "Discretionary is derived by subtracting the mandatory columns from the year's total rather than by adding the columns that look discretionary. Several exhibits publish alternative measures of one figure side by side -- C-1 prints Authorization, Authorization of Appropriation, Appropriation and Total Obligation Authority for the same project -- and adding those as components put every construction project's discretionary figure at three times its own total. This control is what stops that class of error returning: subtraction cannot produce a split that does not foot, so a failure here means the total column itself was picked wrongly.",
+      "authority": "DoD Comptroller \"-1\" display workbooks",
+      "severity": "critical",
+      "sort_order": 321
+    },
+    {
+      "code": "PB-03",
+      "name": "P-1R never enters a counted total",
+      "assertion": "No P-1R row is counted into total obligation authority in any book or fiscal year.",
+      "rationale": "The P-1R exhibit is National Guard and Reserve equipment already carried inside the P-1 lines. It is retained rather than dropped so its absence from a total can be explained on the page, but a single unflagged row would add its money to procurement twice. The FY2027 book puts $6.6B in this exhibit.",
+      "authority": "DoD Comptroller P-1R exhibit, cost types marked (MEMO NON ADD)",
+      "severity": "high",
+      "sort_order": 322
+    },
+    {
+      "code": "PB-04",
+      "name": "Every C-1 reconciliation project is inside its year sheet, not beside it",
+      "assertion": "Every project on a C-1 Mandatory Reconciliation sheet appears in that fiscal year's C-1 sheet, and the year sheet's amount is at least the reconciliation amount.",
+      "rationale": "The reconciliation sheets look like additional money and are not: on the FY2027 book all 25 projects appear in the FY 2027 sheet, 19 at the identical amount and 6 as part of a larger project total. Adding the sheet would have counted $2.68B twice in FY2027 and $4.90B in FY2026. This control is the evidence for treating those sheets as a breakout, and it fails the moment a future book stops behaving that way -- which is exactly when the rule would need revisiting.",
+      "authority": "DoD Comptroller C-1 display workbook, year sheets and Mandatory Reconciliation sheets",
+      "severity": "high",
+      "sort_order": 323
+    },
+    {
+      "code": "PB-05",
+      "name": "Every counted display row resolves to a Treasury account",
+      "assertion": "Every row counted into total obligation authority carries an exhibit account symbol that resolves to a Treasury agency and account.",
+      "rationale": "The account symbol is the only key these display tables share with the execution files, and the organisation letter is the whole of the difference between '2020A' and '021-2020'. A row that does not resolve is a row the request can be read for but never traced to what was obligated against it, so the count is published rather than left as a silent gap in every crosswalk downstream.",
+      "authority": "DoD Comptroller \"-1\" display workbooks; Treasury Account Symbol structure",
+      "severity": "moderate",
+      "sort_order": 324
+    },
+    {
+      "code": "EXEC-01",
+      "name": "File B detail adds up to the obligation total the site publishes",
+      "assertion": "For every fiscal year, the sum of obligations across the account-level File B extract equals the Department obligation total already published on the execution page, to within 0.01%.",
+      "rationale": "A detail table that does not foot to its own total is worse than no detail table: every drill-down built on it would quietly disagree with the figure printed above it, and a reader has no way to tell which of the two is wrong. The detail and the total are produced by the same grain and replication rules, so any difference here means those rules were applied twice differently.",
+      "authority": "USASpending File B; DoD FY2025 Agency Financial Report",
+      "severity": "critical",
+      "sort_order": 330
+    },
+    {
+      "code": "EXEC-02",
+      "name": "Every detail row is counted once",
+      "assertion": "For each fiscal year carrying detail, the sum of obligations across detail rows equals that year's obligation total, to within 0.01%.",
+      "rationale": "From the FY2026 submission File B identifies a program activity by reporting key rather than by code, and where an account holds several keys it repeats the account's object-class figure against each one instead of splitting it. At detail grain that defect is worse than in a total: a drill-down would show the same money under four different keys and a reader would have no way to know. Rows that differ only by reporting key and repeat one figure become one row, and this control is what proves the collapse neither lost nor duplicated a dollar.",
+      "authority": "USASpending File B, FY2026 P09 submission",
+      "severity": "critical",
+      "sort_order": 331
+    },
+    {
+      "code": "EXEC-03",
+      "name": "How much of the year expires on 30 September",
+      "assertion": "For each fiscal year, obligations are split by period of availability and the share whose availability could not be resolved is published; more than 1% unresolved is reported.",
+      "rationale": "Annual appropriations expire on 30 September and cannot be obligated afterwards; multi-year and no-year authority can. It is the single most decision-relevant attribute in the file in September and it is not published as a field -- it has to be read off the beginning and ending periods of availability. An obligation rate that mixes the two answers no question at all, so the split is measured and the unresolved remainder is stated rather than folded into either side.",
+      "authority": "31 U.S.C. 1502; DoD FMR Volume 3",
+      "severity": "moderate",
+      "sort_order": 332
+    },
+    {
+      "code": "TIME-01",
+      "name": "The day-by-day curve foots to the contract obligation total",
+      "assertion": "For every fiscal year, the sum of the daily contract obligation curve equals the contract obligation total published for that year, to within 0.01%.",
+      "rationale": "The daily curve is the spine of every pace comparison, year-end share and September projection on the execution page. If it does not foot to the total the site already publishes, every figure drawn from it is wrong by the same amount and none of them would look wrong on their own.",
+      "authority": "USASpending contract award files (FPDS-NG)",
+      "severity": "critical",
+      "sort_order": 333
+    },
+    {
+      "code": "TIME-02",
+      "name": "Every signal names its baseline, its evidence and its method",
+      "assertion": "Every execution signal is computed against at least three of its own category's fiscal years, and every one carries the evidence it was computed from and the method that produced it.",
+      "rationale": "A deviation measured against one or two prior years is an anecdote with a z-score printed on it. Three is the minimum at which a median means anything, and a signal that cannot name the years behind it cannot be argued with. The deviation is also capped: a category whose prior years are nearly identical has a scale near zero, and dividing by it produced a z of 416 -- a number that says nothing except that the denominator was small. A capped value means far outside the category's own history, and the page says so rather than printing it as a measurement.",
+      "authority": "Robust statistics: median and scaled median absolute deviation",
+      "severity": "high",
+      "sort_order": 334
+    },
+    {
+      "code": "TIME-03",
+      "name": "The year in progress is marked, everywhere",
+      "assertion": "Every fiscal year records whether it is complete, the last action date observed, and how many whole fiscal months it covers, and the completeness flag agrees with the observed day count.",
+      "rationale": "The live fiscal year is shorter than the years it is compared with. Reading its total beside a closed year's shows a collapse that is only the calendar, and it is the easiest mistake on the site to make silently. Every pace comparison here runs over whole months only, and this control is what guarantees the page has the information it needs to say so.",
+      "authority": "USASpending contract award files; submission period conventions",
+      "severity": "high",
+      "sort_order": 335
     }
   ],
   "audit_posture": {
@@ -534,7 +666,7 @@
         "metric_value": 28,
         "value_kind": "count",
         "citation": "DoD OIG report DODIG-2026-032, prior-year comparison as reported",
-        "note": "Carried here only to show the FY2025 auditor-identified count moved by −2 year over year. Verified 2026-09-08.",
+        "note": "Carried here only to show the FY2025 auditor-identified count moved by \u22122 year over year. Verified 2026-09-08.",
         "sort_order": 96
       },
       {
@@ -604,7 +736,7 @@
         "value_kind": "text",
         "value_text": "Established March 2026",
         "citation": "GAO-26-109115",
-        "note": "A centralized, substantive-testing effort — validating account balances directly rather than relying primarily on remediated internal controls — that supersedes the prior decentralized FIAR remediation approach for this push toward a clean opinion. GAO's report raises open questions about this approach; see the strategy section on this page. Verified 2026-09-08.",
+        "note": "A centralized, substantive-testing effort \u2014 validating account balances directly rather than relying primarily on remediated internal controls \u2014 that supersedes the prior decentralized FIAR remediation approach for this push toward a clean opinion. GAO's report raises open questions about this approach; see the strategy section on this page. Verified 2026-09-08.",
         "sort_order": 103
       },
       {

@@ -16,8 +16,8 @@ export const revalidate = 900;
 
 const PRODUCTS = [
   { href: '/execution', title: 'Budget to execution',
-    desc: 'Appropriated authority through obligation, undelivered and delivered orders, and outlay — with the variance at each hand-off stated.',
-    tag: 'Statement of Budgetary Resources' },
+    desc: 'The fiscal year in progress: authority through obligation and outlay, File B at object-class and expenditure-stage grain, and contract timing measured against each category’s own year-end history.',
+    tag: 'The year that is running' },
   { href: '/reconciliation', title: 'Reconciliation',
     desc: 'Award-file contract obligations against account-linked File C, and the movement of closed fiscal years between warehouse vintages.',
     tag: 'Two reporting chains' },
@@ -28,7 +28,7 @@ const PRODUCTS = [
     desc: 'Contract obligations by set-aside, extent competed, recipient and industry — with those first two kept as the separate fields they are.',
     tag: 'FPDS award files' },
   { href: '/budget', title: 'FY2027 request',
-    desc: 'The seven "-1" display tables, de-duplicated to their canonical sheets, with a line-item explorer and the source documents.',
+    desc: 'The seven "-1" display tables drilled from appropriation to budget activity, sub-activity and budget line item, with every memo restatement excluded and stated.',
     tag: 'Justification exhibits' },
   { href: '/audit', title: 'Audit posture',
     desc: 'Opinion, material weakness counts and scope limitations, read from the Agency Financial Report rather than inferred from file counts.',

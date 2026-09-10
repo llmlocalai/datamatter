@@ -17,6 +17,9 @@ Steps (run all with --step all):
   filec       File C  -> account-linked contract obligations + reconciliation
   assistance  DoD financial-assistance warehouse -> FY totals, dimensions, vintage drift
   exhibits    President's Budget -1 exhibits (FY2020-FY2027) -> the program spine
+  pb_display  all seven -1 display tables, latest books -> the FY2027 request page
+  execution   File B at reported grain -> account x object class x activity detail
+  timing      contract action dates -> daily pace, year-end concentration, signals
   program     contracts + File C -> program-level execution and account traceability
   knowledge   wiki + knowledge-bank folders -> definitions, inventory, hearings
   controls    control tests over everything already staged
@@ -2778,8 +2781,1166 @@ def step_jbook(out):
            "dm_jbook_skeleton": skel, "dm_jbook_style": style},
           source_path="knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification"))
 
+# ------------------------------------------------- the seven display tables ---
+# /budget shows the FY2027 President's Budget request as the Department displays
+# it: seven "-1" tables, each one an appropriation title. The exhibit spine above
+# reads only p1/p1r/r1, because it exists to follow a weapon-system budget line
+# across eight books. This step reads all seven, for the latest books only, and
+# keeps the DISPLAY HIERARCHY -- appropriation, budget activity, budget
+# sub-activity, budget line item -- because that is the structure a budget
+# analyst navigates and the earlier page flattened it to the account, which made
+# 1,138 P-1 lines look like the same Treasury symbol repeated 1,138 times.
+#
+# WHAT COUNTS AND WHAT RESTATES. There is no single flag for this: the same
+# column means different things in different exhibits, and the difference is not
+# stylistic. Each rule below is the source's own evidence, not a convention:
+#
+#   p1r, whole exhibit          National Guard and Reserve equipment already
+#                               inside the P-1 lines. Verified PB2020-PB2027.
+#   P-1 "(MEMO NON ADD)"        a line restating its own money by ship class or
+#     cost types                variant, inside a row otherwise flagged Add.
+#   P-1 Advance Procurement     the subtotal of that line's own "C (FY x for
+#     (CY) subtotal             FY y) (M)" rows; keeping both put PB2026
+#                               procurement $14.4B above the published figure.
+#   R-1 Include in TOA = N      rows outside total obligation authority.
+#   O-1 Include in TOA = N      the Indefinite Accounts block. The workbook
+#                               itself settles this: it publishes "OM Title" and
+#                               "OM Title plus Indefinite" as two sheets, and the
+#                               difference is exactly these rows.
+#   C-1 Mandatory Reconciliation  a BREAKOUT of projects already in that year's
+#     sheets                    sheet, not money beside it. Measured on the
+#                               FY2027 book: all 25 reconciliation projects
+#                               appear in the FY 2027 sheet, 19 at the identical
+#                               amount and 6 as part of a larger project total.
+#                               Adding the sheet would count $2.68B twice.
+#
+# And one rule that reads like the others and is NOT the same:
+#
+#   M-1 Include in TOA = N      five "Less Reimbursables" rows carrying NEGATIVE
+#                               amounts, which the published M-1 total INCLUDES.
+#                               Excluding them raises military personnel by
+#                               $1.39B in FY2027. They are flagged is_offset and
+#                               counted.
+#
+# Taking "Include in TOA = N" as one rule across the seven exhibits is therefore
+# wrong in two directions at once, and nothing in the column itself says so.
+#
+# THE TIE-OUT IS PUBLISHED IN THE WORKBOOK. Every sheet carries a "Total of
+# Displayed Rows" line above its header, stating that sheet's own column totals.
+# dm_pb_tieout records, per exhibit and fiscal year, what that line says against
+# what this extract counted plus what it flagged memo. PB-01 asserts the two
+# agree to the dollar, which is what makes the memo rules checkable rather than
+# merely argued: if a rule drops a row it should not, the sum stops matching the
+# Department's own footer.
+PB_EXHIBITS = ("m1", "o1", "p1", "p1r", "r1", "rf1", "c1")
+PB_EXHIBIT_META = {
+    "m1":  ("M-1",  "Military Personnel"),
+    "o1":  ("O-1",  "Operation and Maintenance"),
+    "p1":  ("P-1",  "Procurement"),
+    "p1r": ("P-1R", "Procurement, National Guard and Reserve equipment"),
+    "r1":  ("R-1",  "Research, Development, Test and Evaluation"),
+    "rf1": ("RF-1", "Revolving and Management Funds"),
+    "c1":  ("C-1",  "Military Construction and Family Housing"),
+}
+# How many books back to read. The page shows the newest; the one before it is
+# what makes a restatement visible without carrying eight books of O&M detail.
+PB_DISPLAY_YEARS = (2026, 2027)
+
+# Header aliases for the display tables. The four exhibits the spine does not
+# read name their line item differently -- O-1 and RF-1 use SAG/BLI over an
+# AG/BSA, M-1 has no line item below the sub-activity at all, and C-1's leaf is a
+# construction project -- so the alias list is ordered from most specific to
+# least and the first hit wins. "bsa" is last in the bli list precisely so that
+# it only fires for M-1, where the sub-activity IS the leaf.
+PB_COLS = {
+    "bli":   ("budgetlineitem", "lineitem", "pebli", "sagbli", "constructionproject", "bsa"),
+    "title": ("budgetlineitem(bli)title", "lineitemtitle",
+              "programelementbudgetlineitem(bli)title",
+              "sagbudgetlineitem(bli)title", "constructionprojecttitle",
+              "budgetsubactivity(bsa)title"),
+    "add": ("addnonadd",), "toa": ("includeintoa",), "org": ("organization",),
+    "acct_title": ("accounttitle",), "ba": ("budgetactivity",), "ba_title": ("budgetactivitytitle",),
+    "bsa": ("bsa", "agbsa"),
+    "bsa_title": ("budgetsubactivity(bsa)title", "agbudgetsubactivity(bsa)title"),
+    "line_no": ("linenumber",), "cost_type": ("costtype",), "cost_type_title": ("costtypetitle",),
+    "fy_col": ("fiscalyear",), "location": ("locationtitle",), "state": ("statecountrytitle",),
+    "facility": ("facilitycategorytitle",),
+}
+# Column-name fragments that say which half of a year's request a component
+# column is. Everything not marked mandatory is discretionary, including the
+# plain "Actuals" and "Enacted" columns of the two closed years.
+PB_MANDATORY_MARKS = ("mandatory", "reconciliation", "pl 119-21", "pl119-21")
+
+
+
+_PB_ACCT = re.compile(r"^(\d{4})(\d{2})?([A-Z])$")
+
+
+def _pb_account_parts(acct):
+    """('493001A') -> ('4930', '01', 'A', '021', '021-4930')."""
+    m = _PB_ACCT.match(acct or "")
+    if not m:
+        return None, None, None, None, None
+    main, sub, letter = m.group(1), m.group(2), m.group(3)
+    agency = ACCT_AGENCY.get(letter)
+    return main, sub, letter, agency, (f"{agency}-{main}" if agency else None)
+
+def _pb_resolve(hdr, which):
+    keys = {_key(h): i for i, h in enumerate(hdr) if h}
+    for alias in PB_COLS[which]:
+        if alias in keys:
+            return keys[alias]
+    return None
+
+
+def _pb_mandatory_columns(hdr):
+    """{fiscal_year: [column index]} for the mandatory half of that year.
+
+    Only the mandatory side is detected, and the discretionary side is then the
+    year's total MINUS it. Reading the discretionary columns directly looks
+    equivalent and is not: C-1 publishes four amount columns per year --
+    Authorization, Authorization of Appropriation, Appropriation and Total
+    Obligation Authority -- which are four measures of one project, not four
+    components of a sum. Adding the three non-total columns put every
+    construction project's discretionary figure at three times its own total.
+    Subtraction cannot make that mistake, because the total column is the figure
+    the exhibit itself footed to."""
+    out = {}
+    for i, h in enumerate(hdr):
+        if not h or "Quantity" in h: continue
+        m = _FY.search(h)
+        if not m: continue
+        low = h.lower()
+        if "total" in low: continue
+        if any(k in low for k in PB_MANDATORY_MARKS):
+            out.setdefault(int(m.group(1)), []).append(i)
+    return out
+
+
+def _pb_sheets(path, all_sheets):
+    """(sheet_name, header, rows, published_totals_row) for the sheets we read.
+
+    The published-totals row sits ABOVE the header and has no Account cell, so it
+    is recognised by its own label rather than by position."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    names = wb.sheetnames if all_sheets else wb.sheetnames[:1]
+    for name in names:
+        ws = wb[name]
+        hdr, rows, totals = None, [], None
+        for row in ws.iter_rows(values_only=True):
+            if hdr is None:
+                if row and row[0] == "Account":
+                    hdr = [_norm(h) for h in row]
+                elif row and any(c == "Total of Displayed Rows" for c in row if c):
+                    totals = row
+                continue
+            rows.append(row)
+        yield name, hdr, rows, totals
+    wb.close()
+
+
+def _pb_memo(exhibit, is_recon, toa_n, cost_type_title):
+    """(is_memo, is_offset, reason). See the header comment for each rule's evidence."""
+    if exhibit == "p1r":                  return True, False, "p1r_exhibit"
+    if is_recon:                          return True, False, "c1_reconciliation_breakout"
+    if exhibit == "m1" and toa_n:         return False, True, "less_reimbursables_offset"
+    if toa_n and exhibit == "o1":         return True, False, "outside_toa_indefinite"
+    if toa_n:                             return True, False, "include_in_toa_n"
+    up = (cost_type_title or "").upper()
+    if "MEMO NON ADD" in up:              return True, False, "memo_cost_type"
+    if cost_type_title == AP_SUBTOTAL:    return True, False, "advance_procurement_subtotal"
+    return False, False, None
+
+
+def step_pb_display(out):
+    _exhibit_preflight()
+    root = os.path.join(KB, "11-Budget-Justification/_Archive")
+    if not os.path.isdir(root):
+        print("  no exhibit archive found, skipping"); return
+    vintage = mtime_date(root)
+    lines, tie = [], []
+
+    for pb in PB_DISPLAY_YEARS:
+        for ex in PB_EXHIBITS:
+            path = _exhibit_files(root, pb, ex)
+            if not path:
+                print(f"  FY{pb} {ex}: no workbook, skipped"); continue
+            # C-1 publishes one sheet per fiscal year plus its reconciliation
+            # breakouts; the other six carry all three years on their first sheet.
+            for sheet, hdr, rows, totals in _pb_sheets(path, all_sheets=(ex == "c1")):
+                if not hdr:
+                    print(f"  FY{pb} {ex}/{sheet}: no header row, skipped"); continue
+                is_recon = "Reconciliation" in sheet
+                years = _year_columns(hdr)
+                mand_cols = _pb_mandatory_columns(hdr)
+                iB, iT = _pb_resolve(hdr, "bli"), _pb_resolve(hdr, "title")
+                iAdd, iToa = _pb_resolve(hdr, "add"), _pb_resolve(hdr, "toa")
+                iFy = _pb_resolve(hdr, "fy_col")
+                cols = {w: _pb_resolve(hdr, w) for w in
+                        ("org", "acct_title", "ba", "ba_title", "bsa", "bsa_title",
+                         "line_no", "cost_type", "cost_type_title", "location", "state", "facility")}
+                # M-1's leaf IS the sub-activity, so the two resolve to one column.
+                # Leaving both set would print the same value in two levels of the
+                # drill-down and make every M-1 sub-activity look like it has
+                # exactly one child with the same name.
+                if cols["bsa"] == iB: cols["bsa"] = None
+                if cols["bsa_title"] == iT: cols["bsa_title"] = None
+                # The reconciliation sheets name no fiscal year in any header --
+                # the year is a column on the row -- so the amount is the sheet's
+                # TOA column and the year is read per row.
+                recon_amt = [i for i, h in enumerate(hdr) if h and "TOA" in h][-1:] if is_recon else []
+
+                counted = collections.defaultdict(float)
+                memoed  = collections.defaultdict(float)
+                nrows   = collections.Counter()
+                for r in rows:
+                    # A Non-Add row is the advance-procurement detail that its own
+                    # line already carries. Dropped at read time, as in the spine.
+                    if iAdd is not None and _norm(r[iAdd]) == "Non-Add": continue
+                    title = _norm(r[iT]) if iT is not None else ""
+                    bli = _norm(r[iB]) if iB is not None else ""
+                    acct = _norm(r[0])
+                    # Spacer rows have no account. A row that HAS an account but
+                    # no line item is not a spacer: PB2026 O-1 carries $24K on
+                    # 5286A budget activity 10 with every leaf column blank, and
+                    # dropping it for want of a label was the one sheet-year in
+                    # twenty-eight that stopped matching the workbook's own
+                    # published footer. It is kept, and the page prints the
+                    # missing leaf as "no line item published" rather than
+                    # inventing one.
+                    if not acct: continue
+                    main, sub, letter, agency, tas = _pb_account_parts(acct)
+                    cell = lambda w: (_norm(r[cols[w]]) if cols[w] is not None else "")
+                    ctt = cell("cost_type_title")
+                    toa_n = iToa is not None and _norm(r[iToa]) == "N"
+                    is_memo, is_offset, reason = _pb_memo(ex, is_recon, toa_n, ctt)
+                    base = {
+                        "pb_year": pb, "exhibit": ex, "sheet_name": sheet,
+                        "account": acct, "account_main": main, "account_sub": sub, "treasury_agency": agency,
+                        "treasury_account": tas, "account_title": cell("acct_title"),
+                        "component": COMPONENT.get(agency, "Unattributed"),
+                        "organization": cell("org"),
+                        "budget_activity": cell("ba"), "budget_activity_title": cell("ba_title"),
+                        "bsa": cell("bsa"), "bsa_title": cell("bsa_title"),
+                        "line_number": cell("line_no"), "bli": bli, "bli_title": title,
+                        "cost_type": cell("cost_type"), "cost_type_title": ctt,
+                        "location": cell("location") or cell("state") or cell("facility"),
+                        "is_memo": is_memo, "is_offset": is_offset, "memo_reason": reason,
+                        "include_in_toa": "N" if toa_n else ("Y" if iToa is not None else ""),
+                    }
+                    if is_recon:
+                        fy = int(_num(r[iFy])) if iFy is not None else pb
+                        amt = sum(_num(r[i]) for i in recon_amt)
+                        if not amt: continue
+                        lines.append({**base, "fiscal_year": fy, "fy_role": "request",
+                            "amount_k": round(amt, 3), "discretionary_k": 0.0,
+                            "mandatory_k": round(amt, 3), "quantity": 0.0,
+                            "total_column": _norm(hdr[recon_amt[0]])[:200],
+                            "total_basis": "sole_column", "component_count": 1})
+                        memoed[fy] += amt; nrows[fy] += 1
+                        continue
+                    for fy, c in years.items():
+                        amt = sum(_num(r[i]) for i in c["amount"])
+                        qty = sum(_num(r[i]) for i in c["qty"])
+                        if amt == 0 and qty == 0: continue
+                        mand = sum(_num(r[i]) for i in mand_cols.get(fy, ()))
+                        disc = amt - mand
+                        role = ("prior_actual" if fy == pb - 2 else
+                                "enacted" if fy == pb - 1 else
+                                "request" if fy == pb else "other")
+                        lines.append({**base, "fiscal_year": fy, "fy_role": role,
+                            "amount_k": round(amt, 3), "discretionary_k": round(disc, 3),
+                            "mandatory_k": round(mand, 3), "quantity": qty,
+                            "total_column": c["label"][:200], "total_basis": c["basis"],
+                            "component_count": c["component_count"]})
+                        (memoed if is_memo else counted)[fy] += amt
+                        nrows[fy] += 1
+
+                for fy in sorted(set(counted) | set(memoed)):
+                    if is_recon:
+                        published = None
+                    else:
+                        c = years.get(fy)
+                        published = (sum(_num(totals[i]) for i in c["amount"])
+                                     if totals and c and all(i < len(totals) for i in c["amount"])
+                                     else None)
+                    got = counted[fy] + memoed[fy]
+                    tie.append({
+                        "pb_year": pb, "exhibit": ex, "sheet_name": sheet, "fiscal_year": fy,
+                        "published_k": None if published is None else round(published, 3),
+                        "counted_k": round(counted[fy], 3), "memo_k": round(memoed[fy], 3),
+                        "difference_k": None if published is None else round(got - published, 3),
+                        "row_count": nrows[fy]})
+            name, _ = PB_EXHIBIT_META[ex]
+            got = sum(t["counted_k"] for t in tie if t["exhibit"] == ex and t["pb_year"] == pb
+                      and t["fiscal_year"] == pb)
+            print(f"  FY{pb} {name:5s} request {got/1e6:>9,.1f}B")
+
+    off = [t for t in tie if t["difference_k"] is not None and abs(t["difference_k"]) >= 1]
+    if off:
+        print(f"  WARNING: {len(off)} sheet-years do not match the workbook's own"
+              f" 'Total of Displayed Rows'. PB-01 will fail this load.")
+        for t in off[:6]:
+            print(f"    FY{t['pb_year']} {t['exhibit']} {t['sheet_name']} FY{t['fiscal_year']}:"
+                  f" counted+memo {t['counted_k']+t['memo_k']:,.0f}K vs published {t['published_k']:,.0f}K")
+    write(out, "pb_display.json", payload("pb_display", vintage,
+          {"dm_pb_line": lines, "dm_pb_tieout": tie},
+          source_path="11-Budget-Justification/_Archive"))
+
+
+# ------------------------------------------------------- execution detail ---
+# File B, published at the grain it is reported at rather than as a single row
+# per fiscal year.
+#
+# The earlier extract kept two things from this file: five Department-wide
+# totals and the top twenty-five object classes. That is enough to draw the
+# undelivered/delivered orders chart and nothing else. Everything an execution
+# review actually asks -- which account is behind, whether the money is annual
+# or multi-year, whether an account's obligations are sitting in undelivered
+# orders or have been received and not paid, which object class moved, how much
+# of the year's undelivered balance was carried in rather than created -- needs
+# the account, the object class, the funding source and the period of
+# availability on the same row. There are only about 27,000 File B rows a year
+# in Department scope, so the detail is published whole rather than sampled.
+#
+# THE PARK REPLICATION IS HANDLED HERE TOO, and it has to be, because it is
+# worse at detail grain than in a total. From the FY2026 P09 submission
+# program_activity_code is null on every row and the Program Activity Reporting
+# Key carries the identity; where an account has several PARKs the extract
+# repeats the account's object-class figure verbatim against each one instead of
+# splitting it. Summing the file as published overstates Department obligations
+# by 34.9%. A group whose rows differ only by PARK and publish one repeated
+# figure therefore becomes ONE row here, with activity_kind = 'collapsed' and
+# activity_count saying how many keys it covered, rather than several rows each
+# carrying the whole amount. Genuine splits -- every FY2021-25 row -- pass
+# through untouched and keep their own activity.
+#
+# WHAT THE FY2026 SUBMISSION DOES NOT CARRY. There is no program activity NAME
+# on any FY2026 row: the column is null throughout, so the activity can be
+# identified but not read. The page prints the key and says so rather than
+# borrowing a name from a different year's row that happens to share a key.
+EXEC_COLS = FILE_B_COLS + [
+  "treasury_account_name", "federal_account_symbol", "federal_account_name",
+  "budget_function", "budget_subfunction", "program_activity_name",
+  "availability_type_code", "beginning_period_of_availability",
+  "ending_period_of_availability",
+  "obligations_undelivered_orders_unpaid_total_FYB",
+  "gross_outlays_undelivered_orders_prepaid_total",
+  "gross_outlays_delivered_orders_paid_total",
+  "USSGL488100_upward_adj_prior_year_undeliv_orders_oblig_unpaid",
+  "USSGL498100_upward_adj_of_prior_year_deliv_orders_oblig_unpaid",
+  "USSGL487100_downward_adj_prior_year_unpaid_undeliv_orders_oblig",
+  "USSGL497100_downward_adj_prior_year_unpaid_deliv_orders_oblig",
+  "USSGL487200_downward_adj_prior_year_prepaid_undeliv_order_oblig",
+  "USSGL497200_downward_adj_of_prior_year_paid_deliv_orders_oblig",
+]
+
+# The measures carried per detail row, as (source column, published name).
+EXEC_MEASURES = [
+  ("obligations_incurred", "obligations"),
+  ("obligations_undelivered_orders_unpaid_total", "undelivered_unpaid"),
+  ("obligations_undelivered_orders_unpaid_total_FYB", "undelivered_unpaid_bf"),
+  ("obligations_delivered_orders_unpaid_total", "delivered_unpaid"),
+  ("gross_outlay_amount_FYB_to_period_end", "gross_outlays"),
+  ("gross_outlays_undelivered_orders_prepaid_total", "outlays_prepaid"),
+  ("gross_outlays_delivered_orders_paid_total", "outlays_paid"),
+  ("deobligations_or_recoveries_or_refunds_from_prior_year", "deobligations"),
+]
+EXEC_UPWARD = ["USSGL488100_upward_adj_prior_year_undeliv_orders_oblig_unpaid",
+               "USSGL498100_upward_adj_of_prior_year_deliv_orders_oblig_unpaid"]
+EXEC_DOWNWARD = ["USSGL487100_downward_adj_prior_year_unpaid_undeliv_orders_oblig",
+                 "USSGL497100_downward_adj_prior_year_unpaid_deliv_orders_oblig",
+                 "USSGL487200_downward_adj_prior_year_prepaid_undeliv_order_oblig",
+                 "USSGL497200_downward_adj_of_prior_year_paid_deliv_orders_oblig"]
+
+
+def _fund_life(avail_type, bpoa, epoa):
+    """'no-year' | 'annual' | 'multi-year (N)' | 'unknown'.
+
+    This is the single most decision-relevant attribute in the file at the end
+    of a fiscal year and it is not published as a field: it has to be read off
+    the period of availability. Annual money expires on 30 September and cannot
+    be obligated afterwards; multi-year and no-year money can. A year-end
+    obligation rate that mixes the two answers no question at all."""
+    if (avail_type or "").strip().upper() == "X": return "no-year"
+    try: b, e = int(bpoa), int(epoa)
+    except (TypeError, ValueError): return "unknown"
+    if b <= 0 or e <= 0: return "unknown"
+    n = e - b + 1
+    return "annual" if n <= 1 else f"multi-year ({n})"
+
+
+# Detail is published for the years an execution review actually works in --
+# the year in progress and the two before it. Earlier years are carried as
+# account and object-class rollups over the whole window, which is what a trend
+# needs, at a twentieth of the rows.
+EXEC_DETAIL_YEARS = 3
+
+
+def step_execution(out):
+    import pyarrow.dataset as ds
+    base = os.path.join(WAREHOUSE, "accounts/file_b")
+    vintage = mtime_date(base)
+    years = [fy for fy in FY_RANGE
+             if os.path.isdir(os.path.join(base, f"fiscal_year={fy}"))]
+    detail_years = set(years[-EXEC_DETAIL_YEARS:])
+    detail, fy_rows, acct_dim, act_dim = [], [], {}, {}
+    acct_fy, oc_fy = {}, {}
+
+    for fy in years:
+        t = ds.dataset(os.path.join(base, f"fiscal_year={fy}"),
+                       format="parquet").to_table(columns=EXEC_COLS)
+        c = {k: t[k].to_pylist() for k in EXEC_COLS}
+        rows = [i for i in range(t.num_rows)
+                if (c["agency_identifier_code"][i] or "") in DOW_CODES]
+        groups, replicated = _fileb_grain(c, rows)
+        emitted = collapsed_rows = 0
+        keep_detail = fy in detail_years
+
+        for k, idx in groups.items():
+            rep = k in replicated
+            if rep:
+                collapsed_rows += len(idx) - 1
+                buckets = {"": idx}
+            else:
+                buckets = {}
+                for i in idx:
+                    aid = (str(c["program_activity_code"][i] or "").strip()
+                           or str(c["program_activity_reporting_key"][i] or "").strip() or "")
+                    buckets.setdefault(aid, []).append(i)
+            for aid, part in buckets.items():
+                i0 = part[0]
+                m = {name: round(_fileb_value(c, part, col, rep), 2)
+                     for col, name in EXEC_MEASURES}
+                m["upward_adjustments"] = round(
+                    sum(_fileb_value(c, part, col, rep) for col in EXEC_UPWARD), 2)
+                m["downward_adjustments"] = round(
+                    sum(_fileb_value(c, part, col, rep) for col in EXEC_DOWNWARD), 2)
+                if all(abs(v) < 0.005 for v in m.values()): continue
+                agency = str(c["agency_identifier_code"][i0] or "")
+                oc = str(c["object_class_code"][i0] or "??")
+                tas = k[0]
+                life = _fund_life(c["availability_type_code"][i0],
+                                  c["beginning_period_of_availability"][i0],
+                                  c["ending_period_of_availability"][i0])
+                acct_dim.setdefault((fy, tas), {
+                    "fiscal_year": fy, "treasury_account": tas,
+                    "treasury_account_name": str(c["treasury_account_name"][i0] or ""),
+                    "federal_account": str(c["federal_account_symbol"][i0] or ""),
+                    "federal_account_name": str(c["federal_account_name"][i0] or ""),
+                    "agency_code": agency, "agency_name": AGENCY_NAME.get(agency, ""),
+                    "budget_function": str(c["budget_function"][i0] or ""),
+                    "budget_subfunction": str(c["budget_subfunction"][i0] or ""),
+                    "fund_life": life})
+                if rep:
+                    kind = "collapsed"
+                    count = len({str(c["program_activity_reporting_key"][i] or "") for i in idx})
+                elif str(c["program_activity_code"][i0] or "").strip():
+                    kind, count = "code", 1
+                elif aid:
+                    kind, count = "park", 1
+                else:
+                    kind, count = "none", 1
+                if aid:
+                    act_dim.setdefault((fy, aid), {
+                        "fiscal_year": fy, "activity_id": aid, "activity_kind": kind,
+                        "activity_name": str(c["program_activity_name"][i0] or "").strip()})
+                if keep_detail:
+                    detail.append({"fiscal_year": fy, "scope": "DOW", "treasury_account": tas,
+                        "object_class_code": oc, "activity_id": aid, "activity_kind": kind,
+                        "activity_count": count, "funding_source": k[2] or "", "defc": k[3] or "",
+                        "fund_life": life, "source_rows": len(part), "is_replicated": rep, **m})
+                    emitted += 1
+                a = acct_fy.setdefault((fy, tas), {"fiscal_year": fy, "scope": "DOW",
+                    "treasury_account": tas, "fund_life": life, "detail_rows": 0,
+                    **{name: 0.0 for _, name in EXEC_MEASURES},
+                    "upward_adjustments": 0.0, "downward_adjustments": 0.0})
+                o = oc_fy.setdefault((fy, oc), {"fiscal_year": fy, "scope": "DOW",
+                    "object_class_code": oc,
+                    "object_class_name": str(c["object_class_name"][i0] or oc),
+                    "major_class": major_class(oc), "detail_rows": 0,
+                    **{name: 0.0 for _, name in EXEC_MEASURES},
+                    "upward_adjustments": 0.0, "downward_adjustments": 0.0})
+                for row in (a, o):
+                    row["detail_rows"] += 1
+                    for key, v in m.items(): row[key] = round(row[key] + v, 2)
+
+        periods = sorted({c["submission_period"][i] for i in rows if c["submission_period"][i]})
+        obl = sum(v["obligations"] for (f, _), v in acct_fy.items() if f == fy)
+        fy_rows.append({"fiscal_year": fy, "scope": "DOW",
+            "submission_period": periods[0] if len(periods) == 1 else None,
+            "source_rows": len(rows), "detail_rows": emitted, "collapsed_rows": collapsed_rows,
+            "has_detail": keep_detail,
+            "accounts": len([1 for (f, _) in acct_fy if f == fy]),
+            "object_classes": len([1 for (f, _) in oc_fy if f == fy]),
+            "activities": len([1 for (f, _) in act_dim if f == fy]),
+            "has_activity_names": any(v["activity_name"] for (f, _), v in act_dim.items() if f == fy),
+            "obligations": round(obl, 2)})
+        print(f"  FY{fy}: {len(rows):,} source rows -> "
+              f"{emitted:,} detail rows{'' if keep_detail else ' (rollup only)'}"
+              f"{f', {collapsed_rows:,} PARK-replicated counted once' if collapsed_rows else ''}")
+
+    write(out, "execution.json", payload("file_b_detail", vintage,
+          {"dm_exec_detail": detail, "dm_exec_account": list(acct_dim.values()),
+           "dm_exec_activity": list(act_dim.values()),
+           "dm_exec_account_fy": list(acct_fy.values()),
+           "dm_exec_object_class_fy": list(oc_fy.values()),
+           "dm_exec_fy": fy_rows},
+          source_path="accounts/file_b"))
+
+
+# --------------------------------------------------------- execution timing ---
+# WHEN contract money moved, at day grain, and what that says about the year end.
+#
+# File B answers what kind of money an obligation is and how far through the
+# pipeline it has travelled. It cannot answer when, because the warehouse holds
+# ONE submission per fiscal year -- FY2026 at P09 -- so there is no within-year
+# series in it at all. The contract files do carry a date on every action, so
+# the timing question is answered from FPDS and labelled as what it is: contract
+# obligations, which are about a fifth of Department obligations, not the whole.
+#
+# WHY THIS MATTERS ON 10 SEPTEMBER. Annual appropriations expire on 30 September
+# and cannot be obligated afterwards, so the last weeks of a fiscal year carry a
+# concentration of obligations that exists for a legal reason rather than an
+# operational one. That is not itself a finding -- it is the shape of the
+# system -- and the failure mode of every year-end story is treating the shape
+# as the finding. What can be measured is DEVIATION FROM A CATEGORY'S OWN
+# HISTORY: an office that has put 8% of its year into September for four years
+# and puts 30% into it in the fifth has done something its own past does not
+# explain, and a product class that has never been bought in September appearing
+# there at scale is a question worth asking. Both are computed here, per
+# category, against that category's own prior years.
+#
+# THE BASELINE IS ROBUST, NOT AVERAGE. Prior-year values are summarised by their
+# MEDIAN and their median absolute deviation rather than mean and standard
+# deviation. With four or five prior observations a single unusual year drags a
+# mean far enough to hide the year after it, and these series contain exactly
+# that kind of year -- FY2021 and FY2022 carry supplemental and emergency money
+# that lands in months the base budget does not use. A median of five is
+# unmoved by one outlier; a mean of five is moved by a fifth of it.
+#
+# WHAT IS NOT CLAIMED. A deviation is a question, not a finding: none of these
+# signals observes impropriety, and several of the largest are certainly
+# legitimate -- a shipbuilding award or an exercised option lands as one action
+# with no anomaly in it beyond its size. Every signal therefore carries the
+# evidence it was computed from and the method that produced it, and the page
+# prints both beside it. The page says "worth asking about", never "improper".
+
+# FPDS writes the product or service code's own description on the row, so the
+# label is the source's. What is derived is the coarse kind, and that is the
+# structure FPDS itself uses: a numeric first character is a product class, A is
+# research and development, and every other letter is a service group.
+def psc_kind(code: str) -> str:
+    c = (code or "").strip().upper()
+    if not c: return "Not reported"
+    if c[0].isdigit(): return "Product"
+    if c[0] == "A": return "Research and development"
+    return "Service"
+
+
+# The Federal Supply Classification groups and the service categories, which is
+# the structure FPDS itself codes to: a product code's first two digits name its
+# supply group, a service code's first letter names its category. This coarser
+# key exists because the questions asked of year-end spending are almost never
+# about the largest classes. Furniture, food and office supplies are far too
+# small to appear among the forty biggest four-digit codes and are exactly what
+# a reader arrives having read about, so they need a level at which they are
+# visible rather than a threshold that excludes them.
+PSC_GROUP = {
+ "10":"Weapons","11":"Nuclear ordnance","12":"Fire control equipment",
+ "13":"Ammunition and explosives","14":"Guided missiles",
+ "15":"Aircraft and airframe structural components",
+ "16":"Aircraft components and accessories",
+ "17":"Aircraft launching, landing and ground handling equipment",
+ "18":"Space vehicles","19":"Ships, small craft, pontoons and floating docks",
+ "20":"Ship and marine equipment","22":"Railway equipment",
+ "23":"Motor vehicles, trailers and cycles","24":"Tractors",
+ "25":"Vehicular equipment components","26":"Tires and tubes",
+ "28":"Engines, turbines and components","29":"Engine accessories",
+ "30":"Mechanical power transmission equipment","31":"Bearings",
+ "32":"Woodworking machinery","34":"Metalworking machinery",
+ "35":"Service and trade equipment","36":"Special industry machinery",
+ "37":"Agricultural machinery","38":"Construction and highway maintenance equipment",
+ "39":"Materials handling equipment","40":"Rope, cable, chain and fittings",
+ "41":"Refrigeration and air conditioning equipment",
+ "42":"Fire fighting, rescue and safety equipment","43":"Pumps and compressors",
+ "44":"Furnace, steam plant and drying equipment",
+ "45":"Plumbing, heating and waste disposal equipment",
+ "46":"Water purification and sewage treatment equipment",
+ "47":"Pipe, tubing, hose and fittings","48":"Valves",
+ "49":"Maintenance and repair shop equipment","51":"Hand tools",
+ "52":"Measuring tools","53":"Hardware and abrasives",
+ "54":"Prefabricated structures and scaffolding","55":"Lumber, millwork and plywood",
+ "56":"Construction and building materials",
+ "58":"Communication, detection and coherent radiation equipment",
+ "59":"Electrical and electronic equipment components",
+ "60":"Fibre optics materials and components",
+ "61":"Electric wire and power distribution equipment",
+ "62":"Lighting fixtures and lamps","63":"Alarm, signal and security detection systems",
+ "65":"Medical, dental and veterinary equipment and supplies",
+ "66":"Instruments and laboratory equipment","67":"Photographic equipment",
+ "68":"Chemicals and chemical products","69":"Training aids and devices",
+ "70":"General purpose information technology equipment","71":"Furniture",
+ "72":"Household and commercial furnishings and appliances",
+ "73":"Food preparation and serving equipment","74":"Office machines",
+ "75":"Office supplies and devices","76":"Books, maps and other publications",
+ "77":"Musical instruments and home-type radios",
+ "78":"Recreational and athletic equipment","79":"Cleaning equipment and supplies",
+ "80":"Brushes, paints, sealers and adhesives",
+ "81":"Containers, packaging and packing supplies",
+ "83":"Textiles, leather, furs, apparel findings, tents and flags",
+ "84":"Clothing, individual equipment and insignia","85":"Toiletries",
+ "87":"Agricultural supplies","88":"Live animals","89":"Subsistence (food)",
+ "91":"Fuels, lubricants, oils and waxes","93":"Nonmetallic fabricated materials",
+ "94":"Nonmetallic crude materials","95":"Metal bars, sheets and shapes",
+ "96":"Ores, minerals and their primary products","99":"Miscellaneous",
+}
+PSC_SERVICE_GROUP = {
+ "A":"Research and development","B":"Special studies and analysis",
+ "C":"Architect and engineering","D":"Information technology and telecommunications",
+ "E":"Purchase of structures and facilities","F":"Natural resources and conservation",
+ "G":"Social services","H":"Quality control, testing and inspection",
+ "J":"Maintenance, repair and rebuilding of equipment","K":"Modification of equipment",
+ "L":"Technical representative","M":"Operation of government-owned facilities",
+ "N":"Installation of equipment","P":"Salvage","Q":"Medical services",
+ "R":"Professional, administrative and management support",
+ "S":"Utilities and housekeeping","T":"Photographic, mapping, printing and publication",
+ "U":"Education and training","V":"Transportation, travel and relocation",
+ "W":"Lease or rental of equipment","X":"Lease or rental of facilities",
+ "Y":"Construction of structures and facilities",
+ "Z":"Maintenance, repair and alteration of real property",
+}
+# The classes a year-end story is normally about: things that are consumed,
+# furnished or eaten rather than fielded. Named here so the page can show them
+# without a threshold quietly deciding they do not exist.
+PSC_SUPPLY_WATCH = ("71", "72", "73", "75", "77", "78", "79", "85", "89")
+
+
+
+def _shared_prefix_label(descriptions):
+    """The words every description in a group begins with, or ''.
+
+    A few product classes are not in the published supply-group list -- the 7A
+    to 7K information-technology classes are the live example -- and inventing a
+    name for them would be exactly the kind of made-up label this codebase
+    refuses elsewhere. Their own four-digit descriptions all begin the same way
+    ("IT AND TELECOM - ..."), so the group's name is taken from the words they
+    share rather than from anywhere outside the source."""
+    parts = [re.split(r"\s+", (d or "").strip().upper()) for d in descriptions if d]
+    if not parts: return ""
+    out = []
+    for i in range(min(len(x) for x in parts)):
+        w = parts[0][i]
+        if all(x[i] == w for x in parts): out.append(w)
+        else: break
+    # Six words is enough to name a group and short enough to sit in a table
+    # cell; a class with a single member would otherwise take that member's
+    # whole description as the group name. Acronyms keep their case -- "It And
+    # Telecom" is not what the source says.
+    words = out[:6]
+    _JOIN = {"AND", "THE", "FOR", "OF", "OR"}
+    label = " ".join(w.lower() if w in _JOIN and i else
+                     (w if (w.isupper() and len(w) <= 3) else w.capitalize())
+                     for i, w in enumerate(words)).strip(" -,;:")
+    return label if len(label) >= 4 else ""
+
+def psc_group_key(code):
+    c = (code or "").strip().upper()
+    if not c: return "", "(not reported)"
+    if c[0].isdigit():
+        g = c[:2]
+        return g, f"{g} · {PSC_GROUP.get(g, 'Supply group ' + g)}"
+    g = c[0]
+    return g, f"{g} · {PSC_SERVICE_GROUP.get(g, 'Service category ' + g)}"
+
+
+TIMING_DIMS = [("sub_agency", "awarding_sub_agency_name", None),
+               ("office", "awarding_office_name", None),
+               ("psc", "product_or_service_code", "product_or_service_code_description"),
+               ("psc_class", "psc_class_key", None),
+               ("pricing", "type_of_contract_pricing", None),
+               ("competition", "extent_competed", None),
+               ("recipient", "recipient_name", None)]
+TIMING_KEEP = 80          # keys carried per dimension per year
+FY_MONTH_LABEL = ["Oct", "Nov", "Dec", "Jan", "Feb", "Mar",
+                  "Apr", "May", "Jun", "Jul", "Aug", "Sep"]
+
+
+def _median(xs):
+    s = sorted(xs); n = len(s)
+    if not n: return 0.0
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+
+# A scale floor, and why there has to be one. 1.4826 scales the median absolute
+# deviation to a standard deviation for a normal sample, so the ratio reads on
+# the familiar z scale. But a category whose four prior years are 1.1%, 0.9%,
+# 1.1% and 1.0% has a MAD near zero, and dividing by it produced a z of 416 --
+# a number that says nothing except that the denominator was small. The scale is
+# therefore floored at 5% of the median, or at a twentieth of the value where
+# the median is zero, and the result is capped at 99. Both are stated on the
+# page beside the figure: a capped z means "far outside its own history", not a
+# measurement.
+_Z_CAP = 99.0
+
+
+def _mad_z(value, prior):
+    """(robust z, median, scale). None when there are too few prior years to
+    summarise -- three is the minimum at which a median means anything here."""
+    if len(prior) < 3: return None, _median(prior) if prior else 0.0, 0.0
+    med = _median(prior)
+    mad = _median([abs(x - med) for x in prior]) * 1.4826
+    floor = abs(med) * 0.05 if med else abs(value) * 0.05
+    scale = max(mad, floor)
+    if scale <= 0:
+        return (None if abs(value - med) < 1e-9 else
+                (_Z_CAP if value > med else -_Z_CAP)), med, 0.0
+    z = (value - med) / scale
+    return max(-_Z_CAP, min(_Z_CAP, z)), med, mad
+
+
+def step_timing(out, only_fy=None):
+    import pyarrow as pa, pyarrow.dataset as ds, pyarrow.compute as pc
+    base = os.path.join(WAREHOUSE, "contracts")
+    current = vintages()[-1]
+    cols = ["action_date", "federal_action_obligation", "awarding_sub_agency_name",
+            "awarding_office_name", "product_or_service_code",
+            "product_or_service_code_description", "type_of_contract_pricing",
+            "extent_competed", "recipient_name"]
+
+    day_rows, month_rows, eoy_rows = [], [], []
+    fy_meta = {}
+    # keyed (dimension, key) -> {fy: {"obl","act","months":{m:obl},"sep","last5"}}
+    series = collections.defaultdict(dict)
+    labels, class_descs = {}, {}
+
+    years = sorted(int(d.split("=", 1)[1]) for d in os.listdir(os.path.join(base, f"vintage={current}"))
+                   if d.startswith("fy="))
+    for fy in years:
+        p = os.path.join(base, f"vintage={current}/fy={fy}")
+        if not os.path.isdir(p): continue
+        t = ds.dataset(p, format="parquet").to_table(columns=cols)
+        epoch0 = (dt.date(fy - 1, 10, 1) - dt.date(1970, 1, 1)).days
+        days = pc.cast(t["action_date"], pa.int32())
+        dofy = pc.add(pc.subtract(days, pa.scalar(epoch0, pa.int32())), 1)
+        # October is fiscal month 1 and September is 12. pyarrow.compute has no
+        # modulo, so the wrap is written as the branch it actually is.
+        cm = pc.month(t["action_date"])
+        fym = pc.if_else(pc.greater_equal(cm, pa.scalar(10, pa.int64())),
+                         pc.subtract(cm, pa.scalar(9, pa.int64())),
+                         pc.add(cm, pa.scalar(3, pa.int64())))
+        # The supply group or service category, derived once as a column rather
+        # than folded together after aggregation: a product code's first two
+        # digits, a service code's first letter.
+        psc = t["product_or_service_code"]
+        first = pc.utf8_slice_codeunits(psc, 0, 1)
+        grp = pc.if_else(pc.match_substring_regex(first, r"^[0-9]$"),
+                         pc.utf8_slice_codeunits(psc, 0, 2), first)
+        t = (t.append_column("day_of_fy", dofy)
+              .append_column("fy_month", fym)
+              .append_column("psc_class_key", grp))
+
+        # -- the daily curve, which is what a pace comparison is read from -----
+        g = t.group_by(["day_of_fy"]).aggregate(
+            [("federal_action_obligation", "sum"), ("federal_action_obligation", "count")])
+        daily = sorted(({"d": r["day_of_fy"],
+                         "o": round(r["federal_action_obligation_sum"] or 0.0, 2),
+                         "n": r["federal_action_obligation_count"]}
+                        for r in g.to_pylist() if r["day_of_fy"] is not None),
+                       key=lambda r: r["d"])
+        cum_o = cum_n = 0.0
+        last_day = max((r["d"] for r in daily), default=0)
+        for r in daily:
+            if r["d"] < 1 or r["d"] > 366: continue     # an action dated outside its own year
+            cum_o += r["o"]; cum_n += r["n"]
+            day_rows.append({"fiscal_year": fy, "day_of_fy": r["d"],
+                             "obligation": r["o"], "action_count": r["n"],
+                             "cum_obligation": round(cum_o, 2), "cum_actions": int(cum_n)})
+        fy_meta[fy] = {"last_day": last_day, "obligation": round(cum_o, 2), "actions": int(cum_n)}
+
+        # -- month x dimension, and the year-end shares built from it ----------
+        gd = t.group_by(["psc_class_key", "product_or_service_code_description"]).aggregate(
+            [("federal_action_obligation", "count")])
+        for r in gd.to_pylist():
+            k = r["psc_class_key"]
+            if k: class_descs.setdefault(str(k), set()).add(
+                r["product_or_service_code_description"])
+
+        for dim, col, labcol in TIMING_DIMS:
+            keys = t.group_by([col] + ([labcol] if labcol else [])).aggregate(
+                [("federal_action_obligation", "sum"), ("federal_action_obligation", "count")])
+            recs = sorted(keys.to_pylist(),
+                          key=lambda r: -(r["federal_action_obligation_sum"] or 0.0))
+            keep = []
+            for r in recs[:TIMING_KEEP]:
+                k = r[col]
+                k = "(not reported)" if k in (None, "") else str(k)
+                keep.append(k)
+                if dim == "psc_class":
+                    _, lab = psc_group_key(k)
+                else:
+                    book = CODE_BOOKS.get(dim, {})
+                    lab = book.get(k) or (str(r.get(labcol)) if labcol and r.get(labcol) else k)
+                    if dim in CODE_BOOKS and k in book: lab = f"{k} · {lab}"
+                labels[(dim, k)] = lab
+                series[(dim, k)][fy] = {"obl": round(r["federal_action_obligation_sum"] or 0.0, 2),
+                                        "act": r["federal_action_obligation_count"],
+                                        "months": {}, "last5": 0.0}
+            keepset = set(keep)
+            gm = t.group_by([col, "fy_month"]).aggregate(
+                [("federal_action_obligation", "sum"), ("federal_action_obligation", "count")])
+            for r in gm.to_pylist():
+                k = r[col]; k = "(not reported)" if k in (None, "") else str(k)
+                if k not in keepset or r["fy_month"] is None: continue
+                m = int(r["fy_month"]); o = round(r["federal_action_obligation_sum"] or 0.0, 2)
+                series[(dim, k)][fy]["months"][m] = o
+                month_rows.append({"fiscal_year": fy, "fy_month": m,
+                                   "month_label": FY_MONTH_LABEL[m - 1],
+                                   "dimension": dim, "dim_key": k, "dim_label": labels[(dim, k)],
+                                   "obligation": o,
+                                   "action_count": r["federal_action_obligation_count"]})
+            # The final five days of the fiscal year, which is where a
+            # deadline-driven obligation actually lands.
+            tail = t.filter(pc.greater_equal(t["day_of_fy"], pa.scalar(last_day - 4, pa.int32()))) \
+                    if last_day >= 5 else t.slice(0, 0)
+            if tail.num_rows:
+                gt = tail.group_by([col]).aggregate([("federal_action_obligation", "sum")])
+                for r in gt.to_pylist():
+                    k = r[col]; k = "(not reported)" if k in (None, "") else str(k)
+                    if k in keepset:
+                        series[(dim, k)][fy]["last5"] = round(r["federal_action_obligation_sum"] or 0.0, 2)
+        print(f"  FY{fy}: {fy_meta[fy]['actions']:,} actions, "
+              f"${fy_meta[fy]['obligation']/1e9:,.1f}B, latest day-of-year {last_day}")
+        del t
+
+    # A supply group the published list does not name takes its label from the
+    # words its own four-digit descriptions share. Done after the year loop so
+    # every year's descriptions are in hand, and applied to the rows already
+    # emitted rather than leaving two spellings of one group on the page.
+    relabelled = {}
+    for (dim, k), lab in list(labels.items()):
+        if dim != "psc_class" or "Supply group" not in lab: continue
+        derived = _shared_prefix_label(class_descs.get(k, ()))
+        if derived:
+            relabelled[k] = f"{k} · {derived}"
+            labels[(dim, k)] = relabelled[k]
+    if relabelled:
+        for r in month_rows:
+            if r["dimension"] == "psc_class" and r["dim_key"] in relabelled:
+                r["dim_label"] = relabelled[r["dim_key"]]
+        print(f"  {len(relabelled)} supply groups labelled from their own descriptions: "
+              + ", ".join(sorted(relabelled.values())[:4]))
+
+    # ----- the year-end shares, per dimension key per year --------------------
+    for (dim, k), byfy in series.items():
+        for fy, v in byfy.items():
+            months = v["months"]
+            sep = months.get(12, 0.0)
+            q4 = sum(months.get(m, 0.0) for m in (10, 11, 12))
+            tot = v["obl"] or 0.0
+            eoy_rows.append({
+                "fiscal_year": fy, "dimension": dim, "dim_key": k, "dim_label": labels[(dim, k)],
+                "fy_obligation": tot, "fy_actions": v["act"],
+                "sep_obligation": round(sep, 2),
+                "sep_share_pct": round(sep / tot * 100, 4) if tot else 0.0,
+                "q4_obligation": round(q4, 2),
+                "q4_share_pct": round(q4 / tot * 100, 4) if tot else 0.0,
+                "last5_obligation": round(v["last5"], 2),
+                "last5_share_pct": round(v["last5"] / tot * 100, 4) if tot else 0.0,
+                "months_observed": len(months),
+                "is_complete_year": fy_meta.get(fy, {}).get("last_day", 0) >= 360})
+    # =====================================================================
+    # Signals. Everything below compares a category with its OWN prior years;
+    # nothing is compared with a Department-wide average, because the categories
+    # differ by three orders of magnitude in size and a shared threshold would
+    # only ever select the largest of them.
+    # =====================================================================
+    complete = sorted(fy for fy, m in fy_meta.items() if m["last_day"] >= 360)
+    partial = [fy for fy in sorted(fy_meta) if fy not in complete]
+    live = partial[-1] if partial else (complete[-1] if complete else None)
+    # The months of the live year that are fully observed. FY2026 runs to
+    # 4 August 2026, so October through July are whole and August is not; a
+    # comparison that included August would read a five-day month as a month.
+    live_full_months = 0
+    if live is not None:
+        ld = fy_meta[live]["last_day"]
+        d0 = dt.date(live - 1, 10, 1) + dt.timedelta(days=ld - 1)
+        # month index of the last complete FY month before the cut-off
+        live_full_months = ((d0.month - 10) % 12)      # 0-based count of whole months
+    signals, executors, action_rows = [], [], []
+
+    def ytd(byfy, fy, months):
+        v = byfy.get(fy)
+        return sum(v["months"].get(m, 0.0) for m in range(1, months + 1)) if v else 0.0
+
+    for (dim, k), byfy in series.items():
+        lab = labels[(dim, k)]
+        prior_complete = [fy for fy in complete if fy in byfy and fy != live]
+        if len(prior_complete) < 3: continue
+        # A key tracked in four of five complete years is not a four-year
+        # history: it is a five-year history with one year missing because the
+        # key fell outside the eighty largest that year, and the missing year is
+        # a SMALL one. Leaving it out makes the years that remain look more alike
+        # than they are and inflates every deviation measured against them. The
+        # comparative signals therefore run only where the key is present in
+        # every complete year; the descriptive one below states its own coverage.
+        full_baseline = len(prior_complete) == len([fy for fy in complete if fy != live])
+        sep_shares = []
+        for fy in prior_complete:
+            v = byfy[fy]
+            tot = v["obl"] or 0.0
+            if tot > 0: sep_shares.append((fy, v["months"].get(12, 0.0) / tot * 100))
+        if not sep_shares: continue
+        med_share = _median([s for _, s in sep_shares])
+        med_sep = _median([byfy[fy]["months"].get(12, 0.0) for fy in prior_complete])
+
+        # -- S1  how much of this category's year has historically landed in
+        #        September. Not a finding: the shape of the system, published so
+        #        the deviations below can be read against it.
+        if med_sep >= 25e6:
+            signals.append({"signal_kind": "eoy_concentration", "dimension": dim, "dim_key": k,
+                "dim_label": lab, "fiscal_year": live, "metric": round(med_share, 3),
+                "baseline": round(med_share, 3), "mad": 0.0, "deviation": None,
+                "amount": round(med_sep, 2), "baseline_years": len(prior_complete),
+                "direction": "high" if med_share >= 20 else "normal",
+                "headline": f"{lab} has put a median {med_share:.1f}% of its year into September",
+                "evidence": "; ".join(f"FY{fy} {s:.1f}%" for fy, s in sep_shares),
+                "method": "median of the category's September share across its complete years"})
+
+        # -- S2  a year whose September share its own history does not explain.
+        for fy in (prior_complete if full_baseline else ()):
+            tot = byfy[fy]["obl"] or 0.0
+            if tot <= 0: continue
+            share = byfy[fy]["months"].get(12, 0.0) / tot * 100
+            others = [s for f2, s in sep_shares if f2 != fy]
+            z, med, mad = _mad_z(share, others)
+            if z is not None and abs(z) >= 3.0 and byfy[fy]["months"].get(12, 0.0) >= 50e6:
+                signals.append({"signal_kind": "eoy_deviation", "dimension": dim, "dim_key": k,
+                    "dim_label": lab, "fiscal_year": fy, "metric": round(share, 3),
+                    "baseline": round(med, 3), "mad": round(mad, 3), "deviation": round(z, 2),
+                    "amount": round(byfy[fy]["months"].get(12, 0.0), 2),
+                    "baseline_years": len(others),
+                    "direction": "high" if z > 0 else "low",
+                    "headline": f"FY{fy}: {lab} put {share:.1f}% of its year into September "
+                                f"against a {med:.1f}% norm",
+                    "evidence": "; ".join(f"FY{f2} {s:.1f}%" for f2, s in sep_shares),
+                    "method": "robust z of the September share against the median and scaled "
+                              "median absolute deviation of the category's other complete years"})
+
+        if live is None or live_full_months < 3 or not full_baseline: continue
+        M = live_full_months
+        live_ytd = ytd(byfy, live, M)
+        prior_ytd = [ytd(byfy, fy, M) for fy in prior_complete]
+
+        # -- S3  pace against the same window of prior years. The window is the
+        #        live year's whole months only, so nothing is compared with a
+        #        part-month.
+        z, med, mad = _mad_z(live_ytd, prior_ytd)
+        if med > 0 and (live_ytd >= 100e6 or med >= 100e6):
+            ratio = live_ytd / med * 100
+            if z is not None and abs(z) >= 2.5:
+                signals.append({"signal_kind": "pace", "dimension": dim, "dim_key": k,
+                    "dim_label": lab, "fiscal_year": live, "metric": round(live_ytd, 2),
+                    "baseline": round(med, 2), "mad": round(mad, 2), "deviation": round(z, 2),
+                    "amount": round(live_ytd - med, 2), "baseline_years": len(prior_ytd),
+                    "direction": "high" if z > 0 else "low",
+                    "headline": f"{lab} is at {ratio:.0f}% of its own {FY_MONTH_LABEL[0]}–"
+                                f"{FY_MONTH_LABEL[M-1]} norm with the year end ahead",
+                    "evidence": "; ".join(f"FY{fy} ${v/1e9:,.2f}B" for fy, v in
+                                          zip(prior_complete, prior_ytd))
+                                + f"; FY{live} ${live_ytd/1e9:,.2f}B",
+                    "method": f"obligations in fiscal months 1-{M} against the median of the "
+                              "same window in the category's complete years"})
+
+        # -- S4  what September looks like if this category behaves as it has.
+        #        A ratio of September to the same observed window, not a share of
+        #        a full year: the live year has no full year to take a share of.
+        ratios = [byfy[fy]["months"].get(12, 0.0) / max(1.0, ytd(byfy, fy, M))
+                  for fy in prior_complete if ytd(byfy, fy, M) > 0]
+        if ratios and live_ytd > 0:
+            lo, hi, mid = min(ratios), max(ratios), _median(ratios)
+            proj = live_ytd * mid
+            if proj >= 100e6:
+                signals.append({"signal_kind": "eoy_projection", "dimension": dim, "dim_key": k,
+                    "dim_label": lab, "fiscal_year": live, "metric": round(proj, 2),
+                    "baseline": round(med_sep, 2), "mad": 0.0, "deviation": None,
+                    "amount": round(proj, 2), "baseline_years": len(ratios),
+                    "direction": "high" if proj > med_sep else "low",
+                    "headline": f"{lab} projects ${proj/1e9:,.2f}B of September obligations",
+                    "evidence": f"FY{live} months 1-{M} ${live_ytd/1e9:,.2f}B; September ran "
+                                f"{lo*100:.0f}%–{hi*100:.0f}% of that window in FY"
+                                f"{prior_complete[0]}–FY{prior_complete[-1]}, median {mid*100:.0f}%",
+                    "method": "the live year's observed window scaled by the median ratio of "
+                              "September to the same window in prior complete years; the range "
+                              "is the observed minimum and maximum of that ratio"})
+
+        # -- S5  a month of the live year its own history does not explain.
+        for m in range(1, M + 1):
+            v = byfy.get(live, {}).get("months", {}).get(m, 0.0)
+            hist = [byfy[fy]["months"].get(m, 0.0) for fy in prior_complete]
+            z, med_m, mad_m = _mad_z(v, hist)
+            if z is not None and abs(z) >= 4.0 and abs(v) >= 50e6:
+                signals.append({"signal_kind": "spike", "dimension": dim, "dim_key": k,
+                    "dim_label": lab, "fiscal_year": live, "metric": round(v, 2),
+                    "baseline": round(med_m, 2), "mad": round(mad_m, 2), "deviation": round(z, 2),
+                    "amount": round(v - med_m, 2), "baseline_years": len(base),
+                    "direction": "high" if z > 0 else "low",
+                    "headline": f"{lab} obligated ${v/1e9:,.2f}B in {FY_MONTH_LABEL[m-1]} "
+                                f"against a ${med_m/1e9:,.2f}B norm",
+                    "evidence": "; ".join(f"FY{fy} ${b/1e6:,.0f}M" for fy, b in
+                                          zip(prior_complete, hist))
+                                + f"; FY{live} ${v/1e6:,.0f}M",
+                    "method": f"robust z of {FY_MONTH_LABEL[m-1]} against the same month in the "
+                              "category's complete years"})
+
+        # -- S6  a category that was not being bought and now is.
+        if live_ytd >= 25e6 and all(v <= 0 for v in prior_ytd):
+            signals.append({"signal_kind": "new_activity", "dimension": dim, "dim_key": k,
+                "dim_label": lab, "fiscal_year": live, "metric": round(live_ytd, 2),
+                "baseline": 0.0, "mad": 0.0, "deviation": None, "amount": round(live_ytd, 2),
+                "baseline_years": len(prior_ytd), "direction": "high",
+                "headline": f"{lab} has ${live_ytd/1e6:,.0f}M in FY{live} and nothing in the "
+                            f"same window of any prior year held",
+                "evidence": f"FY{prior_complete[0]}–FY{prior_complete[-1]} months 1-{M}: $0",
+                "method": "no obligations in the same window of any prior complete year"})
+
+    for s in signals:
+        s["severity_rank"] = 0
+        s.setdefault("full_baseline", True)
+    order = {"eoy_deviation": 0, "spike": 1, "pace": 2, "new_activity": 3,
+             "eoy_projection": 4, "eoy_concentration": 5}
+    signals.sort(key=lambda s: (order.get(s["signal_kind"], 9),
+                                -abs(s["deviation"] or 0), -abs(s["amount"] or 0)))
+    for i, s in enumerate(signals, 1): s["severity_rank"] = i
+
+    # ----- executor scorecard, by awarding sub-agency -------------------------
+    if live is not None and live_full_months >= 3:
+        M = live_full_months
+        for (dim, k), byfy in series.items():
+            if dim != "sub_agency": continue
+            prior_complete = [fy for fy in complete if fy in byfy and fy != live]
+            if len(prior_complete) < 3 or live not in byfy: continue
+            live_ytd = ytd(byfy, live, M)
+            prior_ytd = [ytd(byfy, fy, M) for fy in prior_complete]
+            med = _median(prior_ytd)
+            sep_shares = [byfy[fy]["months"].get(12, 0.0) / max(1.0, byfy[fy]["obl"]) * 100
+                          for fy in prior_complete]
+            last5 = [byfy[fy]["last5"] / max(1.0, byfy[fy]["obl"]) * 100 for fy in prior_complete]
+            ratios = [byfy[fy]["months"].get(12, 0.0) / max(1.0, ytd(byfy, fy, M))
+                      for fy in prior_complete if ytd(byfy, fy, M) > 0]
+            executors.append({
+                "fiscal_year": live, "dim_key": k, "dim_label": labels[(dim, k)],
+                "ytd_obligation": round(live_ytd, 2), "ytd_norm": round(med, 2),
+                "pace_pct": round(live_ytd / med * 100, 2) if med else None,
+                "months_observed": M,
+                "sep_share_median_pct": round(_median(sep_shares), 3),
+                "last5_share_median_pct": round(_median(last5), 3),
+                "projected_sep": round(live_ytd * _median(ratios), 2) if ratios else None,
+                "projected_sep_low": round(live_ytd * min(ratios), 2) if ratios else None,
+                "projected_sep_high": round(live_ytd * max(ratios), 2) if ratios else None,
+                "baseline_years": len(prior_complete),
+                "actions_ytd": byfy[live]["act"]})
+        executors.sort(key=lambda r: -(r["ytd_obligation"] or 0))
+        for i, r in enumerate(executors, 1): r["rank_in_fy"] = i
+
+    # ----- exemplar actions ---------------------------------------------------
+    # The signals above are about categories. A reviewer's next question is
+    # always "which action", so the largest actions behind the two windows that
+    # matter -- the last complete year's September, and the live year to date --
+    # are carried with the description the contracting officer wrote. The scan
+    # is filtered to actions of $5M or more first, because the description column
+    # is the widest in the file and pulling it for four million rows to keep
+    # fifty is the one thing here that will not fit in memory.
+    exemplar_cols = cols + ["award_id_piid", "transaction_description",
+                            "prime_award_base_transaction_description", "action_type",
+                            "naics_description", "recipient_state_code"]
+
+    def emit(fy, bucket, recs, limit, last_day):
+        recs = sorted(recs, key=lambda r: -(r["federal_action_obligation"] or 0.0))
+        for rank, r in enumerate(recs[:limit], 1):
+            psc = str(r.get("product_or_service_code") or "")
+            gk, glab = psc_group_key(psc)
+            action_rows.append({
+                "fiscal_year": fy, "bucket": bucket, "rank_in_bucket": rank,
+                "action_date": r["action_date"].isoformat() if r.get("action_date") else None,
+                "day_of_fy": r.get("day_of_fy"),
+                "days_to_year_end": (None if not r.get("day_of_fy") else last_day - r["day_of_fy"]),
+                "award_id_piid": str(r.get("award_id_piid") or ""),
+                "recipient_name": str(r.get("recipient_name") or ""),
+                "recipient_state": str(r.get("recipient_state_code") or ""),
+                "sub_agency": str(r.get("awarding_sub_agency_name") or ""),
+                "office": str(r.get("awarding_office_name") or ""),
+                "psc": psc,
+                "psc_description": str(r.get("product_or_service_code_description") or ""),
+                "psc_class": gk, "psc_class_label": glab, "psc_kind": psc_kind(psc),
+                "naics_description": str(r.get("naics_description") or ""),
+                "pricing": CONTRACT_PRICING.get(str(r.get("type_of_contract_pricing") or ""),
+                                                str(r.get("type_of_contract_pricing") or "")),
+                "competition": EXTENT_COMPETED.get(str(r.get("extent_competed") or ""),
+                                                   str(r.get("extent_competed") or "")),
+                "action_type": str(r.get("action_type") or ""),
+                "obligation": round(r.get("federal_action_obligation") or 0.0, 2),
+                "description": (r.get("transaction_description")
+                                or r.get("prime_award_base_transaction_description") or "")[:600]})
+
+    want = [fy for fy in ([complete[-1]] if complete else []) + ([live] if live else []) if fy]
+    for fy in want:
+        p = os.path.join(base, f"vintage={current}/fy={fy}")
+        if not os.path.isdir(p): continue
+        d = ds.dataset(p, format="parquet")
+        last_day = fy_meta[fy]["last_day"]
+        epoch0 = (dt.date(fy - 1, 10, 1) - dt.date(1970, 1, 1)).days
+
+        def load(expr):
+            t = d.to_table(columns=exemplar_cols, filter=expr)
+            if not t.num_rows: return []
+            dofy = pc.add(pc.subtract(pc.cast(t["action_date"], pa.int32()),
+                                      pa.scalar(epoch0, pa.int32())), 1)
+            return t.append_column("day_of_fy", dofy).to_pylist()
+
+        big = load(ds.field("federal_action_obligation") >= 5_000_000)
+        emit(fy, "largest", big, 60, last_day)
+        # September is a calendar month of the same year as the fiscal year, so
+        # it can be filtered on the date column itself rather than on the derived
+        # day-of-year -- which is what keeps this a pushed-down scan instead of a
+        # full read.
+        sep = load((ds.field("action_date") >= dt.date(fy, 9, 1))
+                   & (ds.field("federal_action_obligation") >= 250_000))
+        emit(fy, "september", sep, 60, last_day)
+        emit(fy, "last5", [r for r in sep if r.get("day_of_fy")
+                           and r["day_of_fy"] >= last_day - 4], 60, last_day)
+        # The classes a year-end story is usually about. They are far too small
+        # to reach any dollar-ranked list, so they get their own, and the page
+        # says plainly that buying supplies in September is not itself a finding.
+        emit(fy, "september_supplies",
+             [r for r in sep
+              if psc_group_key(r.get("product_or_service_code"))[0] in PSC_SUPPLY_WATCH],
+             60, last_day)
+        n = len([a for a in action_rows if a["fiscal_year"] == fy])
+        print(f"  FY{fy}: {n:,} exemplar actions across "
+              f"{len({a['bucket'] for a in action_rows if a['fiscal_year']==fy})} buckets")
+        del big, sep
+
+    meta_rows = [{"fiscal_year": fy, "last_day_of_fy": m["last_day"],
+                  "last_action_date": (dt.date(fy - 1, 10, 1)
+                                       + dt.timedelta(days=m["last_day"] - 1)).isoformat(),
+                  "obligation": m["obligation"], "action_count": m["actions"],
+                  "is_complete_year": m["last_day"] >= 360,
+                  "full_months_observed": 12 if m["last_day"] >= 360 else
+                      ((dt.date(fy - 1, 10, 1) + dt.timedelta(days=m["last_day"] - 1)).month - 10) % 12}
+                 for fy, m in sorted(fy_meta.items())]
+    print(f"  {len(signals):,} signals, {len(executors)} executor rows, "
+          f"{len(action_rows):,} exemplar actions")
+    write(out, "timing.json", payload("contract_timing", current,
+          {"dm_fpds_day": day_rows, "dm_fpds_month": month_rows, "dm_fpds_eoy": eoy_rows,
+           "dm_fpds_year": meta_rows, "dm_exec_signal": signals,
+           "dm_exec_executor": executors, "dm_fpds_action": action_rows},
+          source_path="contracts", vintages=vintages()))
+
+
 # ------------------------------------------------------------------- main ---
-STEPS = {"exhibits": step_exhibits, "sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
+STEPS = {"exhibits": step_exhibits, "pb_display": step_pb_display, "execution": step_execution, "timing": step_timing, "sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
          "filec": step_filec, "assistance": step_assistance, "program": step_program,
          "knowledge": step_knowledge,
          "crosswalk": step_crosswalk, "catalog": step_catalog,
@@ -2796,7 +3957,7 @@ def main():
     for nm in names:
         print(f"[{nm}]")
         fn = STEPS[nm]
-        fn(a.out, a.fy) if nm in ("awards", "assistance", "program") else fn(a.out)
+        fn(a.out, a.fy) if nm in ("awards", "assistance", "program", "timing") else fn(a.out)
     print("done.")
 
 if __name__ == "__main__":
