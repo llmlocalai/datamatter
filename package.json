@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "etl": "python3 scripts/etl_analytics.py --step all",
+    "migrate": "node scripts/apply_schema.js",
     "knowledge-index": "python3 scripts/etl_knowledge_index.py",
     "load": "node scripts/load_analytics.js",
     "refresh": "npm run etl && npm run load && npm run knowledge-index",

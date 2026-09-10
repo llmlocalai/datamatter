@@ -104,7 +104,12 @@ export default async function ExecutionPage() {
   // 30 April; comparing to 4 August put three empty months into the live year's
   // total and none into anyone else's, which showed every organisation running
   // behind when they are all running ahead.
-  const sameDay = fpdsFocus?.frontierDayOfFy ?? fpdsFocus?.lastDayOfFy ?? 0;
+  // Null means this database predates the frontier column. There is no fallback:
+  // the only candidate is the year's last action date, which is the value the
+  // frontier exists to replace, so using it would restore the bug. The timing
+  // sections are withheld instead — see lib/schema.
+  const timingReady = fpdsFocus?.frontierDayOfFy != null;
+  const sameDay = fpdsFocus?.frontierDayOfFy ?? 0;
   const paceAt = (fy: number) => {
     const ps = pace.filter((p) => p.fiscalYear === fy && p.dayOfFy <= sameDay);
     return ps.length ? ps[ps.length - 1].cumObligation : 0;
@@ -115,7 +120,7 @@ export default async function ExecutionPage() {
         ? priorAtSameDay[(priorAtSameDay.length - 1) / 2]
         : (priorAtSameDay[priorAtSameDay.length / 2 - 1] + priorAtSameDay[priorAtSameDay.length / 2]) / 2)
     : 0;
-  const focusYtd = fpdsFocus?.frontierObligation ?? fpdsFocus?.obligation ?? 0;
+  const focusYtd = timingReady ? Number(fpdsFocus?.frontierObligation ?? 0) : 0;
 
   const projSep = executors.reduce((s, e) => s + (e.projectedSep ?? 0), 0);
   const projLow = executors.reduce((s, e) => s + (e.projectedSepLow ?? 0), 0);
@@ -211,16 +216,21 @@ export default async function ExecutionPage() {
             value={fmtT(Number(annual?.obligations ?? 0))}
             sub={`${fmtPct(annualPct)} of obligations are on annual appropriations`}
             tone="warning" />
-          <StatTile label={`Contract obligations to ${fpdsFocus?.frontierDate ?? 'the reporting frontier'}`}
-            value={fmtB(focusYtd)}
-            sub={(medianPrior
+          <StatTile label={timingReady
+              ? `Contract obligations to ${fpdsFocus?.frontierDate}`
+              : 'Contract obligations, year to date'}
+            value={timingReady ? fmtB(focusYtd) : '—'}
+            sub={!timingReady ? 'Awaiting a refresh — see the note below' : (medianPrior
               ? `${fmtPct(focusYtd / medianPrior * 100)} of the median of FY`
                 + `${fpdsClosed[0]?.fiscalYear}–FY${fpdsClosed[fpdsClosed.length - 1]?.fiscalYear} at the same point`
                 + ` · ${fpdsFocus?.fullMonthsObserved ?? 0} whole months`
               : 'No same-point comparison available')
               + (cov ? ` · a ${fmtPct(cov.contractPct, 0)} subset of obligations` : '')} />
-          <StatTile label="September projects to" value={projSep ? fmtB(projSep) : '—'}
-            sub={projSep ? `Range ${fmtB(projLow)}–${fmtB(projHigh)} across the sub-agencies` : 'Not computable'} />
+          <StatTile label="September projects to"
+            value={timingReady && projSep ? fmtB(projSep) : '—'}
+            sub={!timingReady ? 'Awaiting a refresh — see the note below'
+              : projSep ? `Range ${fmtB(projLow)}–${fmtB(projHigh)} across the sub-agencies`
+              : 'Not computable'} />
         </div>
         <Caveat>
           The September figure is a <strong className="text-navy-200">projection</strong>: each
@@ -314,154 +324,179 @@ export default async function ExecutionPage() {
         ) : <Empty />}
       </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      <Section title="When contract money moves"
-        note={`Cumulative CONTRACT obligations by day of the fiscal year — `
-          + `${cov ? fmtPct(cov.contractPct) : 'about a third'} of Department obligations in FY`
-          + `${cov?.fiscalYear ?? ''}, not the whole of execution. It is here because an action `
-          + `carries a date and an account submission does not. The FY${currentFy} line stops at the `
-          + `reporting frontier — ${fpdsFocus?.frontierDate ?? 'where the file is complete'}, `
-          + `${fpdsFocus?.fullMonthsObserved ?? 0} whole months in — and the gap between the two `
-          + `markers is the reporting lag, not a fall in spending.`}>
-        {pace.length ? (
-          <>
-            <PaceChart points={pace} liveYear={currentFy}
-              todayDayOfFy={dayOfFiscalYear(now, currentFy)}
-              dataEndsDay={fpdsFocus?.frontierDayOfFy ?? dayOfFiscalYear(now, currentFy)} />
-            {fpdsFocus && !fpdsFocus.isCompleteYear && (
-              <Caveat>
-                The FY{fpdsFocus.fiscalYear} file carries actions dated as late as{' '}
-                <strong className="text-navy-200">{fpdsFocus.lastActionDate}</strong>, but it is
-                substantially complete only to{' '}
-                <strong className="text-navy-200">{fpdsFocus.frontierDate}</strong>: October through
-                April carry between 280,000 and 400,000 actions a month, and everything after the
-                frontier comes to {fmtInt(fpdsFocus.tailActions)} actions worth{' '}
-                {fmtT(fpdsFocus.tailObligation)}. Every figure on this page measures the live year to
-                the frontier and every prior year to the same point. Taking the last dated action as
-                the extent of the file instead put three near-empty months into FY
-                {fpdsFocus.fiscalYear}&rsquo;s total and none into anyone else&rsquo;s — which showed
-                every organisation running behind its own norm when all of them are running ahead.
-                Control <strong className="text-navy-200">TIME-04</strong> asserts the frontier and
-                publishes what it excludes.
-              </Caveat>
-            )}
-            {cov && (
-              <div className="mt-6">
-                <DataTable
-                  head={['Fiscal year', 'Department obligations', 'Contract obligations',
-                         'Share carrying a date']}
-                  rows={coverage.map((c) => [
-                    `FY${c.fiscalYear}${c.isPartialAccounts ? ' (in progress)' : ''}`,
-                    fmtT(c.departmentObligations), fmtT(c.contractObligations),
-                    fmtPct(c.contractPct),
-                  ])}
-                  caption={`What the curve above covers. The largest block it does not is personnel `
-                    + `compensation and benefits — ${personnel ? fmtT(Number(personnel.obligations)) : ''} `
-                    + `${personnel && mcTotal ? `(${fmtPct(Number(personnel.obligations) / mcTotal * 100)} of `
-                        + `FY${lastClosed?.fiscalYear})` : ''}, which is paid on a schedule and has no `
-                    + `year-end timing question in it. The in-progress year's share is lower on both `
-                    + `counts because its two sources reach different dates.`}
-                />
-              </div>
-            )}
-            <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div>
-                <h3 className="text-sm font-semibold text-navy-200 mb-3">
-                  The last three weeks of a closed year
-                </h3>
-                {tail.length ? (
+      {timingReady ? (
+        <>
+        {/* ---------------------------------------------------------------- */}
+        <Section title="When contract money moves"
+          note={`Cumulative CONTRACT obligations by day of the fiscal year — `
+            + `${cov ? fmtPct(cov.contractPct) : 'about a third'} of Department obligations in FY`
+            + `${cov?.fiscalYear ?? ''}, not the whole of execution. It is here because an action `
+            + `carries a date and an account submission does not. The FY${currentFy} line stops at the `
+            + `reporting frontier — ${fpdsFocus?.frontierDate ?? 'where the file is complete'}, `
+            + `${fpdsFocus?.fullMonthsObserved ?? 0} whole months in — and the gap between the two `
+            + `markers is the reporting lag, not a fall in spending.`}>
+          {pace.length ? (
+            <>
+              <PaceChart points={pace} liveYear={currentFy}
+                todayDayOfFy={dayOfFiscalYear(now, currentFy)}
+                dataEndsDay={fpdsFocus?.frontierDayOfFy ?? dayOfFiscalYear(now, currentFy)} />
+              {fpdsFocus && !fpdsFocus.isCompleteYear && (
+                <Caveat>
+                  The FY{fpdsFocus.fiscalYear} file carries actions dated as late as{' '}
+                  <strong className="text-navy-200">{fpdsFocus.lastActionDate}</strong>, but it is
+                  substantially complete only to{' '}
+                  <strong className="text-navy-200">{fpdsFocus.frontierDate}</strong>: October through
+                  April carry between 280,000 and 400,000 actions a month, and everything after the
+                  frontier comes to {fmtInt(fpdsFocus.tailActions)} actions worth{' '}
+                  {fmtT(fpdsFocus.tailObligation)}. Every figure on this page measures the live year to
+                  the frontier and every prior year to the same point. Taking the last dated action as
+                  the extent of the file instead put three near-empty months into FY
+                  {fpdsFocus.fiscalYear}&rsquo;s total and none into anyone else&rsquo;s — which showed
+                  every organisation running behind its own norm when all of them are running ahead.
+                  Control <strong className="text-navy-200">TIME-04</strong> asserts the frontier and
+                  publishes what it excludes.
+                </Caveat>
+              )}
+              {cov && (
+                <div className="mt-6">
                   <DataTable
-                    head={['Fiscal year', 'Final 5 days', 'Share of the year', 'Largest single day']}
-                    rows={fpdsClosed.map((y) => {
-                      const rows = tail.filter((t) => t.fiscalYear === y.fiscalYear);
-                      const last5 = rows.filter((t) => t.daysToEnd <= 4)
-                        .reduce((s, t) => s + t.obligation, 0);
-                      const biggest = rows.reduce((a, b) => (b.obligation > (a?.obligation ?? 0) ? b : a), rows[0]);
-                      return [`FY${y.fiscalYear}`, fmtB(last5),
-                              fmtPct(y.obligation ? last5 / y.obligation * 100 : 0),
-                              biggest ? `${fmtB(biggest.obligation)} on day ${biggest.dayOfFy}` : '—'];
-                    })}
-                    caption="Concentration at the end of a year is the shape of an annual appropriation, not a finding in itself. It is published so the deviations further down can be read against it."
+                    head={['Fiscal year', 'Department obligations', 'Contract obligations',
+                           'Share carrying a date']}
+                    rows={coverage.map((c) => [
+                      `FY${c.fiscalYear}${c.isPartialAccounts ? ' (in progress)' : ''}`,
+                      fmtT(c.departmentObligations), fmtT(c.contractObligations),
+                      fmtPct(c.contractPct),
+                    ])}
+                    caption={`What the curve above covers. The largest block it does not is personnel `
+                      + `compensation and benefits — ${personnel ? fmtT(Number(personnel.obligations)) : ''} `
+                      + `${personnel && mcTotal ? `(${fmtPct(Number(personnel.obligations) / mcTotal * 100)} of `
+                          + `FY${lastClosed?.fiscalYear})` : ''}, which is paid on a schedule and has no `
+                      + `year-end timing question in it. The in-progress year's share is lower on both `
+                      + `counts because its two sources reach different dates.`}
                   />
-                ) : <Empty />}
+                </div>
+              )}
+              <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div>
+                  <h3 className="text-sm font-semibold text-navy-200 mb-3">
+                    The last three weeks of a closed year
+                  </h3>
+                  {tail.length ? (
+                    <DataTable
+                      head={['Fiscal year', 'Final 5 days', 'Share of the year', 'Largest single day']}
+                      rows={fpdsClosed.map((y) => {
+                        const rows = tail.filter((t) => t.fiscalYear === y.fiscalYear);
+                        const last5 = rows.filter((t) => t.daysToEnd <= 4)
+                          .reduce((s, t) => s + t.obligation, 0);
+                        const biggest = rows.reduce((a, b) => (b.obligation > (a?.obligation ?? 0) ? b : a), rows[0]);
+                        return [`FY${y.fiscalYear}`, fmtB(last5),
+                                fmtPct(y.obligation ? last5 / y.obligation * 100 : 0),
+                                biggest ? `${fmtB(biggest.obligation)} on day ${biggest.dayOfFy}` : '—'];
+                      })}
+                      caption="Concentration at the end of a year is the shape of an annual appropriation, not a finding in itself. It is published so the deviations further down can be read against it."
+                    />
+                  ) : <Empty />}
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-navy-200 mb-3">
+                    Where September lands, by sub-agency
+                    {lastClosed ? ` · FY${lastClosed.fiscalYear}` : ''}
+                  </h3>
+                  {eoySub.length ? (
+                    <BarList
+                      rows={eoySub.slice(0, 10).map((e) => ({
+                        key: e.dimKey, label: e.dimLabel, value: e.sepObligation,
+                        meta: `${fmtPct(e.sepSharePct)} of its year · ${fmtPct(e.last5SharePct)} in the final five days`,
+                      }))}
+                      colour="var(--series-2)"
+                    />
+                  ) : <Empty />}
+                </div>
               </div>
-              <div>
-                <h3 className="text-sm font-semibold text-navy-200 mb-3">
-                  Where September lands, by sub-agency
-                  {lastClosed ? ` · FY${lastClosed.fiscalYear}` : ''}
-                </h3>
-                {eoySub.length ? (
-                  <BarList
-                    rows={eoySub.slice(0, 10).map((e) => ({
-                      key: e.dimKey, label: e.dimLabel, value: e.sepObligation,
-                      meta: `${fmtPct(e.sepSharePct)} of its year · ${fmtPct(e.last5SharePct)} in the final five days`,
-                    }))}
-                    colour="var(--series-2)"
-                  />
-                ) : <Empty />}
-              </div>
-            </div>
-          </>
-        ) : <Empty />}
-        <div className="mt-4"><ProvenanceBar p={provT} /></div>
-      </Section>
+            </>
+          ) : <Empty />}
+          <div className="mt-4"><ProvenanceBar p={provT} /></div>
+        </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      <Section title="Signals worth asking about"
-        note="Each one compares a category with its own prior years, never with a Department-wide average — these categories differ by three orders of magnitude in size and a shared threshold would only ever select the largest of them. A signal is a question, not a finding.">
-        {signals.length
-          ? <SignalBoard signals={signals} totalsByKind={totalsByKind}
-              totalsByDimension={totalsByDimension} shown={signals.length} total={signalTotal} />
-          : <Empty />}
-        <Caveat>
-          None of these observes impropriety, and several of the largest are certainly ordinary: a
-          multiyear definitisation, an exercised option or a supplemental lands as one very large
-          action with nothing unusual in it beyond its size. The deviation is a robust z — the
-          distance from the median of the category&rsquo;s own years, scaled by their median absolute
-          deviation, floored so that a category with a nearly flat history cannot produce an
-          arbitrarily large number, and capped at 99. A capped value means <em>far outside its own
-          history</em> rather than a measurement. Control{' '}
-          <strong className="text-navy-200">TIME-02</strong> refuses a signal computed against fewer
-          than three of a category&rsquo;s own years.
-        </Caveat>
-      </Section>
+        {/* ---------------------------------------------------------------- */}
+        <Section title="Signals worth asking about"
+          note="Each one compares a category with its own prior years, never with a Department-wide average — these categories differ by three orders of magnitude in size and a shared threshold would only ever select the largest of them. A signal is a question, not a finding.">
+          {signals.length
+            ? <SignalBoard signals={signals} totalsByKind={totalsByKind}
+                totalsByDimension={totalsByDimension} shown={signals.length} total={signalTotal} />
+            : <Empty />}
+          <Caveat>
+            None of these observes impropriety, and several of the largest are certainly ordinary: a
+            multiyear definitisation, an exercised option or a supplemental lands as one very large
+            action with nothing unusual in it beyond its size. The deviation is a robust z — the
+            distance from the median of the category&rsquo;s own years, scaled by their median absolute
+            deviation, floored so that a category with a nearly flat history cannot produce an
+            arbitrarily large number, and capped at 99. A capped value means <em>far outside its own
+            history</em> rather than a measurement. Control{' '}
+            <strong className="text-navy-200">TIME-02</strong> refuses a signal computed against fewer
+            than three of a category&rsquo;s own years.
+          </Caveat>
+        </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      <Section title="Who is executing, and how much of it is left to September"
-        note={`Each sub-agency against its own norm for the same whole months, with the September and `
-          + `final-five-day dependence its own prior years show. Ordered by size, because a pace `
-          + `percentage on a small organisation is not comparable with one on the Navy.`}>
-        {executors.length ? (
-          <DataTable
-            head={['Sub-agency', 'Year to date', 'Own norm, same months', 'Pace',
-                   'September share, median', 'Final five days, median', 'September projects to']}
-            rows={executors.map((e) => [
-              e.dimLabel,
-              fmtB(e.ytdObligation),
-              fmtB(e.ytdNorm),
-              e.pacePct === null ? '—' : `${fmtPct(e.pacePct, 0)}`,
-              e.sepShareMedianPct === null ? '—' : fmtPct(e.sepShareMedianPct),
-              e.last5ShareMedianPct === null ? '—' : fmtPct(e.last5ShareMedianPct),
-              e.projectedSep === null ? '—'
-                : `${fmtB(e.projectedSep)}  (${fmtB(e.projectedSepLow ?? 0)}–${fmtB(e.projectedSepHigh ?? 0)})`,
-            ])}
-            caption={`Pace is the year to date over the median of the same ${executors[0]?.monthsObserved ?? 0} `
-              + `whole fiscal months in that organisation's own complete years. Under 100% is not `
-              + `behind in any contractual sense: an organisation whose September has always carried a `
-              + `fifth of its year is exactly where it has always been at this point.`}
-          />
-        ) : <Empty />}
-      </Section>
+        {/* ---------------------------------------------------------------- */}
+        <Section title="Who is executing, and how much of it is left to September"
+          note={`Each sub-agency against its own norm for the same whole months, with the September and `
+            + `final-five-day dependence its own prior years show. Ordered by size, because a pace `
+            + `percentage on a small organisation is not comparable with one on the Navy.`}>
+          {executors.length ? (
+            <DataTable
+              head={['Sub-agency', 'Year to date', 'Own norm, same months', 'Pace',
+                     'September share, median', 'Final five days, median', 'September projects to']}
+              rows={executors.map((e) => [
+                e.dimLabel,
+                fmtB(e.ytdObligation),
+                fmtB(e.ytdNorm),
+                e.pacePct === null ? '—' : `${fmtPct(e.pacePct, 0)}`,
+                e.sepShareMedianPct === null ? '—' : fmtPct(e.sepShareMedianPct),
+                e.last5ShareMedianPct === null ? '—' : fmtPct(e.last5ShareMedianPct),
+                e.projectedSep === null ? '—'
+                  : `${fmtB(e.projectedSep)}  (${fmtB(e.projectedSepLow ?? 0)}–${fmtB(e.projectedSepHigh ?? 0)})`,
+              ])}
+              caption={`Pace is the year to date over the median of the same ${executors[0]?.monthsObserved ?? 0} `
+                + `whole fiscal months in that organisation's own complete years. Under 100% is not `
+                + `behind in any contractual sense: an organisation whose September has always carried a `
+                + `fifth of its year is exactly where it has always been at this point.`}
+            />
+          ) : <Empty />}
+        </Section>
 
-      {/* ---------------------------------------------------------------- */}
-      <Section title="What a year end actually buys"
-        note="The individual actions, with the description the contracting officer wrote on them.">
-        {actions.length
-          ? <ActionTable actions={actions}
-              years={Array.from(new Set(actions.map((a) => a.fiscalYear))).sort((a, b) => b - a)} />
-          : <Empty />}
-      </Section>
-
+        {/* ---------------------------------------------------------------- */}
+        <Section title="What a year end actually buys"
+          note="The individual actions, with the description the contracting officer wrote on them.">
+          {actions.length
+            ? <ActionTable actions={actions}
+                years={Array.from(new Set(actions.map((a) => a.fiscalYear))).sort((a, b) => b - a)} />
+            : <Empty />}
+        </Section>
+        </>
+      ) : (
+        <Section title="Contract timing is not available from this load"
+          note="Everything above comes from the account files and is current. The timing sections are withheld.">
+          <Caveat>
+            The timing figures on this page — the day-by-day curve, the year-end shares, the signals
+            and the September projection — are all measured to a{' '}
+            <strong className="text-navy-200">reporting frontier</strong>, the point at which the
+            contract file stops being substantially complete. This database has no frontier recorded,
+            which means it was migrated before that column existed.
+            <br /><br />
+            The figures are withheld rather than computed from the year&rsquo;s last action date.
+            That date is the value the frontier was introduced to replace: FY2026&rsquo;s file carries
+            actions to 4 August but is complete only to 30 April, and measuring to the later date put
+            three near-empty months into the live year and none into any other — which showed every
+            organisation running behind its own norm when all of them are running ahead. A fallback
+            here would restore that, quietly, on a page built to support a decision.
+            <br /><br />
+            Run <code className="font-mono text-accent-400 text-sm">npm run migrate</code> then{' '}
+            <code className="font-mono text-accent-400 text-sm">npm run refresh</code> on a machine
+            with access to the warehouse.
+          </Caveat>
+        </Section>
+      )}
       {/* ---------------------------------------------------------------- */}
       <Section title={`Scope, before any of it counts`}
         note="File A carries five agency identifier codes. Four are the Department; 011 is the Executive Office of the President. Every figure on this page uses the Department scope only.">

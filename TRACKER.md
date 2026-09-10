@@ -1,6 +1,6 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-10 (the reporting frontier, FY2026 as the default year, and what the timing view actually covers)
+- **Last updated:** 2026-09-10 (release order: migrate, refresh, deploy)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (2026-09-10):** `tsc --noEmit` clean and `next build` green, 27 routes,
   run against a full local Postgres load of every staged extract. All 18 pages and
@@ -16,6 +16,41 @@
   TIME-04, neither of which did until it was rewritten).
 
 ---
+
+## Done — 2026-09-10 (thirteenth pass) — the deploy that broke on a column
+
+The FY2026 frontier release was pushed before the schema reached Neon.
+`next build` on Vercel: `column y.frontier_day_of_fy does not exist`, three
+times, then `Export encountered errors on following paths: /execution/page` and
+exit 1. **The whole site failed to deploy over one section of one page**, because
+the build prerenders every page against the live database.
+
+- [x] **`npm run migrate`**, and `scripts/apply_schema.js` rewritten to deserve
+  it. It was applying `database/schema.neon.sql` — the FY2027 war-budget schema,
+  not the analytics one — so it had never once applied the table definitions this
+  site actually reads. It also connected with `rejectUnauthorized: false`, which
+  CLAUDE.md forbids by name. It now applies both schema files, verifies the
+  certificate as the loader does, and reports the table and column delta. Schema
+  only: no data is written, so it is safe to run against a live site.
+- [x] **The release order is written down**: `npm run migrate` → `npm run refresh`
+  → `git push`. `npm run verify` before pushing catches this class of failure on
+  the machine rather than in CI, because it runs the same prerender.
+- [x] **`lib/schema.ts` — the read-side guard.** A page can ask whether the
+  columns it needs exist and withhold that section, rather than failing the
+  build for every other page. Cached per process, one `information_schema` query.
+- [x] **The guard does not fall back, on purpose.** The only candidate fallback
+  for a missing reporting frontier is the year's last action date — precisely the
+  value the frontier was introduced to replace. A fallback would have silently
+  restored the three-empty-months bug on a page built to support a decision. So
+  `/execution` withholds the timing sections and prints why, with the two
+  commands that fix it. The account-file sections above are current and stay.
+
+Verified both directions on a local Postgres: dropped the six frontier columns
+and rebuilt — **build green**, timing withheld with the notice, the two contract
+tiles reading "—", the Department-wide sections intact. Then `npm run migrate`
+(+33 columns), reload, rebuild — **build green**, timing restored, all 18 pages
+200.
+
 
 ## Done — 2026-09-10 (twelfth pass) — the timing view says what it covers
 

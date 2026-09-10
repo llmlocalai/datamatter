@@ -19,6 +19,7 @@
  * compared with and that is the easiest mistake on this page to make silently.
  */
 import { query } from './db';
+import { missingColumns } from './schema';
 
 export const SCOPE = 'DOW';
 
@@ -180,24 +181,44 @@ export interface FpdsYear {
   fiscalYear: number; lastDayOfFy: number; lastActionDate: string | null;
   obligation: number; actionCount: number; isCompleteYear: boolean;
   fullMonthsObserved: number;
-  /** Where the file substantially IS, which is not where its latest date is. */
-  frontierDayOfFy: number; frontierDate: string | null;
+  /** Where the file substantially IS, which is not where its latest date is.
+   *  Null on a database migrated before the column existed — see lib/schema. */
+  frontierDayOfFy: number | null; frontierDate: string | null;
   frontierObligation: number; frontierActions: number;
   /** What falls after the frontier and is excluded from every comparison. */
   tailActions: number; tailObligation: number;
 }
+const FRONTIER_COLS = ['frontier_day_of_fy', 'frontier_date', 'frontier_obligation',
+                       'frontier_actions', 'tail_actions', 'tail_obligation'];
+
+/**
+ * The years, and whether this database knows where each file's data actually
+ * ends.
+ *
+ * Every timing figure on the site is measured to the reporting frontier. A
+ * database migrated before that column existed cannot supply one, and the
+ * fallback -- the year's last action date -- is exactly the value the frontier
+ * replaced, so it is not offered: `frontierDayOfFy` comes back null and the
+ * page withholds the section. See lib/schema.
+ */
 export async function getFpdsYears(): Promise<FpdsYear[]> {
+  const missing = await missingColumns('dm_fpds_year', FRONTIER_COLS);
+  const frontier = missing.length
+    ? `NULL::int AS "frontierDayOfFy", NULL::text AS "frontierDate",
+       0 AS "frontierObligation", 0 AS "frontierActions",
+       0 AS "tailActions", 0 AS "tailObligation"`
+    : `y.frontier_day_of_fy AS "frontierDayOfFy",
+       to_char(y.frontier_date,'YYYY-MM-DD') AS "frontierDate",
+       y.frontier_obligation AS "frontierObligation",
+       y.frontier_actions AS "frontierActions",
+       y.tail_actions AS "tailActions", y.tail_obligation AS "tailObligation"`;
   return query<FpdsYear>(
     `SELECT y.fiscal_year AS "fiscalYear", y.last_day_of_fy AS "lastDayOfFy",
             to_char(y.last_action_date,'YYYY-MM-DD') AS "lastActionDate",
             y.obligation, y.action_count AS "actionCount",
             y.is_complete_year AS "isCompleteYear",
             y.full_months_observed AS "fullMonthsObserved",
-            y.frontier_day_of_fy AS "frontierDayOfFy",
-            to_char(y.frontier_date,'YYYY-MM-DD') AS "frontierDate",
-            y.frontier_obligation AS "frontierObligation",
-            y.frontier_actions AS "frontierActions",
-            y.tail_actions AS "tailActions", y.tail_obligation AS "tailObligation"
+            ${frontier}
        FROM dm_fpds_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
       ORDER BY y.fiscal_year`);
 }

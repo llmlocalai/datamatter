@@ -290,6 +290,37 @@ at each step, because the loss happens in the sources rather than in the extract
 `/traceability` is the page about that break. Do not write copy on `/program`
 that implies the chain is tighter than this.
 
+### The release order: migrate, refresh, deploy
+
+**The build prerenders every page against the live database.** A query naming a
+column the database has not been migrated to yet does not fail a request — it
+fails the BUILD, and the deploy with it. Three steps, in this order:
+
+```bash
+npm run migrate    # schema only. Idempotent, safe on a live site, seconds.
+npm run refresh    # ETL + load + knowledge index. Minutes.
+git push           # the deploy, which prerenders against the two above.
+```
+
+Pushing first is what broke the FY2026 frontier release:
+`column y.frontier_day_of_fy does not exist`, and `next build` exited 1 over one
+section of one page. `npm run verify` before pushing catches it, because it runs
+the same prerender against the same database.
+
+`scripts/apply_schema.js` used to apply `schema.neon.sql` — the FY2027
+war-budget schema, not the analytics one — and connected with
+`rejectUnauthorized: false`. It now applies both schema files and verifies the
+certificate like the loader.
+
+**The read-side guard, and what it must never do.** `lib/schema.ts` lets a page
+ask whether the columns it needs exist, so a code deploy that lands ahead of a
+migration withholds one section instead of taking the site's build down.
+It must not fall back to the old column. On this release the only candidate
+fallback for a missing reporting frontier was the year's last action date —
+exactly the value the frontier replaced — so a fallback would have quietly
+restored the bug the frontier was added to fix. A missing column means the
+figures are unavailable, and the page says so.
+
 ### Schema changes on an already-loaded database
 
 `schema.analytics.sql` runs on every load and is `CREATE TABLE IF NOT EXISTS`
