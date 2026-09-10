@@ -20,6 +20,7 @@ Steps (run all with --step all):
   pb_display  all seven -1 display tables, latest books -> the FY2027 request page
   execution   File B at reported grain -> account x object class x activity detail
   timing      contract action dates -> daily pace, year-end concentration, signals
+  currency    USASpending submission calendar -> how far behind this load is
   program     contracts + File C -> program-level execution and account traceability
   knowledge   wiki + knowledge-bank folders -> definitions, inventory, hearings
   controls    control tests over everything already staged
@@ -4002,8 +4003,74 @@ def step_timing(out, only_fy=None):
           source_path="contracts", vintages=vintages()))
 
 
+# ----------------------------------------------------------------- currency ---
+# How far behind the published record this load is.
+#
+# Timeliness is the point of an execution page, and nothing in the warehouse
+# says how current the warehouse is. The account files carry the submission
+# period they were extracted at -- FY2026P09 -- but a period number only means
+# something beside the calendar of what has actually been published, and that
+# calendar lives at USASpending rather than in any file here.
+#
+# Measured on 2026-09-10: the warehouse holds FY2026 P09, covering June, which
+# was revealed on 2026-07-31. FY2026 P10, covering July, was revealed on
+# 2026-09-01 -- nine days earlier -- and is not in the warehouse, because the
+# warehouse snapshot was taken on 21 August. The site had no way to say that,
+# and so said nothing: it presented June as though it were current.
+#
+# This step is the only one that touches the network, and it is allowed to fail.
+# The sandbox this ETL is often exercised in cannot reach the API at all, and a
+# missing calendar must never block a load of real measures -- so a failure
+# writes nothing, warns, and leaves the previous calendar in place with its own
+# fetch date attached, which the page then shows rather than pretending.
+SUBMISSION_PERIODS_URL = \
+    "https://api.usaspending.gov/api/v2/references/submission_periods/"
+
+
+def step_currency(out):
+    import json as _json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(SUBMISSION_PERIODS_URL, timeout=30) as r:
+            feed = _json.loads(r.read())
+    except Exception as e:                                  # noqa: BLE001
+        print(f"  WARNING: could not reach the submission calendar ({type(e).__name__}).")
+        print("           No currency payload written. The previous calendar, if any,")
+        print("           stays with its own fetch date and the page reports on that;")
+        print("           CUR-01 reports how far behind the load is from whatever it has.")
+        return
+
+    now = dt.datetime.now(dt.timezone.utc)
+    rows = []
+    for p in feed.get("available_periods", []):
+        reveal = (p.get("submission_reveal_date") or "")[:10] or None
+        rows.append({
+            "fiscal_year": p.get("submission_fiscal_year"),
+            "fiscal_month": p.get("submission_fiscal_month"),
+            "fiscal_quarter": p.get("submission_fiscal_quarter"),
+            "is_quarter": bool(p.get("is_quarter")),
+            "period_start": (p.get("period_start_date") or "")[:10] or None,
+            "period_end": (p.get("period_end_date") or "")[:10] or None,
+            "submission_due_date": (p.get("submission_due_date") or "")[:10] or None,
+            "reveal_date": reveal,
+            # Revealed means the public record carries it now, which is the only
+            # sense in which it is available to this warehouse.
+            "is_revealed": bool(reveal and reveal <= now.date().isoformat()),
+        })
+    rows.sort(key=lambda r: (r["fiscal_year"] or 0, r["fiscal_month"] or 0, r["is_quarter"]))
+    monthly = [r for r in rows if not r["is_quarter"] and r["is_revealed"]]
+    newest = monthly[-1] if monthly else None
+    if newest:
+        print(f"  newest revealed monthly submission: FY{newest['fiscal_year']}"
+              f"P{newest['fiscal_month']:02d}, covering the month ending {newest['period_end']},"
+              f" revealed {newest['reveal_date']}")
+    print(f"  {len(rows):,} submission periods, {sum(1 for r in rows if r['is_revealed']):,} revealed")
+    write(out, "currency.json", payload("submission_calendar", now.date().isoformat(),
+          {"dm_submission_period": rows}, source_path=SUBMISSION_PERIODS_URL))
+
+
 # ------------------------------------------------------------------- main ---
-STEPS = {"exhibits": step_exhibits, "pb_display": step_pb_display, "execution": step_execution, "timing": step_timing, "sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
+STEPS = {"exhibits": step_exhibits, "pb_display": step_pb_display, "execution": step_execution, "timing": step_timing, "currency": step_currency, "sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
          "filec": step_filec, "assistance": step_assistance, "program": step_program,
          "knowledge": step_knowledge,
          "crosswalk": step_crosswalk, "catalog": step_catalog,

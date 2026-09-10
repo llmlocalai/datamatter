@@ -1497,3 +1497,30 @@ ALTER TABLE dm_fpds_year ADD COLUMN IF NOT EXISTS frontier_obligation numeric(20
 ALTER TABLE dm_fpds_year ADD COLUMN IF NOT EXISTS frontier_actions int;
 ALTER TABLE dm_fpds_year ADD COLUMN IF NOT EXISTS tail_actions int;
 ALTER TABLE dm_fpds_year ADD COLUMN IF NOT EXISTS tail_obligation numeric(20,2);
+
+-- The public submission calendar, so the site can say how far behind it is.
+--
+-- The account files carry the period they were extracted at; a period number
+-- means nothing without the calendar of what has actually been published.
+-- Measured on 2026-09-10: the warehouse held FY2026 P09 (June, revealed
+-- 2026-07-31) while FY2026 P10 (July) had been revealed on 2026-09-01 and was
+-- not in it, because the warehouse snapshot was taken on 21 August. The site
+-- had no way to say so, and therefore presented June as current.
+--
+-- Fetched from USASpending rather than derived, so it carries its own vintage:
+-- a calendar is only evidence of what was published as at the date it was read.
+CREATE TABLE IF NOT EXISTS dm_submission_period (
+  id                  bigserial PRIMARY KEY,
+  load_id             bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year         int,
+  fiscal_month        int,          -- 1 = October, 12 = September
+  fiscal_quarter      int,
+  is_quarter          boolean NOT NULL DEFAULT false,
+  period_start        date,
+  period_end          date,
+  submission_due_date date,
+  reveal_date         date,
+  is_revealed         boolean NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS dm_submission_period_idx
+  ON dm_submission_period (load_id, fiscal_year, fiscal_month, is_quarter);

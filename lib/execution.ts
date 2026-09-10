@@ -175,6 +175,85 @@ export async function getExecTree(a: {
   return { nodes: [], dim: null };
 }
 
+
+// ------------------------------------------------------------- currency ----
+
+export interface Currency {
+  /** What the account files in this load actually hold. */
+  heldPeriod: string | null; heldFiscalYear: number | null; heldMonth: number | null;
+  heldPeriodEnd: string | null;
+  /** The newest monthly submission revealed on the public calendar. */
+  newestPeriod: string | null; newestFiscalYear: number | null; newestMonth: number | null;
+  newestPeriodEnd: string | null; newestRevealDate: string | null;
+  /** How many submission periods behind the published record this load is. */
+  periodsBehind: number | null;
+  /** When the calendar itself was read. A calendar has a vintage like anything else. */
+  calendarVintage: string | null;
+  /** When the source directory the account files came from was last written. */
+  warehouseVintage: string | null;
+}
+
+const MONTH_END = ['October', 'November', 'December', 'January', 'February', 'March',
+                   'April', 'May', 'June', 'July', 'August', 'September'];
+/** 'FY2026P09' -> 'June 2026'. The period number is not a month anyone reads. */
+export function periodMonthName(fy: number, month: number): string {
+  const name = MONTH_END[month - 1] ?? `period ${month}`;
+  return `${name} ${month <= 3 ? fy - 1 : fy}`;
+}
+
+/**
+ * How current this load is against what has actually been published.
+ *
+ * The account files carry the submission period they were extracted at, and a
+ * period number means nothing on its own. Beside the public calendar it means
+ * everything: on 2026-09-10 this warehouse held FY2026 P09, covering June, while
+ * FY2026 P10 covering July had been revealed on 1 September and was not in it —
+ * because the warehouse snapshot was taken on 21 August. The page said nothing,
+ * and so presented June as current.
+ */
+export async function getCurrency(): Promise<Currency> {
+  const [held, newest, cal] = await Promise.all([
+    query<{ period: string; vintage: string }>(
+      `SELECT s.submission_period AS period, to_char(l.vintage,'YYYY-MM-DD') AS vintage
+         FROM dm_sbr_fy s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+        WHERE s.scope = $1 AND s.submission_period IS NOT NULL
+        ORDER BY s.fiscal_year DESC LIMIT 1`, [SCOPE]),
+    query<{ fiscal_year: number; fiscal_month: number; period_end: string; reveal_date: string }>(
+      `SELECT p.fiscal_year, p.fiscal_month,
+              to_char(p.period_end,'YYYY-MM-DD') AS period_end,
+              to_char(p.reveal_date,'YYYY-MM-DD') AS reveal_date
+         FROM dm_submission_period p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+        WHERE NOT p.is_quarter AND p.is_revealed
+        ORDER BY p.fiscal_year DESC, p.fiscal_month DESC LIMIT 1`).catch(() => []),
+    query<{ vintage: string }>(
+      `SELECT to_char(vintage,'YYYY-MM-DD') AS vintage FROM dm_load
+        WHERE dataset_key = 'submission_calendar' AND is_current LIMIT 1`).catch(() => []),
+  ]);
+
+  const h = held[0];
+  const m = /FY(\d{4})P(\d{2})/.exec(h?.period ?? '');
+  const heldFy = m ? Number(m[1]) : null;
+  const heldMonth = m ? Number(m[2]) : null;
+  const n = newest[0];
+  const behind = (heldFy && heldMonth && n)
+    ? (n.fiscal_year - heldFy) * 12 + (n.fiscal_month - heldMonth)
+    : null;
+  // A held period whose own end date is not on the calendar still has one; it is
+  // the end of that fiscal month, which the calendar names for every period it
+  // carries. Where the calendar is absent the page falls back to the period label.
+  return {
+    heldPeriod: h?.period ?? null, heldFiscalYear: heldFy, heldMonth,
+    heldPeriodEnd: heldFy && heldMonth ? periodMonthName(heldFy, heldMonth) : null,
+    newestPeriod: n ? `FY${n.fiscal_year}P${String(n.fiscal_month).padStart(2, '0')}` : null,
+    newestFiscalYear: n?.fiscal_year ?? null, newestMonth: n?.fiscal_month ?? null,
+    newestPeriodEnd: n ? periodMonthName(n.fiscal_year, n.fiscal_month) : null,
+    newestRevealDate: n?.reveal_date ?? null,
+    periodsBehind: behind,
+    calendarVintage: cal[0]?.vintage ?? null,
+    warehouseVintage: h?.vintage ?? null,
+  };
+}
+
 // ------------------------------------------------------------------ FPDS ----
 
 export interface FpdsYear {

@@ -925,6 +925,63 @@ const CONTROLS = {
           + '. Every pace figure and September projection is measured over that window.' };
   }),
 
+  // ---- currency ------------------------------------------------------------
+  // Not a check on the extract: a check on how old it is. An execution page is
+  // for the year being executed, and a load that silently trails the published
+  // record by a month presents last month as this month.
+  'CUR-01': async (c) => {
+    const { rows: cal } = await c.query(`
+      SELECT max(fiscal_year * 100 + fiscal_month) AS newest,
+             count(*)::int AS n,
+             to_char(max(reveal_date),'YYYY-MM-DD') AS newest_reveal
+        FROM dm_submission_period p JOIN dm_load l ON l.id = p.load_id AND l.is_current
+       WHERE NOT is_quarter AND is_revealed`);
+    if (!cal.length || cal[0].newest === null) {
+      return [{ status: 'not_applicable',
+        message: 'No submission calendar in this load, so how far behind it is cannot be '
+          + 'measured. Run the currency step from a machine with network access.' }];
+    }
+    const newest = Number(cal[0].newest);
+    // Two queries rather than a UNION: ORDER BY and LIMIT inside a UNION branch
+    // are not valid Postgres, and the error aborted the whole load transaction.
+    const [fileA, fileB] = await Promise.all([
+      c.query(`SELECT submission_period AS period
+                 FROM dm_sbr_fy s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+                WHERE s.scope = 'DOW' AND s.submission_period IS NOT NULL
+                ORDER BY s.fiscal_year DESC LIMIT 1`),
+      c.query(`SELECT submission_period AS period
+                 FROM dm_exec_fy e JOIN dm_load l ON l.id = e.load_id AND l.is_current
+                WHERE e.scope = 'DOW' AND e.submission_period IS NOT NULL
+                ORDER BY e.fiscal_year DESC LIMIT 1`),
+    ]);
+    const held = { rows: [
+      ...fileA.rows.map((r) => ({ src: 'File A (Statement of Budgetary Resources)', period: r.period })),
+      ...fileB.rows.map((r) => ({ src: 'File B (execution detail)', period: r.period })),
+    ] };
+    const label = (k) => `FY${Math.floor(k / 100)}P${String(k % 100).padStart(2, '0')}`;
+    return held.rows.map((r) => {
+      const m = /FY(\d{4})P(\d{2})/.exec(r.period || '');
+      if (!m) {
+        return { observed: null, expected: newest, status: 'fail',
+          message: `${r.src}: submission period "${r.period}" is not readable, so currency `
+            + 'cannot be measured.' };
+      }
+      const have = Number(m[1]) * 100 + Number(m[2]);
+      // Periods are 1..12 within a fiscal year, so the gap is months, not the
+      // arithmetic difference of the two keys.
+      const behind = (Math.floor(newest / 100) - Math.floor(have / 100)) * 12
+                   + (newest % 100) - (have % 100);
+      return { observed: have, expected: newest, tolerance: 0, variance_pct: behind,
+        status: behind <= 0 ? 'pass' : 'fail',
+        message: behind <= 0
+          ? `${r.src} holds ${label(have)}, which is the newest submission published.`
+          : `${r.src} holds ${label(have)} but ${label(newest)} was published on `
+            + `${cal[0].newest_reveal} — this load is ${behind} submission period`
+            + `${behind === 1 ? '' : 's'} behind. Rebuild the warehouse snapshot, then re-run `
+            + 'the ETL and the load.' };
+    });
+  },
+
 };
 
 // -------------------------------------------------------------------- main --
@@ -976,6 +1033,7 @@ const CONTROLS = {
       ['pb_display.json', 'pb_display',            'scripts/etl_analytics.py --step pb_display'],
       ['execution.json',  'file_b_detail',         'scripts/etl_analytics.py --step execution'],
       ['timing.json',     'contract_timing',       'scripts/etl_analytics.py --step timing'],
+      ['currency.json',   'submission_calendar',   'scripts/etl_analytics.py --step currency'],
       ['program.json',    'program_execution',     'scripts/etl_analytics.py --step program'],
       ['crosswalk.json',  'budget_execution_crosswalk', 'scripts/etl_analytics.py --step crosswalk'],
       ['knowledge.json',  'knowledge_bank',        'scripts/etl_analytics.py --step knowledge'],
@@ -1056,6 +1114,8 @@ const CONTROLS = {
         'upward_adjustments','downward_adjustments'],
       dm_exec_fy: ['fiscal_year','scope','submission_period','source_rows','detail_rows',
         'collapsed_rows','has_detail','accounts','object_classes','activities','has_activity_names','obligations'],
+      dm_submission_period: ['fiscal_year','fiscal_month','fiscal_quarter','is_quarter',
+        'period_start','period_end','submission_due_date','reveal_date','is_revealed'],
       dm_fpds_day: ['fiscal_year','day_of_fy','obligation','action_count','cum_obligation','cum_actions'],
       dm_fpds_month: ['fiscal_year','fy_month','month_label','dimension','dim_key','dim_label',
         'obligation','action_count'],
@@ -1237,8 +1297,22 @@ const CONTROLS = {
     const severity = Object.fromEntries(seed.controls.map((c) => [c.code, c.severity]));
     for (const [code, fn] of Object.entries(CONTROLS)) {
       let results = [];
-      try { results = await fn(client); }
-      catch (e) { results = [{ status: 'fail', message: `control errored: ${e.message}` }]; }
+      // Each control runs inside a savepoint. A control that raises a database
+      // error -- a typo in its SQL, a column it assumed -- aborts the enclosing
+      // transaction, and every control after it then fails with "current
+      // transaction is aborted" until the load itself dies. Catching the
+      // JavaScript exception is not enough, because the damage is on the
+      // connection rather than in the caller. Rolling back to the savepoint
+      // restores it, so a broken control is one recorded failure instead of a
+      // refused load of every measure on the site.
+      await client.query(`SAVEPOINT ctl_${code.replace(/[^A-Za-z0-9]/g, '_')}`);
+      try {
+        results = await fn(client);
+        await client.query(`RELEASE SAVEPOINT ctl_${code.replace(/[^A-Za-z0-9]/g, '_')}`);
+      } catch (e) {
+        await client.query(`ROLLBACK TO SAVEPOINT ctl_${code.replace(/[^A-Za-z0-9]/g, '_')}`);
+        results = [{ status: 'fail', message: `control errored: ${e.message}` }];
+      }
       if (!results.length) results = [{ status: 'not_applicable', message: 'No rows in scope.' }];
       for (const r of results) {
         await client.query(

@@ -165,6 +165,17 @@
       "refresh_cadence": "monthly, with each warehouse vintage",
       "limitations": "Contract obligations are a third of Department obligations -- 33.9% in FY2025 -- and are not the whole of execution. The largest block they do not cover is personnel compensation and benefits, 40.4% of that year, which is paid on a schedule. There is no Department-wide within-year series in these sources to compare against: File A and File B each publish one submission per fiscal year, so the account chain gives a position and never a curve. A signal is a question rather than a finding: none of them observes impropriety, and a large September action is very often a multiyear definitisation or an exercised option with nothing unusual in it beyond its size. Deviations are measured against a category's own history, so a category held in fewer than three complete years produces none. The live fiscal year is shorter than the years it is compared with, and every comparison is made to the reporting frontier over whole months only.",
       "sort_order": 99
+    },
+    {
+      "key": "submission_calendar",
+      "label": "USASpending submission calendar",
+      "source_system": "USASpending API, /api/v2/references/submission_periods/",
+      "source_path": "https://api.usaspending.gov/api/v2/references/submission_periods/",
+      "grain": "fiscal year x fiscal period",
+      "description": "Every agency submission window with the date its data was revealed to the public record. It is the only thing here that says what is AVAILABLE, as against what this warehouse happens to hold, and it is what makes the currency of every account figure on this site measurable rather than assumed.",
+      "refresh_cadence": "monthly, with each submission window",
+      "limitations": "Fetched over the network and therefore the one extract here that can fail without the load failing: where it cannot be reached nothing is written, the previous calendar stays with its own fetch date, and the page reports on that date rather than implying it is current. It describes the government-wide calendar, not any one agency's compliance with it -- a period being revealed does not guarantee that the Department submitted into it.",
+      "sort_order": 100
     }
   ],
   "controls": [
@@ -563,6 +574,15 @@
       "authority": "USASpending contract award files (FPDS-NG); warehouse vintage extraction dates",
       "severity": "critical",
       "sort_order": 336
+    },
+    {
+      "code": "CUR-01",
+      "name": "How far behind the published record this load is",
+      "assertion": "The submission period held by the account files is the newest monthly period revealed on the public submission calendar. Where it is not, the gap in periods is published.",
+      "rationale": "This is not a check on the extract but on its age, and it is the one the rest of the execution page depends on: a page about the year being executed that silently trails the published record by a month is presenting last month as this month. Measured on 2026-09-10 the warehouse held FY2026 P09, covering June and revealed 2026-07-31, while FY2026 P10 covering July had been revealed on 2026-09-01 and was not in it -- because the warehouse snapshot was taken on 21 August. Nothing on the site could say so. The control reports rather than blocks: a stale load is still the best available answer and refusing it would leave the site with an older one.",
+      "authority": "USASpending submission periods; OMB Circular A-11 reporting windows",
+      "severity": "high",
+      "sort_order": 340
     }
   ],
   "audit_posture": {

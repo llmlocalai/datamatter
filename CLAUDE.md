@@ -172,6 +172,44 @@ the extract against itself and passed a deliberate $1M corruption of an O-1 line
   identifies an activity; nothing reads it. Do not borrow a name from another
   year's row that happens to share a key.
 
+### The warehouse does not know how old it is — CUR-01 does
+
+The account files carry the submission period they were extracted at, and a
+period number means nothing on its own. Beside the published calendar it means
+everything. Measured on 2026-09-10: the warehouse held **FY2026 P09** (June,
+revealed 2026-07-31) while **FY2026 P10** (July) had been revealed on
+**2026-09-01** and was not in it — because the warehouse snapshot was taken on
+**21 August**. Nothing on the site could say so, so it showed June as current.
+
+`step_currency` fetches the USASpending submission calendar into
+`dm_submission_period`; `CUR-01` reports how many periods behind the load is;
+`/execution` opens with a currency banner naming the period held, the warehouse
+snapshot date, and the newer period that exists. **This is the only step that
+touches the network and it is allowed to fail** — the sandboxes cannot reach the
+API, so a failure writes nothing, warns, and leaves the previous calendar with
+its own fetch date rather than pretending.
+
+Note what this is NOT: nothing in the ETL can make the warehouse newer. The fix
+for staleness is rebuilding the warehouse snapshot, which happens outside this
+repo. The site's job is to say how old it is.
+
+**The FPDS lag is separate, real, and reproducible.** Contract data trails by
+about three months and moves forward exactly one month per warehouse vintage:
+vintage 2026-07-06 is dense through March, vintage 2026-08-06 through April. A
+closed year is dense in every month (FY2025 September: 468,426 actions). So the
+reporting frontier is a property of the source, not of the extract — do not
+"fix" it by widening the window.
+
+### One bad control must not take the load down
+
+Each control runs inside a `SAVEPOINT`. A control that raises a database error
+aborts the enclosing transaction, and every control after it then fails with
+"current transaction is aborted" until the load itself dies — catching the
+JavaScript exception is not enough, because the damage is on the connection.
+CUR-01 shipped with `ORDER BY ... LIMIT` inside a `UNION` branch and killed a
+whole load of real measures over its own typo. Rolling back to the savepoint
+makes a broken control one recorded failure instead of a refused load.
+
 ### The account chain gives a position; only contracts give a curve
 
 `file_a` and `file_b` each hold **exactly one submission per fiscal year** in this

@@ -1,13 +1,14 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-10 (release order: migrate, refresh, deploy)
+- **Last updated:** 2026-09-10 (currency: the warehouse is a submission period behind)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (2026-09-10):** `tsc --noEmit` clean and `next build` green, 27 routes,
   run against a full local Postgres load of every staged extract. All 18 pages and
   all four new API endpoints requested against that build and returned 200.
   **Not yet loaded to Neon** — the ETL reads `/Volumes/AI_DATA` and Neon is not
   reachable from the sandbox, so `npm run refresh` still has to be run on the Mac.
-- **Control status (2026-09-10):** 438 of 445 assertions pass across 44 controls.
+- **Control status (2026-09-10):** 45 controls. CUR-01 fails by design on the current
+  warehouse: the load is one submission period behind the published record.
   The seven failures are all pre-existing published findings: `TIE-01` (File A vs
   File B, FY2026), `FILEB-01` (FY2026 PARK replication), one `ASSIST-01` bucket,
   three `FILEC-02` spreads and `WBC-02`. **All eleven new controls pass, and all
@@ -16,6 +17,63 @@
   TIME-04, neither of which did until it was rewritten).
 
 ---
+
+## Done — 2026-09-10 (fourteenth pass) — how current is this, actually
+
+Raised on the execution page: *they do have up to July, if not August 2026,
+execution data — there might be a bug, or overlooked tables.*
+
+### What the investigation found
+
+Neither a bug nor a missed table. Three separate facts, each measured:
+
+- [x] **The FPDS lag is real and reproducible.** Comparing the two warehouse
+  vintages one month apart: vintage **2026-07-06** is dense through **March**
+  (402,691 actions) with April at 46,429 and nothing after; vintage
+  **2026-08-06** is dense through **April** (398,347) with May at 75,084 and
+  nothing after. **The frontier moves forward exactly one month per vintage**,
+  and a closed year is dense in every month (FY2025 September: 468,426 actions).
+  So the reporting frontier is a property of the source, and the rule found the
+  right cut in both vintages independently.
+- [x] **The part files are a paginated dump that tiles the year with no gap** —
+  1,000,000 + 1,000,000 + 529,673 rows covering 2025-10-01 to 2026-08-04
+  contiguously. Nothing was truncated on download.
+- [x] **The warehouse itself is stale, and that is the real gap.** Files
+  downloaded 14–21 August; today is 10 September. Checked the published record:
+  **FY2026 P10, covering July, was revealed on 2026-09-01** — nine days ago — and
+  is not in the warehouse, which holds **P09** (June, revealed 2026-07-31).
+  P11 (August) is not yet published; on the calendar's own pattern it is due
+  around 1 October.
+
+### What was built
+
+- [x] **`step_currency`** fetches the USASpending submission calendar into
+  `dm_submission_period`. The only step that touches the network, and the only
+  one allowed to fail: the sandboxes cannot reach the API, so a failure writes
+  nothing, warns, and leaves the previous calendar with its own fetch date.
+- [x] **`CUR-01`** measures how many submission periods behind the load is. It
+  reports rather than blocks — a stale load is still the best available answer,
+  and refusing it would leave the site with an older one. It currently reads:
+  *"File A holds FY2026P09 but FY2026P10 was published on 2026-09-01 — this load
+  is 1 submission period behind."*
+- [x] **A currency banner opens `/execution`**, naming the period held, the
+  warehouse snapshot date, and the newer period that exists, in amber while the
+  load is behind.
+- [x] Nothing in the ETL can make the warehouse newer. The banner's job is to say
+  how old it is; the fix is rebuilding the snapshot, outside this repo.
+
+### And a loader defect the new control exposed
+
+- [x] **One bad control was taking the whole load down.** CUR-01 shipped with
+  `ORDER BY ... LIMIT` inside a `UNION` branch — invalid Postgres. The error
+  aborted the transaction, so every control after it failed with *"current
+  transaction is aborted"* and the load died: **a typo in one control refused a
+  load of every measure on the site.** Catching the JavaScript exception was
+  never enough, because the damage is on the connection.
+- [x] Each control now runs inside a **`SAVEPOINT`**, rolled back on error.
+  Verified by deliberately breaking a control's SQL: one recorded failure, load
+  commits, every other control unaffected.
+
 
 ## Done — 2026-09-10 (thirteenth pass) — the deploy that broke on a column
 

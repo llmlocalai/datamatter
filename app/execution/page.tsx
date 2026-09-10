@@ -14,7 +14,7 @@ import { fiscalYearOf, dayOfFiscalYear, daysToFiscalYearEnd, pickFiscalYear } fr
 import {
   getExecFy, getExecObjectClasses, getExecFundLife, getFpdsYears, getFpdsPace,
   getFpdsTailDays, getEoy, getSignals, getSignalCounts, getExecutors, getFpdsActions,
-  getContractCoverage, getMajorClasses,
+  getContractCoverage, getMajorClasses, getCurrency,
 } from '@/lib/execution';
 
 export const metadata: Metadata = {
@@ -63,8 +63,9 @@ export default async function ExecutionPage() {
       getExecutors(),
       getFpdsActions(undefined, undefined, 400),
     ]);
-  const [coverage, majorClasses] = await Promise.all([
+  const [coverage, majorClasses, currency] = await Promise.all([
     getContractCoverage(), getMajorClasses(lastClosed?.fiscalYear ?? focus.fiscalYear),
+    getCurrency(),
   ]);
   // What the timing view below covers, measured rather than asserted. The last
   // CLOSED year is the one to quote: the live year's share is depressed by the
@@ -198,6 +199,49 @@ export default async function ExecutionPage() {
       />
 
       <div className="mt-6"><ProvenanceBar p={prov} /></div>
+
+      {/* How current this is, before anything is read off it. Timeliness is the
+          point of an execution page, and the one thing the warehouse cannot say
+          about itself is how old it is. */}
+      <div className={`mt-4 rounded-lg border px-4 py-3 text-[13px] leading-relaxed ${
+        currency.periodsBehind && currency.periodsBehind > 0
+          ? 'border-amber-500/40 bg-amber-500/[0.06] text-navy-200'
+          : 'border-navy-800 bg-navy-900/40 text-navy-300'}`}>
+        <span className="uppercase tracking-wider text-[11px] font-semibold text-accent-400 mr-2">
+          Currency
+        </span>
+        {currency.heldPeriod ? (
+          <>
+            The account files in this load hold{' '}
+            <strong className="text-navy-100">{currency.heldPeriod}</strong>
+            {currency.heldPeriodEnd ? ` — through ${currency.heldPeriodEnd}` : ''}
+            {currency.warehouseVintage
+              ? `, from a warehouse snapshot taken ${currency.warehouseVintage}` : ''}.
+            {currency.newestPeriod && currency.periodsBehind !== null && currency.periodsBehind > 0 ? (
+              <>
+                {' '}<strong className="text-amber-300">
+                  {currency.newestPeriod}
+                  {currency.newestPeriodEnd ? `, covering ${currency.newestPeriodEnd}` : ''}, was
+                  published{currency.newestRevealDate ? ` on ${currency.newestRevealDate}` : ''} and
+                  is not in this load
+                </strong>{' '}— {currency.periodsBehind} submission period
+                {currency.periodsBehind === 1 ? '' : 's'} behind. Rebuild the warehouse snapshot,
+                then re-run the ETL and the load. Control{' '}
+                <strong className="text-navy-200">CUR-01</strong> measures this on every load.
+              </>
+            ) : currency.newestPeriod ? (
+              <> That is the newest submission published.</>
+            ) : (
+              <> The submission calendar is not in this load, so how far behind it is cannot be
+                 measured — the currency step needs network access.</>
+            )}
+            {currency.calendarVintage
+              ? ` Calendar read ${currency.calendarVintage}.` : ''}
+          </>
+        ) : (
+          <>No submission period is recorded on this load.</>
+        )}
+      </div>
 
       {/* ---------------------------------------------------------------- */}
       <Section title={`FY${currentFy} at ${daysLeft} days out`}
