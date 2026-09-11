@@ -26,6 +26,7 @@ const GROUPS: { label: string; items: { href: string; label: string }[] }[] = [
       { href: '/congressional', label: 'Congressional' } ] },
   { label: 'Method', items: [
       { href: '/sources', label: 'Sources' },
+      { href: '/raw-data', label: 'Raw data' },
       { href: '/definitions', label: 'Definitions' },
       { href: '/controls', label: 'Controls' },
       { href: '/regulation', label: 'Regulatory search' } ] },

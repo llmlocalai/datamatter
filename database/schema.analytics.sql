@@ -1578,3 +1578,84 @@ ALTER TABLE dm_exec_account ADD COLUMN IF NOT EXISTS epoa int;
 ALTER TABLE dm_exec_account ADD COLUMN IF NOT EXISTS availability_type text;
 CREATE INDEX IF NOT EXISTS dm_exec_account_poa_idx
   ON dm_exec_account (load_id, fiscal_year, bpoa);
+
+-- 2026-09-11 -- DIRECT OR REIMBURSABLE on every File B rollup. File B marks each
+-- row D or R, and the rollups used to add the two. A reimbursable obligation is
+-- work performed for a customer and paid back; when that customer is another
+-- Department account the same work is also its direct obligation, so a total
+-- that adds both counts it twice. FY2025: $212.9B of $1,451.1B File B
+-- obligations (14.7%) were reimbursable, $152.0B of it in the Defense Working
+-- Capital Fund. Nullable on purpose: NULL means "not loaded with the split", and
+-- every reader withholds rather than reading a zero as "no direct execution".
+ALTER TABLE dm_exec_account_fy ADD COLUMN IF NOT EXISTS obligations_direct numeric(20,2);
+ALTER TABLE dm_exec_account_fy ADD COLUMN IF NOT EXISTS obligations_reimbursable numeric(20,2);
+ALTER TABLE dm_exec_account_fy ADD COLUMN IF NOT EXISTS gross_outlays_direct numeric(20,2);
+ALTER TABLE dm_exec_account_fy ADD COLUMN IF NOT EXISTS gross_outlays_reimbursable numeric(20,2);
+ALTER TABLE dm_exec_account_fy ADD COLUMN IF NOT EXISTS undelivered_unpaid_direct numeric(20,2);
+ALTER TABLE dm_exec_account_fy ADD COLUMN IF NOT EXISTS undelivered_unpaid_reimbursable numeric(20,2);
+ALTER TABLE dm_exec_account_fy ADD COLUMN IF NOT EXISTS delivered_unpaid_direct numeric(20,2);
+ALTER TABLE dm_exec_account_fy ADD COLUMN IF NOT EXISTS delivered_unpaid_reimbursable numeric(20,2);
+ALTER TABLE dm_exec_account_fy ADD COLUMN IF NOT EXISTS deobligations_direct numeric(20,2);
+ALTER TABLE dm_exec_account_fy ADD COLUMN IF NOT EXISTS deobligations_reimbursable numeric(20,2);
+ALTER TABLE dm_exec_object_class_fy ADD COLUMN IF NOT EXISTS obligations_direct numeric(20,2);
+ALTER TABLE dm_exec_object_class_fy ADD COLUMN IF NOT EXISTS obligations_reimbursable numeric(20,2);
+ALTER TABLE dm_exec_object_class_fy ADD COLUMN IF NOT EXISTS gross_outlays_direct numeric(20,2);
+ALTER TABLE dm_exec_object_class_fy ADD COLUMN IF NOT EXISTS gross_outlays_reimbursable numeric(20,2);
+ALTER TABLE dm_exec_object_class_fy ADD COLUMN IF NOT EXISTS undelivered_unpaid_direct numeric(20,2);
+ALTER TABLE dm_exec_object_class_fy ADD COLUMN IF NOT EXISTS undelivered_unpaid_reimbursable numeric(20,2);
+ALTER TABLE dm_exec_object_class_fy ADD COLUMN IF NOT EXISTS delivered_unpaid_direct numeric(20,2);
+ALTER TABLE dm_exec_object_class_fy ADD COLUMN IF NOT EXISTS delivered_unpaid_reimbursable numeric(20,2);
+ALTER TABLE dm_exec_object_class_fy ADD COLUMN IF NOT EXISTS deobligations_direct numeric(20,2);
+ALTER TABLE dm_exec_object_class_fy ADD COLUMN IF NOT EXISTS deobligations_reimbursable numeric(20,2);
+ALTER TABLE dm_exec_fy ADD COLUMN IF NOT EXISTS obligations_direct numeric(20,2);
+ALTER TABLE dm_exec_fy ADD COLUMN IF NOT EXISTS obligations_reimbursable numeric(20,2);
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS obligations_incurred_direct numeric(20,2);
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS obligations_incurred_reimbursable numeric(20,2);
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS undelivered_orders_unpaid_direct numeric(20,2);
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS undelivered_orders_unpaid_reimbursable numeric(20,2);
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS delivered_orders_unpaid_direct numeric(20,2);
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS delivered_orders_unpaid_reimbursable numeric(20,2);
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS gross_outlays_direct numeric(20,2);
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS gross_outlays_reimbursable numeric(20,2);
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS deobligations_direct numeric(20,2);
+ALTER TABLE dm_obligation_stage ADD COLUMN IF NOT EXISTS deobligations_reimbursable numeric(20,2);
+
+-- ===========================================================================
+-- Raw data, as the files hold it.
+--
+-- Every file the extract reads, shown before anything is done to it: the first
+-- five records of each source with every column it carries, in the file's own
+-- column order and under the file's own names. Nothing here is a measure. A
+-- value is stored as the text the file holds -- a spreadsheet number stays the
+-- number, a null stays null, an empty cell stays an empty string -- so a reader
+-- can check a figure on another page against the record it started from, and
+-- can see what the files do NOT carry (File A has no direct/reimbursable flag;
+-- File B does).
+CREATE TABLE IF NOT EXISTS dm_raw_source (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  source_key    text NOT NULL,
+  group_label   text NOT NULL,
+  label         text NOT NULL,
+  file_format   text NOT NULL,          -- parquet | xlsx | json
+  file_path     text NOT NULL,          -- relative to the data root, or the API URL
+  sample_path   text NOT NULL,          -- the partition, workbook or endpoint the rows come from
+  sheet_name    text,
+  total_rows    bigint,                 -- every row in file_path, not just the sample
+  file_count    int,
+  column_count  int NOT NULL,
+  columns_json  text NOT NULL,          -- [{name, type}] in file order
+  preamble_json text,                   -- rows printed above a workbook's header
+  note          text,
+  sort_order    int NOT NULL DEFAULT 0,
+  UNIQUE (load_id, source_key)
+);
+
+CREATE TABLE IF NOT EXISTS dm_raw_row (
+  id           bigserial PRIMARY KEY,
+  load_id      bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  source_key   text NOT NULL,
+  row_no       int NOT NULL,
+  values_json  text NOT NULL,           -- one value per column of the source, as text or null
+  UNIQUE (load_id, source_key, row_no)
+);

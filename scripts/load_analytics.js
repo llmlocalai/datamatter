@@ -982,6 +982,224 @@ const CONTROLS = {
     });
   },
 
+  // ---- direct or reimbursable -----------------------------------------------
+  // Every execution figure on the site now defaults to DIRECT, so the split has
+  // to be right in the same way the total does. DR-01 recomputes it twice over,
+  // from tables the split did not come from:
+  //   * the stage totals (step_obligations) against the account rollups
+  //     (step_execution) -- two separate passes over the file;
+  //   * for years carrying detail, the detail rows summed by their own
+  //     funding_source against the account rollup's direct and reimbursable
+  //     columns, account by account.
+  // A NULL split on any current row fails it: NULL means the load predates the
+  // split, and a page reading it as zero would show no direct execution at all.
+  'DR-01': async (c) => (await c.query(`
+    WITH acct AS (
+      SELECT f.fiscal_year,
+             sum(f.obligations_direct) AS d, sum(f.obligations_reimbursable) AS r,
+             sum(f.obligations) AS t,
+             count(*) FILTER (WHERE f.obligations_direct IS NULL OR f.obligations_reimbursable IS NULL)::int AS nulls,
+             count(*) FILTER (WHERE abs(f.obligations - coalesce(f.obligations_direct, 0)
+                                      - coalesce(f.obligations_reimbursable, 0)) > 1
+                                AND f.obligations_direct IS NOT NULL)::int AS overfull
+        FROM dm_exec_account_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+       WHERE f.scope = 'DOW' GROUP BY f.fiscal_year
+    ), det AS (
+      SELECT d.fiscal_year, d.treasury_account,
+             sum(d.obligations) FILTER (WHERE d.funding_source = 'D') AS d,
+             sum(d.obligations) FILTER (WHERE d.funding_source = 'R') AS r
+        FROM dm_exec_detail d JOIN dm_load l ON l.id = d.load_id AND l.is_current
+       WHERE d.scope = 'DOW' GROUP BY 1, 2
+    ), detail_check AS (
+      SELECT det.fiscal_year,
+             count(*) FILTER (WHERE abs(coalesce(det.d, 0) - coalesce(f.obligations_direct, 0)) > 1
+                                 OR abs(coalesce(det.r, 0) - coalesce(f.obligations_reimbursable, 0)) > 1)::int AS bad,
+             count(*)::int AS n
+        FROM det JOIN dm_exec_account_fy f ON f.fiscal_year = det.fiscal_year
+                                          AND f.treasury_account = det.treasury_account AND f.scope = 'DOW'
+        JOIN dm_load l ON l.id = f.load_id AND l.is_current
+       GROUP BY det.fiscal_year
+    )
+    SELECT a.fiscal_year, a.d, a.r, a.t, a.nulls, a.overfull,
+           s.obligations_incurred_direct AS sd, s.obligations_incurred_reimbursable AS sr,
+           dc.bad AS detail_bad, dc.n AS detail_n
+      FROM acct a
+      LEFT JOIN dm_obligation_stage s ON s.fiscal_year = a.fiscal_year AND s.scope = 'DOW'
+       AND s.load_id = (SELECT id FROM dm_load WHERE dataset_key = 'file_b_obligations' AND is_current LIMIT 1)
+      LEFT JOIN detail_check dc ON dc.fiscal_year = a.fiscal_year
+     ORDER BY a.fiscal_year`)).rows.map((r) => {
+    const pct = (o, e) => Math.abs(Number(o ?? 0) - Number(e ?? 0)) / Math.max(1, Math.abs(Number(e ?? 0))) * 100;
+    const v = Math.max(pct(r.d, r.sd), pct(r.r, r.sr));
+    const ok = Number(r.nulls) === 0 && Number(r.overfull) === 0 && r.sd != null && v <= 0.01
+      && Number(r.detail_bad ?? 0) === 0;
+    return { fiscal_year: r.fiscal_year, observed: r.d, expected: r.sd, tolerance: 0.01, variance_pct: v,
+      status: ok ? 'pass' : 'fail',
+      message: ok
+        ? `FY${r.fiscal_year}: direct $${(Number(r.d) / 1e9).toFixed(1)}B and reimbursable `
+          + `$${(Number(r.r) / 1e9).toFixed(1)}B agree between the stage totals and the account rollups`
+          + `${r.detail_n ? `, and account by account with ${Number(r.detail_n).toLocaleString()} accounts' detail rows` : ''}.`
+        : `FY${r.fiscal_year}: the direct/reimbursable split does not foot — `
+          + `${r.nulls} account rows carry no split, ${r.overfull} split to a different amount than their own total, `
+          + `stage vs rollup differs by ${v.toFixed(4)}%`
+          + `${r.detail_bad ? `, ${r.detail_bad} accounts disagree with their own detail rows` : ''}.` };
+  }),
+
+  // DR-02 publishes what the split is for: how much of File B is reimbursable,
+  // where it sits, and how much carries no funding source at all (which is in
+  // the total and in neither side). More than 0.1% unresolved fails it.
+  'DR-02': async (c) => (await c.query(`
+    WITH y AS (
+      SELECT f.fiscal_year, sum(f.obligations) AS t, sum(f.obligations_direct) AS d,
+             sum(f.obligations_reimbursable) AS r
+        FROM dm_exec_account_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+       WHERE f.scope = 'DOW' GROUP BY 1
+    ), top AS (
+      SELECT DISTINCT ON (f.fiscal_year) f.fiscal_year, ac.federal_account_name AS name,
+             sum(f.obligations_reimbursable) AS r
+        FROM dm_exec_account_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+        JOIN dm_exec_account ac ON ac.load_id = f.load_id AND ac.fiscal_year = f.fiscal_year
+                               AND ac.treasury_account = f.treasury_account
+       WHERE f.scope = 'DOW' GROUP BY f.fiscal_year, ac.federal_account_name
+       ORDER BY f.fiscal_year, sum(f.obligations_reimbursable) DESC NULLS LAST
+    )
+    SELECT y.fiscal_year, y.t, y.d, y.r, top.name, top.r AS top_r
+      FROM y LEFT JOIN top ON top.fiscal_year = y.fiscal_year ORDER BY 1`)).rows.map((r) => {
+    const t = Number(r.t || 0), d = Number(r.d || 0), rb = Number(r.r || 0);
+    const unresolved = t - d - rb;
+    const uPct = Math.abs(unresolved) / Math.max(1, Math.abs(t)) * 100;
+    return { fiscal_year: r.fiscal_year, observed: rb, expected: t, tolerance: 0.1, variance_pct: uPct,
+      status: uPct <= 0.1 ? 'pass' : 'fail',
+      message: `FY${r.fiscal_year}: $${(rb / 1e9).toFixed(1)}B of $${(t / 1e9).toFixed(1)}B File B `
+        + `obligations (${(rb / Math.max(1, t) * 100).toFixed(1)}%) are reimbursable and are not counted as `
+        + `direct execution; the largest share sits in ${r.name ?? '—'} ($${(Number(r.top_r || 0) / 1e9).toFixed(1)}B). `
+        + `${uPct <= 0.1 ? 'Every dollar' : `All but $${(unresolved / 1e9).toFixed(2)}B`} carries a funding source.` };
+  }),
+
+  // ---- raw data ------------------------------------------------------------
+  // The raw-data page shows the first records of every file the extract reads,
+  // every column, under the file's own names. Its one way to mislead is to put a
+  // value under the wrong column, show a stale file, or leave out a file a figure
+  // came from. RAW-01 re-derives each of those from something the sample did not
+  // produce:
+  //   * structure: each record's value count against the column list, the row
+  //     numbers against 1..min(5, total rows), from the rows themselves;
+  //   * coverage: the set of files the measures were loaded from -- the File A,
+  //     File B, File C, contract and assistance loads, and every (PB year,
+  //     exhibit) that has a line in dm_exhibit_line or dm_pb_line -- each must
+  //     have a sample;
+  //   * currency: the File A and File B sample records' own submission_period
+  //     against the period the Statement of Budgetary Resources and the File B
+  //     stage are published under, and the contract sample's vintage directory
+  //     against the contract load's vintage.
+  'RAW-01': async (c) => {
+    const src = (await c.query(`
+      SELECT s.source_key, s.label, s.sample_path, s.total_rows, s.column_count, s.columns_json
+        FROM dm_raw_source s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+       ORDER BY s.sort_order`)).rows;
+    if (!src.length) {
+      return [{ status: 'fail', observed: 0, message: 'No raw samples are loaded, so the raw-data page has '
+        + 'nothing to show. Run scripts/etl_analytics.py --step raw, then the load.' }];
+    }
+    const rowsBy = new Map();
+    for (const r of (await c.query(`
+      SELECT r.source_key, r.row_no, r.values_json
+        FROM dm_raw_row r JOIN dm_load l ON l.id = r.load_id AND l.is_current
+       ORDER BY r.source_key, r.row_no`)).rows) {
+      if (!rowsBy.has(r.source_key)) rowsBy.set(r.source_key, []);
+      rowsBy.get(r.source_key).push(r);
+    }
+    const out = [];
+
+    // structure
+    const bad = [];
+    let records = 0;
+    for (const s of src) {
+      let cols = null;
+      try { cols = JSON.parse(s.columns_json); } catch { cols = null; }
+      const rs = rowsBy.get(s.source_key) || [];
+      records += rs.length;
+      const want = Math.min(5, Number(s.total_rows ?? 5));
+      const why = [];
+      if (!Array.isArray(cols) || cols.length !== Number(s.column_count) || !cols.length) {
+        why.push(`column list has ${Array.isArray(cols) ? cols.length : 'no'} entries for ${s.column_count} columns`);
+      } else if (cols.some((k) => !k || !String(k.name || '').trim())) {
+        why.push('a column has no name');
+      }
+      if (rs.length !== want) why.push(`${rs.length} records where ${want} were expected`);
+      rs.forEach((r, i) => {
+        let v = null;
+        try { v = JSON.parse(r.values_json); } catch { v = null; }
+        if (Number(r.row_no) !== i + 1) why.push(`record ${i + 1} is numbered ${r.row_no}`);
+        if (!Array.isArray(v)) why.push(`record ${r.row_no} is not a value list`);
+        else if (v.length !== Number(s.column_count)) why.push(`record ${r.row_no} has ${v.length} values for ${s.column_count} columns`);
+        else if (!v.some((x) => x !== null && x !== '')) why.push(`record ${r.row_no} is empty`);
+      });
+      if (why.length) bad.push(`${s.label}: ${why.slice(0, 3).join('; ')}`);
+    }
+    out.push({ observed: bad.length, expected: 0, tolerance: 0, status: bad.length ? 'fail' : 'pass',
+      message: bad.length
+        ? `${bad.length} of ${src.length} raw samples would show values under the wrong columns or the wrong number of records — ${bad.slice(0, 4).join(' | ')}.`
+        : `${src.length} files, ${records} records: every record carries exactly one value per column of its file, numbered 1 to ${Math.min(5, records)}.` });
+
+    // coverage
+    const have = new Set(src.map((s) => s.source_key));
+    const loads = new Set((await c.query(`SELECT dataset_key FROM dm_load WHERE is_current`)).rows.map((r) => r.dataset_key));
+    const need = [];
+    for (const [ds, key] of [['file_a_sbr', 'file_a'], ['file_b_obligations', 'file_b'], ['file_b_detail', 'file_b'],
+      ['file_c_reconciliation', 'file_c_contracts'], ['contract_awards', 'contracts'], ['contract_timing', 'contracts'],
+      ['assistance_awards', 'assistance']]) {
+      if (loads.has(ds)) need.push(key);
+    }
+    for (const t of ['dm_exhibit_line', 'dm_pb_line']) {
+      for (const r of (await c.query(`
+        SELECT DISTINCT x.pb_year, x.exhibit FROM ${t} x JOIN dm_load l ON l.id = x.load_id AND l.is_current`)).rows) {
+        need.push(`pb${r.pb_year}_${r.exhibit}`);
+      }
+    }
+    const uniq = [...new Set(need)];
+    const lacking = uniq.filter((k) => !have.has(k));
+    out.push({ observed: uniq.length - lacking.length, expected: uniq.length, tolerance: 0,
+      status: lacking.length ? 'fail' : 'pass',
+      message: lacking.length
+        ? `${lacking.length} of the ${uniq.length} files this load's figures come from have no raw sample: ${lacking.slice(0, 8).join(', ')}.`
+        : `All ${uniq.length} files this load's figures come from have a raw sample${have.has('submission_periods') ? ', and so does the submission calendar' : ''}.` });
+
+    // currency
+    const stale = [];
+    const periodFy = async (sql) => new Map((await c.query(sql)).rows.map((r) => [Number(r.fiscal_year), r.submission_period]));
+    const pubA = await periodFy(`SELECT s.fiscal_year, s.submission_period FROM dm_sbr_fy s
+      JOIN dm_load l ON l.id = s.load_id AND l.is_current WHERE s.scope = 'DOW'`);
+    const pubB = await periodFy(`SELECT s.fiscal_year, s.submission_period FROM dm_obligation_stage s
+      JOIN dm_load l ON l.id = s.load_id AND l.is_current WHERE s.scope = 'DOW'`);
+    let checked = 0;
+    for (const [key, pub, what] of [['file_a', pubA, 'the Statement of Budgetary Resources'], ['file_b', pubB, 'the File B stage']]) {
+      const s = src.find((x) => x.source_key === key);
+      if (!s || !pub.size) continue;
+      const names = JSON.parse(s.columns_json).map((k) => k.name);
+      const iP = names.indexOf('submission_period'), iY = names.indexOf('fiscal_year');
+      if (iP < 0 || iY < 0) { stale.push(`${s.label} carries no submission_period/fiscal_year column`); continue; }
+      for (const r of rowsBy.get(key) || []) {
+        const v = JSON.parse(r.values_json);
+        const fy = Number(v[iY]); const expect = pub.get(fy);
+        checked += 1;
+        if (!expect) stale.push(`${s.label} record ${r.row_no} is FY${fy}, which ${what} does not hold`);
+        else if (v[iP] !== expect) stale.push(`${s.label} record ${r.row_no} is ${v[iP]} but ${what} is published as ${expect}`);
+      }
+    }
+    const cs = src.find((x) => x.source_key === 'contracts');
+    const cv = (await c.query(`SELECT vintage::text AS vintage FROM dm_load WHERE dataset_key = 'contract_awards' AND is_current`)).rows[0]?.vintage;
+    if (cs && cv) {
+      checked += 1;
+      const m = /vintage=(\d{4}-\d{2}-\d{2})/.exec(cs.sample_path || '');
+      if (!m || m[1] !== String(cv)) stale.push(`the contract sample is from ${m ? m[1] : 'no vintage'} but the contract figures are vintage ${cv}`);
+    }
+    out.push({ observed: stale.length, expected: 0, tolerance: 0, status: stale.length ? 'fail' : 'pass',
+      message: stale.length
+        ? `The raw samples are not the files the figures were built from: ${stale.slice(0, 4).join('; ')}.`
+        : `${checked} checks: the File A and File B sample records carry the same submission period the published statements do, and the contract sample is the vintage the contract figures use.` });
+    return out;
+  },
+
   // ---- program year --------------------------------------------------------
   // The program-year view splits a fiscal year's execution by the year the money
   // was appropriated for. Both halves of it have to be right: the year each
@@ -1127,6 +1345,7 @@ const CONTROLS = {
       ['knowledge.json',  'knowledge_bank',        'scripts/etl_analytics.py --step knowledge'],
       ['catalog.json',    'source_catalog',        'scripts/etl_analytics.py --step catalog'],
       ['jbook.json',      'jbook_corpus',          'scripts/etl_analytics.py --step jbook'],
+      ['raw.json',        'raw_samples',           'scripts/etl_analytics.py --step raw'],
     ];
     const COLS = {
       dm_sbr_fy: ['fiscal_year','scope','scope_label','submission_period','is_partial_year','tas_count',
@@ -1137,7 +1356,11 @@ const CONTROLS = {
         'obligations_incurred','unobligated_balance','gross_outlays','rank_in_dim'],
       dm_obligation_stage: ['fiscal_year','scope','obligations_incurred','undelivered_orders_unpaid',
         'delivered_orders_unpaid','gross_outlays','deobligations','submission_period',
-        'periods_available','source_rows','grain_rows','replicated_rows'],
+        'periods_available','source_rows','grain_rows','replicated_rows',
+        'obligations_incurred_direct','obligations_incurred_reimbursable','undelivered_orders_unpaid_direct',
+        'undelivered_orders_unpaid_reimbursable','delivered_orders_unpaid_direct',
+        'delivered_orders_unpaid_reimbursable','gross_outlays_direct','gross_outlays_reimbursable',
+        'deobligations_direct','deobligations_reimbursable'],
       dm_fileb_grain: ['fiscal_year','scope','activity_key','source_rows','grain_rows',
         'replicated_groups','replicated_rows','obligations_as_published','obligations_at_grain',
         'overstatement_pct'],
@@ -1201,13 +1424,16 @@ const CONTROLS = {
       dm_exec_activity: ['fiscal_year','activity_id','activity_kind','activity_name'],
       dm_exec_account_fy: ['fiscal_year','scope','treasury_account','fund_life','detail_rows',
         'obligations','undelivered_unpaid','undelivered_unpaid_bf','delivered_unpaid','gross_outlays',
-        'outlays_prepaid','outlays_paid','deobligations','upward_adjustments','downward_adjustments'],
+        'outlays_prepaid','outlays_paid','deobligations','upward_adjustments','downward_adjustments',
+        'obligations_direct','obligations_reimbursable','gross_outlays_direct','gross_outlays_reimbursable','undelivered_unpaid_direct','undelivered_unpaid_reimbursable','delivered_unpaid_direct','delivered_unpaid_reimbursable','deobligations_direct','deobligations_reimbursable'],
       dm_exec_object_class_fy: ['fiscal_year','scope','object_class_code','object_class_name',
         'major_class','detail_rows','obligations','undelivered_unpaid','undelivered_unpaid_bf',
         'delivered_unpaid','gross_outlays','outlays_prepaid','outlays_paid','deobligations',
-        'upward_adjustments','downward_adjustments'],
+        'upward_adjustments','downward_adjustments',
+        'obligations_direct','obligations_reimbursable','gross_outlays_direct','gross_outlays_reimbursable','undelivered_unpaid_direct','undelivered_unpaid_reimbursable','delivered_unpaid_direct','delivered_unpaid_reimbursable','deobligations_direct','deobligations_reimbursable'],
       dm_exec_fy: ['fiscal_year','scope','submission_period','source_rows','detail_rows',
-        'collapsed_rows','has_detail','accounts','object_classes','activities','has_activity_names','obligations'],
+        'collapsed_rows','has_detail','accounts','object_classes','activities','has_activity_names','obligations',
+        'obligations_direct','obligations_reimbursable'],
       dm_submission_period: ['fiscal_year','fiscal_month','fiscal_quarter','is_quarter',
         'period_start','period_end','submission_due_date','reveal_date','is_revealed'],
       dm_fpds_day: ['fiscal_year','day_of_fy','obligation','action_count','cum_obligation','cum_actions'],
@@ -1267,6 +1493,9 @@ const CONTROLS = {
       dm_kb_inventory: ['collection','folder','label','doc_count','authority_tier','note','sort_order'],
       dm_justification_exhibit: ['fiscal_year','activity','exhibit_count'],
       dm_hearing: ['hearing_id','congress','chamber','title','ingest_date','defense_related'],
+      dm_raw_source: ['source_key','group_label','label','file_format','file_path','sample_path',
+        'sheet_name','total_rows','file_count','column_count','columns_json','preamble_json','note','sort_order'],
+      dm_raw_row: ['source_key','row_no','values_json'],
     };
 
     // The schema is applied every load, but CREATE TABLE IF NOT EXISTS cannot add

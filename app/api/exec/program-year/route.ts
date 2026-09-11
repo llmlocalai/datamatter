@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProgramYearDrill, parseFunds, programYearReady, type PyOrder } from '@/lib/program-year';
+import { parseSide, splitReady } from '@/lib/funding';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'The program-year columns are not in this database yet. '
         + 'Run npm run migrate, then npm run refresh.' }, { status: 503 });
     }
-    const out = await getProgramYearDrill({ fiscalYear, funds: parseFunds(q.get('funds')), order, path });
+    const side = parseSide(q.get('side'));
+    if (side !== 'all' && !(await splitReady())) {
+      return NextResponse.json({ error: 'The direct/reimbursable split is not in this database yet. '
+        + 'Run npm run migrate, then npm run refresh.' }, { status: 503 });
+    }
+    const out = await getProgramYearDrill({ fiscalYear, funds: parseFunds(q.get('funds')), order, path, side });
     return NextResponse.json(out);
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? 'query failed' }, { status: 500 });

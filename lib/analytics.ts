@@ -8,6 +8,7 @@
  * All SQL is parameterized. Amounts are DOLLARS.
  */
 import { query as rawQuery } from './db';
+import { columnsOf, missingColumns } from './schema';
 
 export const SCOPE_DOW = 'DOW';
 
@@ -1059,16 +1060,39 @@ export async function getWeaponSystems(pbYear?: number) {
  * states no split between them. Nothing here apportions one.
  */
 export async function getAccountExecution(treasuryAccount: string) {
+  // File A's figures are direct and reimbursable together. The direct and
+  // reimbursable obligations beside them come from File B for the same federal
+  // account, and are null on a load that predates the split -- see lib/funding.
+  const split = !(await missingColumns('dm_exec_account_fy', ['obligations_direct'])).length
+    && (await columnsOf('dm_exec_resource')).size > 0;
+  const splitCols = split
+    ? `(SELECT sum(f.obligations_direct) FROM dm_exec_account_fy f
+          JOIN dm_load lf ON lf.id = f.load_id AND lf.is_current
+          JOIN dm_exec_account ac ON ac.load_id = f.load_id AND ac.fiscal_year = f.fiscal_year
+                                 AND ac.treasury_account = f.treasury_account
+         WHERE f.scope = 'DOW' AND f.fiscal_year = d.fiscal_year AND ac.federal_account = d.dim_key) AS "directObligations",
+       (SELECT sum(f.obligations_reimbursable) FROM dm_exec_account_fy f
+          JOIN dm_load lf ON lf.id = f.load_id AND lf.is_current
+          JOIN dm_exec_account ac ON ac.load_id = f.load_id AND ac.fiscal_year = f.fiscal_year
+                                 AND ac.treasury_account = f.treasury_account
+         WHERE f.scope = 'DOW' AND f.fiscal_year = d.fiscal_year AND ac.federal_account = d.dim_key) AS "reimbursableObligations",
+       (SELECT sum(r.spending_auth_offsetting) FROM dm_exec_resource r
+          JOIN dm_load lr ON lr.id = r.load_id AND lr.is_current
+         WHERE r.scope = 'DOW' AND r.fiscal_year = d.fiscal_year AND r.federal_account = d.dim_key) AS "offsettingCollections"`
+    : `NULL::numeric AS "directObligations", NULL::numeric AS "reimbursableObligations",
+       NULL::numeric AS "offsettingCollections"`;
   return query<{ fiscalYear: number; label: string; totalBudgetaryResources: number;
                  obligationsIncurred: number; unobligatedBalance: number;
                  grossOutlays: number; rankInDim: number; submissionPeriod: string | null;
-                 isPartialYear: boolean }>(
+                 isPartialYear: boolean; directObligations: number | null;
+                 reimbursableObligations: number | null; offsettingCollections: number | null }>(
     `SELECT d.fiscal_year AS "fiscalYear", d.dim_label AS label,
             d.total_budgetary_resources AS "totalBudgetaryResources",
             d.obligations_incurred AS "obligationsIncurred",
             d.unobligated_balance AS "unobligatedBalance",
             d.gross_outlays AS "grossOutlays", d.rank_in_dim AS "rankInDim",
-            s.submission_period AS "submissionPeriod", s.is_partial_year AS "isPartialYear"
+            s.submission_period AS "submissionPeriod", s.is_partial_year AS "isPartialYear",
+            ${splitCols}
        FROM dm_sbr_dim d
        JOIN dm_load l ON l.id = d.load_id AND l.is_current
        LEFT JOIN dm_sbr_fy s ON s.load_id = d.load_id AND s.fiscal_year = d.fiscal_year

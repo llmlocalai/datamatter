@@ -203,6 +203,58 @@ with a program-year view (`lib/program-year.ts`, `/api/exec/program-year`,
 - Still a position per submission, not a curve. What moves across the chart is
   a program year's life, FY by FY.
 
+### Direct or reimbursable — execution is DIRECT unless it says otherwise
+
+File B marks every row `direct_or_reimbursable_funding_source` (D/R). A
+reimbursable obligation is work an account performs for a paying customer; when
+the customer is another Department account, the same work is **also** that
+account's direct obligation (O&M orders parts, the Working Capital Fund buys
+them). A direct-plus-reimbursable total counts it twice. FY2025: **$212.9B of
+$1,451.1B (14.7%)** reimbursable, $152.0B of it in the DWCF; FY2026 P10: $187.3B of
+$1,363.3B (13.7%). The direct obligation rate is 73.4% in FY2025 where the
+D+R rate reads 80.0%.
+
+- **File A has no D/R column** (see `/raw-data`). Direct AMOUNTS always come from
+  File B (`lib/funding.ts`). The direct RATE is File B direct obligations ÷ (File
+  A total budgetary resources − spending authority from offsetting collections).
+  Brought-forward balances cannot be split in File A, so for prior-year and
+  revolving money the denominator still carries some reimbursable carry-in; the
+  page says so. Never divide File B direct by raw File A TBR.
+- **D+R survives only where it is the thing reported**: the Statement of
+  Budgetary Resources, the TIE-01 File A/File B tie-out, and File C vs FPDS
+  linkage (FPDS carries no D/R, so both sides stay D+R). Anywhere else a total
+  is labelled direct, or shows direct and reimbursable side by side.
+- Rollups carry `*_direct` / `*_reimbursable` beside the total
+  (`dm_exec_account_fy`, `dm_exec_object_class_fy`, `dm_obligation_stage`,
+  `dm_exec_fy`); detail filters on `dm_exec_detail.funding_source`. APIs take
+  `side=direct|reimbursable|all`, default direct, and return 503 on a database
+  that has the columns but not the load (`splitReady()`) — NULL is not zero.
+- **`DR-01` (critical)** recomputes the split from the stage totals and, account
+  by account, from the detail rows. **`DR-02`** (high) publishes the reimbursable
+  share and fails if more than 0.1% carries no funding source. Both were proved
+  able to fail (a $5B misstated direct figure, a nulled split, a $3B unresolved
+  gap).
+
+### Raw data — the files before anything is done to them
+
+`/raw-data` (Method) shows the first five records of every file the ETL reads,
+every column, file order, file names: File A, File B, the three File C files,
+FPDS contracts, assistance, all 32 PB exhibit workbooks, and the submission
+calendar (`step_raw` → `raw.json` → `dm_raw_source` / `dm_raw_row`).
+
+- Values are stored as the text the file holds. Workbooks are read with the
+  standard library (zipfile + ElementTree), not openpyxl, so a cell is shown as
+  stored; null and `""` are different and are rendered differently.
+- Parquet samples: the newest `fiscal_year=` partition; award files the newest
+  `vintage=` and `fy=`. `total_rows` is the whole dataset from parquet footers.
+- The submission-calendar sample rides in `currency.json` as `raw_sample`
+  (outside `rows`, so the loader ignores it); `raw` runs last in `--step all`.
+- **`RAW-01` (critical)**: every record has one value per column; every file a
+  current load's figures come from has a sample (including each (PB year,
+  exhibit) with lines loaded); File A/B sample periods equal the published SBR /
+  stage periods; the contract sample's vintage equals the contract load's.
+- Nothing on this page is a figure. Do not compute from `dm_raw_row`.
+
 ### The warehouse does not know how old it is — CUR-01 does
 
 The account files carry the submission period they were extracted at, and a

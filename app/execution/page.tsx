@@ -9,8 +9,9 @@ import ActionTable from '@/components/execution/ActionTable';
 import ExecExplorer from '@/components/execution/ExecExplorer';
 import ProgramYearExplorer from '@/components/execution/ProgramYearExplorer';
 import { getProgramYearOverview, programYearReady } from '@/lib/program-year';
+import { getSplitByFy, getSplitByDim, splitReady, directRate } from '@/lib/funding';
 import {
-  getProvenance, getSbrSeries, getObligationStages, getSbrDim, getScopeComparison, getAwardYears,
+  getProvenance, getSbrSeries, getObligationStages, getScopeComparison, getAwardYears,
 } from '@/lib/analytics';
 import { fiscalYearOf, dayOfFiscalYear, daysToFiscalYearEnd, pickFiscalYear } from '@/lib/fiscal';
 import {
@@ -54,21 +55,30 @@ export default async function ExecutionPage() {
   const lastClosed = closed[closed.length - 1];
   const isFocusPartial = focus.isPartialYear;
 
+  // Direct or reimbursable. Every File B figure below is DIRECT: reimbursable
+  // work is paid back by a customer, and when that customer is another
+  // Department account it is already the customer's direct obligation. A
+  // database that predates the split withholds these figures -- there is no
+  // falling back to the direct-plus-reimbursable total, which is the overstated
+  // number the split exists to replace. See lib/funding.
+  const drReady = await splitReady();
   const [objects, components, fundLife, pace, tail, eoySub, executors, actions] =
     await Promise.all([
-      getExecObjectClasses(focus.fiscalYear),
-      getSbrDim(focus.fiscalYear, 'agency', 6),
-      getExecFundLife(focus.fiscalYear),
+      drReady ? getExecObjectClasses(focus.fiscalYear, 'direct') : Promise.resolve([]),
+      drReady ? getSplitByDim(focus.fiscalYear, 'agency', 6) : Promise.resolve([]),
+      drReady ? getExecFundLife(focus.fiscalYear, 'direct') : Promise.resolve([]),
       getFpdsPace(3),
       getFpdsTailDays(21),
       getEoy('sub_agency', lastClosed?.fiscalYear, 12),
       getExecutors(),
       getFpdsActions(undefined, undefined, 400),
     ]);
-  const [coverage, majorClasses, currency, pyReady] = await Promise.all([
+  const [coverage, majorClasses, currency, pyReady, splits] = await Promise.all([
     getContractCoverage(), getMajorClasses(lastClosed?.fiscalYear ?? focus.fiscalYear),
-    getCurrency(), programYearReady(),
+    getCurrency(), programYearReady(), drReady ? getSplitByFy() : Promise.resolve([]),
   ]);
+  const split = splits.find((x) => x.fiscalYear === focus.fiscalYear);
+  const splitRate = split ? directRate(split.direct, split.resources, split.offsettingCollections) : null;
   // Withheld, not approximated, when the database predates the program-year
   // columns -- see lib/schema and lib/program-year.
   const programYear = pyReady ? await getProgramYearOverview() : null;
@@ -158,7 +168,7 @@ export default async function ExecutionPage() {
   ];
 
   const annual = fundLife.find((f) => f.fundLife === 'annual');
-  const annualPct = execRow?.obligations ? Number(annual?.obligations ?? 0) / execRow.obligations * 100 : 0;
+  const annualPct = split?.direct ? Number(annual?.obligations ?? 0) / split.direct * 100 : 0;
 
   const tie = sbr.map((a) => {
     const b = stages.find((s) => s.fiscalYear === a.fiscalYear);
@@ -251,19 +261,27 @@ export default async function ExecutionPage() {
       {/* ---------------------------------------------------------------- */}
       <Section title={`FY${currentFy} at ${daysLeft} days out`}
         note={`Four figures a review would start from on this date, each labelled with how far its `
-          + `source actually reaches. The first two are the whole Department, from the account files. `
+          + `source actually reaches. The first two are the whole Department's DIRECT execution, from the `
+          + `account files — reimbursable work, paid back by a customer, is shown beside them and not `
+          + `added in. `
           + `The second two are contract actions only`
           + `${cov ? `, which are ${fmtPct(cov.contractPct)} of obligations` : ''} — the account files `
           + `carry no date, so anything about timing can only be read from them.`}>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatTile label="Obligations incurred, all appropriations" value={fmtT(focus.obligationsIncurred)}
-            sub={`${fmtPct(focus.obligationsIncurred / focus.totalBudgetaryResources * 100)} of `
-              + `${fmtT(focus.totalBudgetaryResources)} available`
-              + `${focus.submissionPeriod ? ` · File A at ${focus.submissionPeriod}` : ''}`}
+          <StatTile label="Direct obligations, all appropriations"
+            value={split ? fmtT(split.direct) : '—'}
+            sub={split
+              ? `${splitRate != null ? `${fmtPct(splitRate)} of ` : ''}`
+                + `${fmtT(split.resources - Math.max(0, split.offsettingCollections))} direct resources · `
+                + `${fmtT(split.reimbursable)} reimbursable not counted · `
+                + `${fmtT(focus.obligationsIncurred)} with it (File A)`
+                + `${focus.submissionPeriod ? ` · at ${focus.submissionPeriod}` : ''}`
+              : 'The direct/reimbursable split is not in this database yet — run npm run migrate, then npm run refresh'}
             tone="accent" />
-          <StatTile label="On authority that expires 30 September"
-            value={fmtT(Number(annual?.obligations ?? 0))}
-            sub={`${fmtPct(annualPct)} of obligations are on annual appropriations`}
+          <StatTile label="Direct, on authority that expires 30 September"
+            value={split ? fmtT(Number(annual?.obligations ?? 0)) : '—'}
+            sub={split ? `${fmtPct(annualPct)} of direct obligations are on annual appropriations`
+              : 'Awaiting the direct/reimbursable split'}
             tone="warning" />
           <StatTile label={timingReady
               ? `Contract obligations to ${fpdsFocus?.frontierDate}`
@@ -324,6 +342,43 @@ export default async function ExecutionPage() {
               + `that is like for like.`}
           />
         )}
+        {splits.length ? (
+          <div className="mt-8">
+            <h3 className="text-sm font-semibold text-navy-200 mb-1">
+              Direct and reimbursable — what the statement adds together
+            </h3>
+            <p className="text-xs text-navy-400 mb-3 max-w-3xl leading-relaxed">
+              The Statement of Budgetary Resources above reports direct and reimbursable execution as one figure,
+              because File A carries no attribute that separates them. File B does. A reimbursable obligation is
+              work an account performs for a customer and is paid back for; when the customer is another
+              Department account the same work is already that customer&rsquo;s direct obligation, so the total
+              counts it twice. Execution figures on this page are direct.
+            </p>
+            <DataTable
+              head={['Fiscal year', 'Obligations (File A, D+R)', 'Direct (File B)', 'Reimbursable (File B)',
+                     'Reimb. share', 'Direct resources', 'Direct rate']}
+              rows={splits.map((x) => {
+                const dr = directRate(x.direct, x.resources, x.offsettingCollections);
+                return [`FY${x.fiscalYear}${x.isPartialYear ? ' *' : ''}`,
+                  fmtT(x.obligationsA), fmtT(x.direct), fmtT(x.reimbursable),
+                  fmtPct(x.obligationsB ? x.reimbursable / x.obligationsB * 100 : 0),
+                  fmtT(x.resources - Math.max(0, x.offsettingCollections)),
+                  dr != null ? fmtPct(dr) : '—'];
+              })}
+              caption={`Direct resources are total budgetary resources less spending authority from offsetting `
+                + `collections, which is the authority reimbursable work earns. Unobligated balances brought `
+                + `forward cannot be split in File A, so a year carrying large balances still has some `
+                + `reimbursable carry-in in that column. * period-to-date. Controls DR-01 and DR-02.`}
+            />
+          </div>
+        ) : (
+          <div className="alert-warning rounded-lg px-4 py-3 text-sm text-navy-100 mt-6">
+            The direct/reimbursable split is not in this database yet, so the figures above are the statement&rsquo;s
+            direct-plus-reimbursable totals and no direct execution figure is shown. Run{' '}
+            <code className="font-mono text-xs">npm run migrate</code> then{' '}
+            <code className="font-mono text-xs">npm run refresh</code>.
+          </div>
+        )}
         <Caveat>
           <strong className="text-navy-200">This is a position, not a curve, and it cannot be made
           into one.</strong> File A and File B each publish{' '}
@@ -345,7 +400,7 @@ export default async function ExecutionPage() {
 
       {/* ---------------------------------------------------------------- */}
       <Section title="How long the money lasts"
-        note="Obligations by period of availability, read off the beginning and ending periods on each account. This is the split the date at the top of this page is about.">
+        note="Direct obligations by period of availability, read off the beginning and ending periods on each account. This is the split the date at the top of this page is about. Reimbursable work is excluded.">
         {fundLifeRows.length ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
             <BarList
@@ -357,7 +412,7 @@ export default async function ExecutionPage() {
             />
             <div>
               <h3 className="text-sm font-semibold text-navy-200 mb-4">
-                What the money bought, FY{focus.fiscalYear}
+                What the money bought, FY{focus.fiscalYear} — direct
               </h3>
               <BarList
                 rows={objects.slice(0, 10).map((o) => ({
@@ -366,7 +421,7 @@ export default async function ExecutionPage() {
                     o.obligations ? o.grossOutlays / o.obligations * 100 : 0)}`,
                 }))}
                 colour="var(--series-3)"
-                caption={`Top 10 of ${objects.length} object classes carried in the extract.`}
+                caption={`Top 10 of ${objects.length} object classes carried in the extract, direct obligations only.`}
               />
             </div>
           </div>
@@ -627,20 +682,20 @@ export default async function ExecutionPage() {
 
       {/* ---------------------------------------------------------------- */}
       <Section title="Where obligated dollars sit"
-        note="An obligation is a binding reservation, not a payment. File B splits it by USSGL account into undelivered orders, delivered orders, and what has already been outlaid.">
-        {stages.length ? (
+        note="An obligation is a binding reservation, not a payment. File B splits it by USSGL account into undelivered orders, delivered orders, and what has already been outlaid. Direct obligations only.">
+        {splits.length ? (
           <>
             <StackedFY
-              years={stages.map((s) => ({
-                fy: s.fiscalYear,
-                parts: [s.undeliveredOrdersUnpaid, s.deliveredOrdersUnpaid,
-                        Math.max(0, s.obligationsIncurred - s.undeliveredOrdersUnpaid - s.deliveredOrdersUnpaid)],
-                partial: sbr.find((r) => r.fiscalYear === s.fiscalYear)?.isPartialYear,
+              years={splits.map((x) => ({
+                fy: x.fiscalYear,
+                parts: [x.undeliveredDirect, x.deliveredDirect,
+                        Math.max(0, x.direct - x.undeliveredDirect - x.deliveredDirect)],
+                partial: x.isPartialYear,
               }))}
               series={[
                 { label: 'Undelivered orders, unpaid (USSGL 480100 series)', colour: 'var(--series-1)' },
                 { label: 'Delivered orders, unpaid (USSGL 490100 series)', colour: 'var(--series-2)' },
-                { label: 'Remainder of obligations incurred', colour: 'var(--series-3)' },
+                { label: 'Remainder of direct obligations incurred', colour: 'var(--series-3)' },
               ]}
             />
             <Caveat>
@@ -656,7 +711,9 @@ export default async function ExecutionPage() {
       <Section title="A cross-system reconciliation that does not tie"
         note={`File A and File B are separate submissions of the same execution, at different grain `
           + `and read here at the same submission period. They should agree closely. In ${tieOff.length} `
-          + `of ${tie.length} years they do not, and that variance is published rather than hidden.`}>
+          + `of ${tie.length} years they do not, and that variance is published rather than hidden. Both `
+          + `columns are direct and reimbursable together, because that is what each file publishes and `
+          + `what reconciles; the direct split is above.`}>
         <DataTable
           head={['Fiscal year', 'File A obligations', 'File B obligations', 'Variance', 'Variance %']}
           rows={sbr.map((a) => {
@@ -681,28 +738,38 @@ export default async function ExecutionPage() {
       <Section title="Execution rates across the window"
         note="Obligation and outlay rates against total budgetary resources. The in-progress year is marked and must not be read beside closed years as if it were one.">
         <DataTable
-          head={['Fiscal year', 'Period', 'Budgetary resources', 'Obligated', 'Oblig. rate', 'Outlaid', 'Outlay rate', 'Unobligated']}
-          rows={sbr.map((r) => [
-            `FY${r.fiscalYear}${r.isPartialYear ? ' *' : ''}`,
-            r.submissionPeriod ?? '—',
-            fmtT(r.totalBudgetaryResources), fmtT(r.obligationsIncurred),
-            fmtPct(r.obligationsIncurred / r.totalBudgetaryResources * 100),
-            fmtT(r.grossOutlays),
-            fmtPct(r.grossOutlays / r.totalBudgetaryResources * 100),
-            fmtT(r.unobligatedBalance),
-          ])}
-          caption="* fiscal year in progress. The submission period column is the source's own marker — P12 is a closed year; anything earlier is period-to-date."
+          head={['Fiscal year', 'Period', 'Direct obligated', 'Direct rate', 'Budgetary resources (D+R)',
+                 'Obligated (D+R)', 'Oblig. rate (D+R)', 'Outlaid (D+R)', 'Unobligated (D+R)']}
+          rows={sbr.map((r) => {
+            const x = splits.find((y) => y.fiscalYear === r.fiscalYear);
+            const dr = x ? directRate(x.direct, x.resources, x.offsettingCollections) : null;
+            return [
+              `FY${r.fiscalYear}${r.isPartialYear ? ' *' : ''}`,
+              r.submissionPeriod ?? '—',
+              x ? fmtT(x.direct) : '—', dr != null ? fmtPct(dr) : '—',
+              fmtT(r.totalBudgetaryResources), fmtT(r.obligationsIncurred),
+              fmtPct(r.obligationsIncurred / r.totalBudgetaryResources * 100),
+              fmtT(r.grossOutlays),
+              fmtT(r.unobligatedBalance),
+            ];
+          })}
+          caption="* fiscal year in progress. The submission period column is the source's own marker — P12 is a closed year; anything earlier is period-to-date. Direct columns are File B direct obligations over total budgetary resources less spending authority from offsetting collections; D+R columns are the statement as File A publishes it."
         />
         {components.length ? (
           <div className="mt-8">
             <h3 className="text-sm font-semibold text-navy-200 mb-4">
-              Obligations by component, FY{focus.fiscalYear}
+              Direct obligations by component, FY{focus.fiscalYear}
             </h3>
             <BarList
-              rows={components.map((c) => ({
-                key: c.key, label: c.label, value: c.obligationsIncurred,
-                meta: `${fmtPct(c.obligationsIncurred / focus.obligationsIncurred * 100)} of Department obligations`,
-              }))}
+              rows={components.map((c) => {
+                const dr = directRate(c.direct, c.resources, c.offsettingCollections);
+                return {
+                  key: c.key, label: c.label, value: c.direct,
+                  meta: `${fmtPct(split?.direct ? c.direct / split.direct * 100 : 0)} of direct obligations`
+                    + `${dr != null ? ` · ${fmtPct(dr)} of its direct resources` : ''}`
+                    + ` · ${fmtT(c.reimbursable)} reimbursable not counted`,
+                };
+              })}
               colour="var(--series-3)"
             />
             {award && (

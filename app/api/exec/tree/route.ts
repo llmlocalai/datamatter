@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getExecTree, EXEC_DIMS, EXEC_DIM_ORDER, type ExecDim } from '@/lib/execution';
+import { parseSide, splitReady } from '@/lib/funding';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,9 +28,17 @@ export async function GET(req: NextRequest) {
     }
   } catch { path = []; }
   try {
+    // The side filter reads funding_source on the detail row, which every load
+    // carries; the guard is about the rollups the page above this explorer
+    // reads, so the two never disagree about whether the split exists.
+    const side = parseSide(q.get('side'));
+    if (side !== 'all' && !(await splitReady())) {
+      return NextResponse.json({ error: 'The direct/reimbursable split is not in this database yet. '
+        + 'Run npm run migrate, then npm run refresh.' }, { status: 503 });
+    }
     const out = await getExecTree({
       fiscalYear, dims: dims.length ? dims : EXEC_DIM_ORDER, path,
-      search: q.get('q') || undefined,
+      search: q.get('q') || undefined, side,
     });
     return NextResponse.json(out);
   } catch (e: any) {

@@ -54,6 +54,10 @@ export default function ExecExplorer({ fiscalYear, years, periodNote }: {
   fiscalYear: number; years: number[]; periodNote: string;
 }) {
   const [fy, setFy] = useState(fiscalYear);
+  // Direct by default: reimbursable work is paid back by a customer and, when the
+  // customer is another Department account, is already that account's direct
+  // obligation. The two are shown apart and only added when asked for.
+  const [side, setSide] = useState<'direct' | 'reimbursable' | 'all'>('direct');
   const [viewId, setViewId] = useState(VIEWS[0].id);
   const view = useMemo(() => VIEWS.find((v) => v.id === viewId)!, [viewId]);
   const [search, setSearch] = useState('');
@@ -67,7 +71,7 @@ export default function ExecExplorer({ fiscalYear, years, periodNote }: {
     const t = setTimeout(() => setApplied(search.trim()), 350);
     return () => clearTimeout(t);
   }, [search]);
-  useEffect(() => { setNodes({}); setOpen(new Set()); }, [viewId, applied, fy]);
+  useEffect(() => { setNodes({}); setOpen(new Set()); }, [viewId, applied, fy, side]);
 
   const load = useCallback(async (path: string[]) => {
     const k = key(path);
@@ -75,7 +79,7 @@ export default function ExecExplorer({ fiscalYear, years, periodNote }: {
     setError(null);
     try {
       const q = new URLSearchParams({
-        fy: String(fy), dims: view.dims.join(','), path: JSON.stringify(path),
+        fy: String(fy), dims: view.dims.join(','), path: JSON.stringify(path), side,
       });
       if (applied) q.set('q', applied);
       const res = await fetch(`/api/exec/tree?${q}`);
@@ -87,7 +91,7 @@ export default function ExecExplorer({ fiscalYear, years, periodNote }: {
     } finally {
       setBusy((b) => { const s = new Set(b); s.delete(k); return s; });
     }
-  }, [fy, view, applied]);
+  }, [fy, view, applied, side]);
 
   useEffect(() => { if (!nodes[key([])]) load([]); }, [nodes, load]);
 
@@ -179,6 +183,16 @@ export default function ExecExplorer({ fiscalYear, years, periodNote }: {
             </button>
           ))}
         </div>
+      </div>
+      <div className="flex gap-1.5 flex-wrap mb-2 items-center">
+        <span className="text-[12px] uppercase tracking-wider text-navy-500 font-semibold mr-1">Funding</span>
+        {([['direct', 'Direct'], ['reimbursable', 'Reimbursable'], ['all', 'Direct + reimbursable']] as const).map(([k, l]) => (
+          <button key={k} onClick={() => setSide(k)} aria-pressed={side === k}
+            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+              side === k ? 'bg-accent-500 text-navy-950' : 'bg-navy-800 text-navy-300 hover:bg-navy-700'}`}>
+            {l}
+          </button>
+        ))}
       </div>
       <div className="flex gap-1.5 flex-wrap mb-2">
         {VIEWS.map((v) => (

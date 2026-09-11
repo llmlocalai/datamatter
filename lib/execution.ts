@@ -20,6 +20,7 @@
  */
 import { query } from './db';
 import { missingColumns } from './schema';
+import { type Side, sideSuffix, sideWhere } from './funding';
 
 export const SCOPE = 'DOW';
 
@@ -30,6 +31,14 @@ export interface ExecFy {
   detailRows: number; collapsedRows: number; hasDetail: boolean;
   accounts: number; objectClasses: number; activities: number;
   hasActivityNames: boolean; obligations: number;
+}
+/** Direct and reimbursable File B obligations for one year, or null before the split is loaded. */
+export async function getExecSplit(fy: number) {
+  const r = await query<{ direct: number | null; reimbursable: number | null; total: number }>(
+    `SELECT e.obligations_direct AS direct, e.obligations_reimbursable AS reimbursable, e.obligations AS total
+       FROM dm_exec_fy e JOIN dm_load l ON l.id = e.load_id AND l.is_current
+      WHERE e.fiscal_year = $1 AND e.scope = $2`, [fy, SCOPE]);
+  return r[0] && r[0].direct != null ? r[0] as { direct: number; reimbursable: number; total: number } : null;
 }
 export async function getExecFy(): Promise<ExecFy[]> {
   return query<ExecFy>(
@@ -47,16 +56,18 @@ export interface ObjectClassRow {
   obligations: number; undeliveredUnpaid: number; deliveredUnpaid: number;
   grossOutlays: number; deobligations: number;
 }
-export async function getExecObjectClasses(fy: number): Promise<ObjectClassRow[]> {
+/** Object classes for one side of execution -- direct unless asked otherwise. */
+export async function getExecObjectClasses(fy: number, side: Side = 'direct'): Promise<ObjectClassRow[]> {
+  const x = sideSuffix(side);
   return query<ObjectClassRow>(
-    `SELECT object_class_code AS code, object_class_name AS name,
-            major_class AS "majorClass", obligations,
-            undelivered_unpaid AS "undeliveredUnpaid",
-            delivered_unpaid AS "deliveredUnpaid",
-            gross_outlays AS "grossOutlays", deobligations
+    `SELECT o.object_class_code AS code, o.object_class_name AS name,
+            o.major_class AS "majorClass", o.obligations${x} AS obligations,
+            o.undelivered_unpaid${x} AS "undeliveredUnpaid",
+            o.delivered_unpaid${x} AS "deliveredUnpaid",
+            o.gross_outlays${x} AS "grossOutlays", o.deobligations${x} AS deobligations
        FROM dm_exec_object_class_fy o JOIN dm_load l ON l.id = o.load_id AND l.is_current
-      WHERE fiscal_year = $1 AND scope = $2
-      ORDER BY obligations DESC`, [fy, SCOPE]);
+      WHERE o.fiscal_year = $1 AND o.scope = $2 AND o.obligations${x} IS NOT NULL
+      ORDER BY o.obligations${x} DESC`, [fy, SCOPE]);
 }
 
 /**
@@ -66,14 +77,16 @@ export async function getExecObjectClasses(fy: number): Promise<ObjectClassRow[]
  * it is read off the beginning and ending periods of availability. Annual money
  * expires on 30 September; multi-year and no-year money does not.
  */
-export async function getExecFundLife(fy: number) {
+export async function getExecFundLife(fy: number, side: Side = 'direct') {
+  const x = sideSuffix(side);
   return query<{ fundLife: string; obligations: number; undeliveredUnpaid: number;
                  grossOutlays: number; accounts: number }>(
-    `SELECT fund_life AS "fundLife", sum(obligations) AS obligations,
-            sum(undelivered_unpaid) AS "undeliveredUnpaid",
-            sum(gross_outlays) AS "grossOutlays", count(*)::int AS accounts
+    `SELECT a.fund_life AS "fundLife", sum(a.obligations${x}) AS obligations,
+            sum(a.undelivered_unpaid${x}) AS "undeliveredUnpaid",
+            sum(a.gross_outlays${x}) AS "grossOutlays",
+            count(*) FILTER (WHERE a.obligations${x} <> 0 OR a.gross_outlays${x} <> 0)::int AS accounts
        FROM dm_exec_account_fy a JOIN dm_load l ON l.id = a.load_id AND l.is_current
-      WHERE fiscal_year = $1 AND scope = $2
+      WHERE a.fiscal_year = $1 AND a.scope = $2 AND a.obligations${x} IS NOT NULL
       GROUP BY 1 ORDER BY obligations DESC`, [fy, SCOPE]);
 }
 
@@ -117,12 +130,12 @@ const EXEC_FROM = `
    AND av.load_id = d.load_id`;
 
 export async function getExecTree(a: {
-  fiscalYear: number; dims?: ExecDim[]; path?: string[]; search?: string;
+  fiscalYear: number; dims?: ExecDim[]; path?: string[]; search?: string; side?: Side;
 }): Promise<{ nodes: ExecNode[]; dim: ExecDim | null }> {
   const dims = (a.dims?.length ? a.dims : EXEC_DIM_ORDER).filter((d) => d in EXEC_DIMS);
   const path = a.path ?? [];
   const params: any[] = [a.fiscalYear, SCOPE];
-  const where = ['d.fiscal_year = $1', 'd.scope = $2'];
+  const where = ['d.fiscal_year = $1', 'd.scope = $2', sideWhere(a.side ?? 'direct')];
   for (let i = 0; i < path.length && i < dims.length; i++) {
     params.push(path[i]);
     where.push(`coalesce(${EXEC_DIMS[dims[i]].expr}, '') = $${params.length}`);
@@ -390,11 +403,12 @@ export async function getContractCoverage() {
 }
 
 /** Obligations by object-class group — what the timing view covers and what it does not. */
-export async function getMajorClasses(fy: number) {
+export async function getMajorClasses(fy: number, side: Side = 'all') {
+  const x = sideSuffix(side);
   return query<{ majorClass: string; obligations: number }>(
-    `SELECT major_class AS "majorClass", sum(obligations) AS obligations
+    `SELECT o.major_class AS "majorClass", sum(o.obligations${x}) AS obligations
        FROM dm_exec_object_class_fy o JOIN dm_load l ON l.id = o.load_id AND l.is_current
-      WHERE fiscal_year = $1 AND scope = $2
+      WHERE o.fiscal_year = $1 AND o.scope = $2
       GROUP BY 1 ORDER BY 2 DESC`, [fy, SCOPE]);
 }
 

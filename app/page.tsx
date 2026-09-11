@@ -7,6 +7,7 @@ import {
   getSbrSeries, getReconciliation, getControls, getAllProvenance, getDefinitions,
 } from '@/lib/analytics';
 import { pickFiscalYear } from '@/lib/fiscal';
+import { getSplitByFy, splitReady, directRate } from '@/lib/funding';
 
 export const metadata: Metadata = {
   title: 'datamatter · Department of War budget analytics',
@@ -56,6 +57,11 @@ export default async function Home() {
   const latest = pickFiscalYear(sbr) ?? closed[closed.length - 1];
   const closedRec = rec.filter((r) => !r.isPartialYear);
   const lastRec = closedRec[closedRec.length - 1];
+  // Direct execution, not direct plus reimbursable -- see lib/funding.
+  const splits = (await splitReady()) ? await getSplitByFy() : [];
+  const latestSplit = latest ? splits.find((x) => x.fiscalYear === latest.fiscalYear) : undefined;
+  const latestRate = latestSplit
+    ? directRate(latestSplit.direct, latestSplit.resources, latestSplit.offsettingCollections) : null;
   const assertions = controls.reduce((s, c) => s + c.total, 0);
   const passing = controls.reduce((s, c) => s + c.pass, 0);
   const loaded = datasets.filter((d: any) => d.vintage).length;
@@ -101,9 +107,12 @@ export default async function Home() {
             <StatTile label="Total budgetary resources" value={fmtT(latest.totalBudgetaryResources)}
               sub={`FY${latest.fiscalYear} across ${fmtInt(latest.tasCount)} Treasury accounts`
                 + (latest.submissionPeriod ? ` · ${latest.submissionPeriod}` : '')} />
-            <StatTile label="Obligations incurred" value={fmtT(latest.obligationsIncurred)}
-              sub={`${fmtPct(latest.obligationsIncurred / latest.totalBudgetaryResources * 100)} of `
-                + `available resources${latest.isPartialYear ? ', period-to-date' : ''}`} tone="accent" />
+            <StatTile label="Direct obligations" value={latestSplit ? fmtT(latestSplit.direct) : '—'}
+              sub={latestSplit
+                ? `${latestRate != null ? `${fmtPct(latestRate)} of direct resources · ` : ''}`
+                  + `${fmtT(latestSplit.reimbursable)} reimbursable not counted`
+                  + `${latest.isPartialYear ? ', period-to-date' : ''}`
+                : 'Direct/reimbursable split not loaded yet'} tone="accent" />
             <StatTile label="Contract obligations" value={fmtB(lastRec.awardObligation)}
               sub={`FY${lastRec.fiscalYear} · ${fmtInt(lastRec.awardActions)} contract actions`} />
             <StatTile label="Traceable to an account" value={fmtPct(lastRec.linkagePct)}

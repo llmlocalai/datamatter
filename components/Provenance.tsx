@@ -34,7 +34,7 @@ export function ProvenanceBar({ p, extra }: { p: Provenance | null; extra?: stri
       <div className="px-4 py-3 space-y-1.5">
         <p className="text-xs text-navy-400">
           <span className="text-navy-500">Path</span>{' '}
-          <code className="font-mono text-[12px] text-accent-400">{p.sourcePath}</code>
+          <code className="font-mono text-[12px] text-accent-400 break-all">{p.sourcePath}</code>
           <span className="text-navy-600"> · extracted {p.extractedAt.slice(0, 16).replace('T', ' ')}</span>
           <span className="text-navy-600"> · refresh {p.refreshCadence}</span>
         </p>

@@ -30,6 +30,7 @@
  */
 import { query } from './db';
 import { columnsOf, missingColumns } from './schema';
+import { type Side, sideSuffix, sideWhere } from './funding';
 
 export const SCOPE = 'DOW';
 
@@ -129,8 +130,14 @@ export interface PyYear {
 }
 export interface PyCell {
   fiscalYear: number; bpoa: number | null;
+  /** File B, direct and reimbursable together. */
   obligations: number; outlays: number; undelivered: number;
-  resources: number; obligationsA: number; unobligated: number;
+  /** File B, split -- null on a load that predates the split. */
+  obligationsDirect: number | null; obligationsReimbursable: number | null;
+  outlaysDirect: number | null; outlaysReimbursable: number | null;
+  undeliveredDirect: number | null; undeliveredReimbursable: number | null;
+  /** File A. Carries no split; offsetting collections are what reimbursable work earns. */
+  resources: number; offsettingCollections: number; obligationsA: number; unobligated: number;
 }
 export interface PyOverview {
   years: PyYear[]; cells: PyCell[];
@@ -151,7 +158,10 @@ export async function getProgramYearOverview(): Promise<PyOverview> {
     query<PyCell>(
       `WITH b AS (
          SELECT f.fiscal_year, ac.bpoa, sum(f.obligations) AS obl, sum(f.gross_outlays) AS outl,
-                sum(f.undelivered_unpaid) AS udo
+                sum(f.undelivered_unpaid) AS udo,
+                sum(f.obligations_direct) AS obl_d, sum(f.obligations_reimbursable) AS obl_r,
+                sum(f.gross_outlays_direct) AS outl_d, sum(f.gross_outlays_reimbursable) AS outl_r,
+                sum(f.undelivered_unpaid_direct) AS udo_d, sum(f.undelivered_unpaid_reimbursable) AS udo_r
            FROM dm_exec_account_fy f
            JOIN dm_load l ON l.id = f.load_id AND l.is_current
            JOIN dm_exec_account ac ON ac.load_id = f.load_id AND ac.fiscal_year = f.fiscal_year
@@ -159,13 +169,18 @@ export async function getProgramYearOverview(): Promise<PyOverview> {
           WHERE f.scope = $1 GROUP BY 1, 2
        ), a AS (
          SELECT r.fiscal_year, r.bpoa, sum(r.total_budgetary_resources) AS tbr,
+                sum(r.spending_auth_offsetting) AS saoc,
                 sum(r.obligations_incurred) AS obl, sum(r.unobligated_balance) AS unob
            FROM dm_exec_resource r JOIN dm_load l ON l.id = r.load_id AND l.is_current
           WHERE r.scope = $1 GROUP BY 1, 2
        )
        SELECT coalesce(b.fiscal_year, a.fiscal_year) AS "fiscalYear", coalesce(b.bpoa, a.bpoa) AS bpoa,
               coalesce(b.obl, 0) AS obligations, coalesce(b.outl, 0) AS outlays,
-              coalesce(b.udo, 0) AS undelivered, coalesce(a.tbr, 0) AS resources,
+              coalesce(b.udo, 0) AS undelivered,
+              b.obl_d AS "obligationsDirect", b.obl_r AS "obligationsReimbursable",
+              b.outl_d AS "outlaysDirect", b.outl_r AS "outlaysReimbursable",
+              b.udo_d AS "undeliveredDirect", b.udo_r AS "undeliveredReimbursable",
+              coalesce(a.tbr, 0) AS resources, coalesce(a.saoc, 0) AS "offsettingCollections",
               coalesce(a.obl, 0) AS "obligationsA", coalesce(a.unob, 0) AS unobligated
          FROM b FULL JOIN a ON a.fiscal_year = b.fiscal_year AND a.bpoa IS NOT DISTINCT FROM b.bpoa
         ORDER BY 1, 2 DESC NULLS LAST`, [SCOPE]),
@@ -176,7 +191,7 @@ export async function getProgramYearOverview(): Promise<PyOverview> {
     query<{ code: string; failed: number; message: string | null }>(
       `SELECT control_code AS code, count(*) FILTER (WHERE status = 'fail')::int AS failed,
               max(message) FILTER (WHERE status = 'fail') AS message
-         FROM dm_control_result WHERE control_code IN ('POA-01', 'POA-02', 'TIE-01')
+         FROM dm_control_result WHERE control_code IN ('POA-01', 'POA-02', 'DR-01', 'DR-02', 'TIE-01')
         GROUP BY 1 ORDER BY 1`).catch(() => []),
   ]);
   const load = (k: string) => {
@@ -193,7 +208,7 @@ export interface PyMeasures {
   deobligations: number; upward: number; downward: number;
 }
 export interface PyResources {
-  resources: number; appropriated: number; broughtForward: number;
+  resources: number; appropriated: number; broughtForward: number; offsettingCollections: number;
   obligations: number; unobligated: number; outlays: number; accounts: number;
 }
 export interface PyNode {
@@ -202,11 +217,14 @@ export interface PyNode {
 }
 export interface PyLifeRow {
   fiscalYear: number; submissionPeriod: string | null;
+  /** File B, on the side asked for. */
   obligations: number; outlays: number; undelivered: number;
-  resources: number; appropriated: number; obligationsA: number; unobligated: number;
+  /** File A, direct and reimbursable together. */
+  resources: number; offsettingCollections: number; appropriated: number;
+  obligationsA: number; unobligated: number;
 }
 export interface PyDrill {
-  fiscalYear: number; funds: Funds; order: PyOrder; dims: PyDim[];
+  fiscalYear: number; funds: Funds; side: Side; order: PyOrder; dims: PyDim[];
   level: number; dim: PyDim | null; hasDetail: boolean;
   /** Set when the level asked for needs detail this fiscal year does not carry. */
   unavailable: string | null;
@@ -221,9 +239,23 @@ const B_SUMS = `
   sum(%s.obligations) AS obl, sum(%s.gross_outlays) AS outl, sum(%s.undelivered_unpaid) AS udo,
   sum(%s.delivered_unpaid) AS dlo, sum(%s.deobligations) AS deob,
   sum(%s.upward_adjustments) AS up, sum(%s.downward_adjustments) AS down, count(*)::int AS n`;
-const bSums = (alias: string) => B_SUMS.replace(/%s/g, alias);
+/**
+ * The File B sums for a side. On the account rollup the split lives in suffixed
+ * columns; on the detail table it is the row's own funding_source, filtered in
+ * the WHERE clause, so the plain columns are right. Upward and downward
+ * adjustments are not split on the rollup and are not shown on this chart.
+ */
+const bSums = (alias: string, side: Side) => {
+  if (alias === 'd' || side === 'all') return B_SUMS.replace(/%s/g, alias);
+  const x = sideSuffix(side);
+  return `
+  sum(f.obligations${x}) AS obl, sum(f.gross_outlays${x}) AS outl, sum(f.undelivered_unpaid${x}) AS udo,
+  sum(f.delivered_unpaid${x}) AS dlo, sum(f.deobligations${x}) AS deob,
+  0 AS up, 0 AS down, count(*)::int AS n`;
+};
 const A_SUMS = `
   sum(r.total_budgetary_resources) AS tbr, sum(r.ba_appropriated) AS ba,
+  sum(r.spending_auth_offsetting) AS saoc,
   sum(r.unobligated_bf) AS bf, sum(r.obligations_incurred) AS aobl,
   sum(r.unobligated_balance) AS unob, sum(r.gross_outlays) AS aoutl,
   count(*) FILTER (WHERE r.total_budgetary_resources <> 0 OR r.obligations_incurred <> 0
@@ -236,13 +268,15 @@ const toB = (r: any): PyMeasures | null => r.n == null ? null : ({
 });
 const toA = (r: any): PyResources | null => r.accts == null ? null : ({
   resources: Number(r.tbr ?? 0), appropriated: Number(r.ba ?? 0), broughtForward: Number(r.bf ?? 0),
+  offsettingCollections: Number(r.saoc ?? 0),
   obligations: Number(r.aobl ?? 0), unobligated: Number(r.unob ?? 0), outlays: Number(r.aoutl ?? 0),
   accounts: Number(r.accts ?? 0),
 });
 
 export async function getProgramYearDrill(a: {
-  fiscalYear: number; funds: Funds; order?: PyOrder; path?: string[];
+  fiscalYear: number; funds: Funds; order?: PyOrder; path?: string[]; side?: Side;
 }): Promise<PyDrill> {
+  const side: Side = a.side ?? 'direct';
   const order: PyOrder = a.order === 'object' ? 'object' : 'account';
   const dims = PY_ORDERS[order];
   const path = (a.path ?? []).slice(0, dims.length - 1).map(String);
@@ -264,7 +298,7 @@ export async function getProgramYearDrill(a: {
   const aForTotals = pathIsAccount;
   const aForNodes = pathIsAccount && !levelIsDetail;
   const empty: PyDrill = {
-    fiscalYear: fy, funds: a.funds, order, dims, level, dim, hasDetail, unavailable: null,
+    fiscalYear: fy, funds: a.funds, side, order, dims, level, dim, hasDetail, unavailable: null,
     totals: { b: null, a: null }, nodes: [], crumbs: [], lifecycle: null,
   };
 
@@ -288,6 +322,7 @@ export async function getProgramYearDrill(a: {
                                 AND ac.treasury_account = f.treasury_account`;
     const where = [`${t}.fiscal_year = $1`, `${t}.scope = $2`,
                    fundsWhere(a.funds, 'ac.bpoa', `${t}.fiscal_year`, params)];
+    if (detail) where.push(sideWhere(side));
     path.forEach((v, i) => {
       params.push(v);
       where.push(`coalesce(${B_KEY[dims[i]]}, '') = $${params.length}`);
@@ -316,7 +351,7 @@ export async function getProgramYearDrill(a: {
   const ap: unknown[] = [fy, SCOPE];
   const ta = aForTotals ? aSource(ap) : null;
   const [bTot, aTot] = await Promise.all([
-    query(`SELECT ${bSums(tb.t)} ${tb.from} WHERE ${tb.where}`, tp),
+    query(`SELECT ${bSums(tb.t, side)} ${tb.from} WHERE ${tb.where}`, tp),
     ta ? query(`SELECT ${A_SUMS} ${ta.from} WHERE ${ta.where}`, ap) : Promise.resolve([] as any[]),
   ]);
 
@@ -334,7 +369,7 @@ export async function getProgramYearDrill(a: {
     const nap: unknown[] = [fy, SCOPE];
     const na = aForNodes ? aSource(nap) : null;
     const [bRows, aRows] = await Promise.all([
-      query(`SELECT coalesce(${B_KEY[dim]}, '') AS key, max(${B_LABEL[dim]}) AS label, ${bSums(nb.t)}
+      query(`SELECT coalesce(${B_KEY[dim]}, '') AS key, max(${B_LABEL[dim]}) AS label, ${bSums(nb.t, side)}
                ${nb.from} WHERE ${nb.where} GROUP BY 1`, np),
       na
         ? query(`SELECT coalesce(${A_KEY[dim]}, '') AS key, max(${A_LABEL[dim]}) AS label, ${A_SUMS}
@@ -397,13 +432,15 @@ export async function getProgramYearDrill(a: {
       la.push(v); laWhere.push(`coalesce(${A_KEY[d]}, '') = $${la.length}`);
     }
     const [lbRows, laRows, periods] = await Promise.all([
-      query(`SELECT f.fiscal_year, sum(f.obligations) AS obl, sum(f.gross_outlays) AS outl,
-                    sum(f.undelivered_unpaid) AS udo
+      query(`SELECT f.fiscal_year, sum(f.obligations${sideSuffix(side)}) AS obl,
+                    sum(f.gross_outlays${sideSuffix(side)}) AS outl,
+                    sum(f.undelivered_unpaid${sideSuffix(side)}) AS udo
                FROM dm_exec_account_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
                JOIN dm_exec_account ac ON ac.load_id = f.load_id AND ac.fiscal_year = f.fiscal_year
                                       AND ac.treasury_account = f.treasury_account
               WHERE ${lbWhere.join(' AND ')} GROUP BY 1`, lb),
       query(`SELECT r.fiscal_year, sum(r.total_budgetary_resources) AS tbr, sum(r.ba_appropriated) AS ba,
+                    sum(r.spending_auth_offsetting) AS saoc,
                     sum(r.obligations_incurred) AS obl, sum(r.unobligated_balance) AS unob
                FROM dm_exec_resource r JOIN dm_load l ON l.id = r.load_id AND l.is_current
               WHERE ${laWhere.join(' AND ')} GROUP BY 1`, la),
@@ -423,6 +460,7 @@ export async function getProgramYearDrill(a: {
           obligations: Number((b as any).obl ?? 0), outlays: Number((b as any).outl ?? 0),
           undelivered: Number((b as any).udo ?? 0),
           resources: Number((ar as any).tbr ?? 0), appropriated: Number((ar as any).ba ?? 0),
+          offsettingCollections: Number((ar as any).saoc ?? 0),
           obligationsA: Number((ar as any).obl ?? 0), unobligated: Number((ar as any).unob ?? 0),
         };
       }),

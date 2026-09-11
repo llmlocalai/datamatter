@@ -24,6 +24,25 @@ import type { Funds, PyCell, PyDim, PyDrill, PyNode, PyOrder, PyYear } from '@/l
  */
 
 type Measure = 'obligations' | 'outlays' | 'undelivered';
+type Side = 'direct' | 'reimbursable' | 'all';
+
+const SIDES: { id: Side; label: string; note: string }[] = [
+  { id: 'direct', label: 'Direct',
+    note: 'The account’s own budget authority. Reimbursable work is excluded, because when the customer is another Department account it is already that account’s direct obligation.' },
+  { id: 'reimbursable', label: 'Reimbursable',
+    note: 'Work performed for a customer and paid back — most of it in the Defense Working Capital Fund. Never added to direct execution here.' },
+  { id: 'all', label: 'Direct + reimbursable',
+    note: 'Both together, as File A and the Statement of Budgetary Resources publish them. Counts customer-funded work a second time.' },
+];
+
+/** A cell's File B figure for a measure and side. Null split means the load predates it. */
+const cellValue = (m: Measure, side: Side, c: PyCell): number => {
+  if (side === 'all') return c[m];
+  const key = `${m}${side === 'direct' ? 'Direct' : 'Reimbursable'}` as
+    'obligationsDirect' | 'outlaysDirect' | 'undeliveredDirect'
+    | 'obligationsReimbursable' | 'outlaysReimbursable' | 'undeliveredReimbursable';
+  return c[key] ?? 0;
+};
 
 const MEASURES: { id: Measure; label: string; noun: string }[] = [
   { id: 'obligations', label: 'Obligated', noun: 'obligations' },
@@ -81,6 +100,7 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
   const [fy, setFy] = useState(defaultFy);
   const [funds, setFunds] = useState<Funds>('current');
   const [measure, setMeasure] = useState<Measure>('obligations');
+  const [side, setSide] = useState<Side>('direct');
   const [order, setOrder] = useState<PyOrder>('account');
   const [path, setPath] = useState<string[]>([]);
   const [data, setData] = useState<PyDrill | null>(null);
@@ -97,7 +117,7 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
   useEffect(() => {
     const ctl = new AbortController();
     setBusy(true); setError(null);
-    const q = new URLSearchParams({ fy: String(fy), funds, order, path: JSON.stringify(path) });
+    const q = new URLSearchParams({ fy: String(fy), funds, order, side, path: JSON.stringify(path) });
     fetch(`/api/exec/program-year?${q}`, { signal: ctl.signal })
       .then(async (r) => {
         const j = await r.json();
@@ -108,7 +128,7 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
       .catch((e) => { if (e?.name !== 'AbortError') setError(e?.message ?? 'Could not load that level.'); })
       .finally(() => { if (!ctl.signal.aborted) setBusy(false); });
     return () => ctl.abort();
-  }, [fy, funds, order, path]);
+  }, [fy, funds, order, path, side]);
 
   // A Treasury account symbol names its own program year, so a path that reaches
   // an account cannot survive a change of year: keep the levels above it.
@@ -129,20 +149,20 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
     let advance = 0;
     for (const c of cells) {
       if (c.fiscalYear !== y.fiscalYear) continue;
-      const v = measureOf(measure, c);
+      const v = cellValue(measure, side, c);
       const b = bucketOf(y.fiscalYear, c.bpoa);
       if (b === 'advance') advance += v; else parts[b] += v;
     }
     const total = BUCKETS.reduce((s, b) => s + Math.max(0, parts[b.id]), 0);
     return { ...y, parts, total, advance };
-  }), [years, cells, measure]);
+  }), [years, cells, measure, side]);
   const overMax = Math.max(1, ...overview.map((o) => o.total));
   const advanceTotal = overview.reduce((s, o) => s + o.advance, 0);
 
   // The program years that actually carry money in the chosen fiscal year.
   const programYears = useMemo(() => cells
-    .filter((c) => c.fiscalYear === fy && c.bpoa != null && (c.obligations || c.resources))
-    .sort((a, b) => (b.bpoa ?? 0) - (a.bpoa ?? 0)), [cells, fy]);
+    .filter((c) => c.fiscalYear === fy && c.bpoa != null && (cellValue('obligations', side, c) || c.resources))
+    .sort((a, b) => (b.bpoa ?? 0) - (a.bpoa ?? 0)), [cells, fy, side]);
 
   const selectedBucket: Bucket | null =
     funds === 'current' ? 'b0' : funds === 'old' ? 'b3' : funds === 'noyear' ? 'nx'
@@ -168,10 +188,26 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
   const levelTotal = nodes.reduce((s, n) => s + measureOf(measure, n.b), 0);
   const ta = data?.totals.a ?? null;
   const tb = data?.totals.b ?? null;
-  const rate = ta && ta.resources >= RATE_FLOOR ? ta.obligations / ta.resources * 100 : null;
-  const abGap = ta && tb && ta.obligations
+  // The rate follows the side. Direct + reimbursable is File A over File A, as the
+  // statement publishes it. Direct is File B direct obligations over File A
+  // resources other than spending authority from offsetting collections --
+  // File A carries no split, and offsetting collections are the authority that
+  // reimbursable work earns. Reimbursable has no File A denominator at all.
+  const rateOf = (b: { obligations: number } | null, a: {
+    resources: number; offsettingCollections: number; obligations: number } | null): number | null => {
+    if (!a) return null;
+    if (side === 'all') return a.resources >= RATE_FLOOR ? a.obligations / a.resources * 100 : null;
+    if (side === 'reimbursable' || !b) return null;
+    const den = a.resources - Math.max(0, a.offsettingCollections);
+    return den >= RATE_FLOOR ? b.obligations / den * 100 : null;
+  };
+  const denomOf = (a: { resources: number; offsettingCollections: number }) =>
+    side === 'direct' ? a.resources - Math.max(0, a.offsettingCollections) : a.resources;
+  const rate = rateOf(tb, ta);
+  const abGap = side === 'all' && ta && tb && ta.obligations
     ? Math.abs(tb.obligations - ta.obligations) / Math.abs(ta.obligations) * 100 : 0;
-  const failing = controls.filter((c) => c.code.startsWith('POA') && c.failed > 0);
+  const failing = controls.filter((c) => (c.code.startsWith('POA') || c.code.startsWith('DR')) && c.failed > 0);
+  const sideWord = side === 'all' ? '' : side === 'direct' ? 'Direct ' : 'Reimbursable ';
 
   const drillInto = (n: PyNode) => { if (n.hasChildren) setPath(n.path); };
 
@@ -191,9 +227,9 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
     <div>
       {failing.length > 0 && (
         <div className="alert-warning rounded-lg px-4 py-3 text-sm text-navy-100 mb-4">
-          <strong>Program-year controls are failing on this load.</strong>{' '}
+          <strong>Program-year or funding-source controls are failing on this load.</strong>{' '}
           {failing.map((c) => `${c.code}: ${c.message ?? `${c.failed} failure(s)`}`).join(' ')}{' '}
-          Figures below may be filed under the wrong program year.
+          Figures below may be filed under the wrong program year or funding source.
         </div>
       )}
 
@@ -238,10 +274,25 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
               <option value="">Then-year money…</option>
               {programYears.map((c) => (
                 <option key={c.bpoa!} value={String(c.bpoa)}>
-                  FY{c.bpoa} money · {fmtT(c.obligations)} obligated in FY{fy}
+                  FY{c.bpoa} money · {fmtT(cellValue('obligations', side, c))} {side === 'all' ? '' : `${side} `}obligated in FY{fy}
                 </option>
               ))}
             </select>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend className="text-[12px] uppercase tracking-wider text-navy-500 font-semibold mb-1.5">
+            Funding
+          </legend>
+          <div className="flex gap-1 flex-wrap">
+            {SIDES.map((sd) => (
+              <button key={sd.id} onClick={() => setSide(sd.id)} aria-pressed={side === sd.id} title={sd.note}
+                className={`px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-colors ${
+                  side === sd.id ? 'bg-accent-500 text-navy-950' : 'bg-navy-800 text-navy-300 hover:bg-navy-700'}`}>
+                {sd.label}
+              </button>
+            ))}
           </div>
         </fieldset>
 
@@ -263,7 +314,7 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
       <div className="glass-card rounded-xl p-5 mb-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
           <h3 className="text-sm font-semibold text-navy-100">
-            Where each fiscal year&rsquo;s {MEASURES.find((m) => m.id === measure)!.noun} come from, by age of the money
+            Where each fiscal year&rsquo;s {sideWord.toLowerCase()}{MEASURES.find((m) => m.id === measure)!.noun} come from, by age of the money
           </h3>
           <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-navy-300" aria-label="Legend">
             {BUCKETS.map((b) => (
@@ -356,7 +407,7 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
                     <td className="px-2 py-1 text-navy-200 tnum">{bp == null ? 'No-year' : `FY${bp} money`}</td>
                     {years.map((y) => {
                       const c = cells.find((x) => x.fiscalYear === y.fiscalYear && x.bpoa === bp);
-                      const v = c ? measureOf(measure, c) : 0;
+                      const v = c ? cellValue(measure, side, c) : 0;
                       const f: Funds = bp == null ? 'noyear' : bp === y.fiscalYear ? 'current' : (String(bp) as Funds);
                       return (
                         <td key={y.fiscalYear} className="px-2 py-1 text-right tnum">
@@ -396,14 +447,20 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
 
       <div className={`grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5 transition-opacity ${busy ? 'opacity-60' : ''}`}>
         {[
-          ['Available', ta ? fmtT(ta.resources) : '—', 'total budgetary resources · File A'],
-          ['Obligation rate', rate != null ? fmtPct(rate) : '—',
-            ta ? `${fmtT(ta.obligations)} of available · File A` : 'File A has no activity or object class'],
-          ['Unobligated', ta ? fmtT(ta.unobligated) : '—', 'as at the submission · File A'],
-          ['Obligated', tb ? fmtT(tb.obligations) : '—', 'File B'],
-          ['Outlaid', tb ? fmtT(tb.outlays) : '—',
+          side === 'direct'
+            ? ['Direct resources', ta ? fmtT(denomOf(ta)) : '—',
+               'total budgetary resources less spending authority from offsetting collections · File A']
+            : ['Available', ta ? fmtT(ta.resources) : '—', 'total budgetary resources, direct and reimbursable · File A'],
+          [side === 'direct' ? 'Direct obligation rate' : 'Obligation rate', rate != null ? fmtPct(rate) : '—',
+            side === 'reimbursable' ? 'File A carries no reimbursable resources to divide by'
+              : !ta ? 'File A has no activity or object class'
+              : side === 'direct' ? `${fmtT(tb?.obligations ?? 0)} direct (File B) of direct resources`
+              : `${fmtT(ta.obligations)} of available · File A`],
+          ['Unobligated', ta ? fmtT(ta.unobligated) : '—', 'direct and reimbursable together; File A does not split it'],
+          [`${sideWord}obligated`, tb ? fmtT(tb.obligations) : '—', 'File B'],
+          [`${sideWord}outlaid`, tb ? fmtT(tb.outlays) : '—',
             'File B · includes payments on earlier years’ obligations'],
-          ['Undelivered orders', tb ? fmtT(tb.undelivered) : '—', 'ordered, not yet received · File B'],
+          [`${sideWord}undelivered orders`, tb ? fmtT(tb.undelivered) : '—', 'ordered, not yet received · File B'],
         ].map(([label, value, sub]) => (
           <div key={label} className="glass-card rounded-lg px-4 py-3">
             <div className="text-[12px] uppercase tracking-wider text-navy-400 font-semibold">{label}</div>
@@ -455,11 +512,11 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
                   <span>{MEASURES.find((m) => m.id === measure)!.label}</span>
                   <span className="text-right">Amount</span>
                   <span className="text-right">Share</span>
-                  <span className="text-right">Obligated of available</span>
+                  <span className="text-right">{side === 'direct' ? 'Direct of direct resources' : side === 'all' ? 'Obligated of available' : 'Rate'}</span>
                 </div>
                 {visible.map((n) => {
                   const v = measureOf(measure, n.b);
-                  const r = n.a && n.a.resources >= RATE_FLOOR ? n.a.obligations / n.a.resources * 100 : null;
+                  const r = rateOf(n.b, n.a);
                   const Tag = n.hasChildren ? 'button' : 'div';
                   return (
                     <div key={n.path.join('|')} role="listitem">
@@ -493,11 +550,11 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
                               <span className="block h-full rounded-full"
                                     style={{ width: `${Math.min(100, Math.max(0, r))}%`, background: 'var(--py-1)' }} />
                             </span>
-                            <span className="tnum text-[12px] text-navy-200" title={`${fmtT(n.a!.obligations)} of ${fmtT(n.a!.resources)} available; ${fmtT(n.a!.unobligated)} unobligated`}>
-                              {fmtPct(r)} <span className="text-navy-500">of {fmtT(n.a!.resources)}</span>
+                            <span className="tnum text-[12px] text-navy-200" title={`${fmtT(n.a!.resources)} total resources; ${fmtT(n.a!.offsettingCollections)} from offsetting collections; ${fmtT(n.a!.unobligated)} unobligated`}>
+                              {fmtPct(r)} <span className="text-navy-500">of {fmtT(denomOf(n.a!))}</span>
                             </span>
                           </>
-                        ) : <span className="text-[12px] text-navy-500">{n.a ? 'too small to rate' : '—'}</span>}
+                        ) : <span className="text-[12px] text-navy-500">{side === 'reimbursable' ? 'no File A split' : n.a ? 'too small to rate' : '—'}</span>}
                       </span>
                     </Tag>
                     </div>
@@ -525,7 +582,7 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
           {life && life.rows.length > 0 ? (
             <div className={`glass-card rounded-xl p-4 transition-opacity ${busy ? 'opacity-60' : ''}`}>
               <h3 className="text-sm font-semibold text-navy-100">
-                FY{life.programYear} money, fiscal year by fiscal year
+                FY{life.programYear} money, fiscal year by fiscal year{side === 'all' ? '' : ` — ${side}`}
               </h3>
               <p className="text-[12px] text-navy-500 mt-0.5 mb-3 leading-snug">
                 What was obligated in each year it executes in, and what was still unobligated at the end of it
@@ -583,8 +640,8 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
                   <thead>
                     <tr className="border-b border-navy-700 text-accent-400">
                       <th className="py-1 pr-2 text-left font-semibold">In</th>
-                      <th className="py-1 px-1 text-right font-semibold">Available</th>
-                      <th className="py-1 px-1 text-right font-semibold">Obligated</th>
+                      <th className="py-1 px-1 text-right font-semibold">{side === 'direct' ? 'Direct res.' : 'Available'}</th>
+                      <th className="py-1 px-1 text-right font-semibold">{side === 'all' ? 'Obligated' : side === 'direct' ? 'Direct obl.' : 'Reimb. obl.'}</th>
                       <th className="py-1 px-1 text-right font-semibold">Unobligated</th>
                       <th className="py-1 pl-1 text-right font-semibold">Outlaid</th>
                     </tr>
@@ -593,7 +650,7 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
                     {life.rows.map((r) => (
                       <tr key={r.fiscalYear} className="border-b border-navy-800/60">
                         <td className="py-1 pr-2 text-navy-200 tnum">FY{r.fiscalYear}</td>
-                        <td className="py-1 px-1 text-right text-navy-300 tnum">{fmtT(r.resources)}</td>
+                        <td className="py-1 px-1 text-right text-navy-300 tnum">{fmtT(denomOf(r))}</td>
                         <td className="py-1 px-1 text-right text-navy-50 tnum">{fmtT(r.obligations)}</td>
                         <td className="py-1 px-1 text-right text-navy-300 tnum">{fmtT(r.unobligated)}</td>
                         <td className="py-1 pl-1 text-right text-navy-300 tnum">{fmtT(r.outlays)}</td>
@@ -605,7 +662,8 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
               <p className="text-[12px] text-navy-500 mt-2 leading-snug">
                 A later year&rsquo;s &ldquo;available&rdquo; is the balance carried in plus recoveries, not new money, so
                 the rows do not add. For annual money every year after the first is the expired phase: the
-                balance can take adjustments to existing obligations but no new ones.
+                balance can take adjustments to existing obligations but no new ones. Unobligated is File A&rsquo;s,
+                direct and reimbursable together{side === 'direct' ? '; direct resources exclude offsetting collections but a carried-in balance cannot be split' : ''}.
                 {life.accountScoped ? ' Program activity and object class are not carried across years, so this follows the account above them.' : ''}
                 {life.rows[0]?.fiscalYear > life.programYear ? ` The warehouse starts at FY${life.rows[0].fiscalYear}; the program year's earlier years are not held.` : ''}
               </p>
@@ -624,7 +682,8 @@ export default function ProgramYearExplorer({ years, cells, defaultFy, fileB, fi
       <p className="text-[12px] text-navy-500 mt-5 leading-relaxed">
         File B {yearRow?.submissionPeriod ? `${yearRow.submissionPeriod} ` : ''}· loaded {fileB?.extractedAt ?? '—'}
         {' '}(vintage {fileB?.vintage ?? '—'}) · File A accounts · loaded {fileA?.extractedAt ?? '—'} (vintage {fileA?.vintage ?? '—'})
-        {' '}· {controls.filter((c) => c.code.startsWith('POA')).map((c) => `${c.code} ${c.failed ? 'FAILING' : 'passing'}`).join(' · ')}
+        {' '}· {controls.filter((c) => c.code.startsWith('POA') || c.code.startsWith('DR')).map((c) => `${c.code} ${c.failed ? 'FAILING' : 'passing'}`).join(' · ')}
+        {' '}· {SIDES.find((sd) => sd.id === side)!.note}
       </p>
     </div>
   );

@@ -278,17 +278,21 @@ export default async function LineView({ searchParams }: {
           <>
             <DataTable
               caption={`File A, ${execution[0].label}. These are the whole account's figures — several budget lines share this account and File A states no split between them, so this is the ceiling this line was funded within, not this line's own execution.`}
-              head={['Fiscal year', 'Budgetary resources', 'Obligations incurred', 'Unobligated', 'Gross outlays', 'Obligated share']}
-              rows={execution.map((e) => [
-                `FY${e.fiscalYear}${e.isPartialYear ? ' *' : ''}`,
-                fmtT(Number(e.totalBudgetaryResources)),
-                fmtT(Number(e.obligationsIncurred)),
-                fmtT(Number(e.unobligatedBalance)),
-                fmtT(Number(e.grossOutlays)),
-                Number(e.totalBudgetaryResources)
-                  ? fmtPct(Number(e.obligationsIncurred) / Number(e.totalBudgetaryResources) * 100)
-                  : '—',
-              ])} />
+              head={['Fiscal year', 'Budgetary resources (D+R)', 'Obligations (D+R)', 'Direct (File B)',
+                     'Reimbursable (File B)', 'Direct rate', 'Unobligated', 'Gross outlays']}
+              rows={execution.map((e) => {
+                const den = Number(e.totalBudgetaryResources) - Math.max(0, Number(e.offsettingCollections ?? 0));
+                return [
+                  `FY${e.fiscalYear}${e.isPartialYear ? ' *' : ''}`,
+                  fmtT(Number(e.totalBudgetaryResources)),
+                  fmtT(Number(e.obligationsIncurred)),
+                  e.directObligations != null ? fmtT(Number(e.directObligations)) : '—',
+                  e.reimbursableObligations != null ? fmtT(Number(e.reimbursableObligations)) : '—',
+                  e.directObligations != null && den >= 1e6 ? fmtPct(Number(e.directObligations) / den * 100) : '—',
+                  fmtT(Number(e.unobligatedBalance)),
+                  fmtT(Number(e.grossOutlays)),
+                ];
+              })} />
             <Caveat>
               This is the step where line-item precision is lost, and it is lost in the sources rather
               than here: File A is keyed to accounts and carries no budget line at all. An account

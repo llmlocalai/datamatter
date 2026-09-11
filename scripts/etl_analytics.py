@@ -289,6 +289,28 @@ def _fileb_grain(c, rows):
             replicated.add(k)
     return groups, replicated
 
+# ---------------------------------------------------------------------------
+# DIRECT OR REIMBURSABLE. Every File B row says which it is
+# (direct_or_reimbursable_funding_source), and the two must never be added
+# together and called the Department's execution. A reimbursable obligation is
+# work an account performs for a customer and is paid back for: when the
+# customer is another Department account, the same work is ALSO that customer's
+# direct obligation, so a total that adds both counts it twice. The Defense
+# Working Capital Fund alone carried $152.0B of reimbursable obligations in
+# FY2025, of $212.9B Department-wide -- 14.7% of every File B dollar.
+#
+# So every File B measure is carried three ways -- total, direct, reimbursable --
+# and every execution figure on the site defaults to direct. The total is kept
+# because it is what File A and the Statement of Budgetary Resources publish
+# and what TIE-01 reconciles against. A handful of rows per year carry no source
+# at all (four to six, all zero obligations in every year measured); they stay
+# in the total, in neither side, and DR-02 publishes how much that is.
+# ---------------------------------------------------------------------------
+def _funding_side(code):
+    code = (code or "").strip().upper()
+    return "direct" if code == "D" else "reimbursable" if code == "R" else None
+
+
 def _fileb_value(c, idx, col, is_replicated):
     """One group's contribution to a measure.
 
@@ -323,8 +345,11 @@ def step_obligations(out):
         for k, idx in groups.items():
             rep = k in replicated
             if rep: collapsed += len(idx) - 1
+            side = _funding_side(k[2])
             for col, name in FILE_B_MEASURES:
-                agg[name] += _fileb_value(c, idx, col, rep)
+                v = _fileb_value(c, idx, col, rep)
+                agg[name] += v
+                if side: agg[f"{name}_{side}"] += v
             ock = k[1]
             ocn.setdefault(ock, str(c["object_class_name"][idx[0]] or ock))
             oc[ock] += _fileb_value(c, idx, "obligations_incurred", rep)
@@ -335,7 +360,8 @@ def step_obligations(out):
         periods = sorted({c["submission_period"][i] for i in rows if c["submission_period"][i]})
         stage_rows.append({
             "fiscal_year": fy, "scope": "DOW",
-            **{k: round(v, 2) for k, v in agg.items()},
+            **{f"{name}{sfx}": round(agg.get(f"{name}{sfx}", 0.0), 2)
+               for _, name in FILE_B_MEASURES for sfx in ("", "_direct", "_reimbursable")},
             "submission_period": periods[0] if len(periods) == 1 else None,
             "periods_available": len(periods),
             "source_rows": len(rows), "grain_rows": len(groups),
@@ -358,7 +384,9 @@ def step_obligations(out):
                             "object_class_name": ocn[k], "major_class": major_class(k),
                             "obligations": round(v, 2), "rank_in_fy": rank})
         note = f", {collapsed:,} PARK-replicated rows counted once" if collapsed else ""
-        print(f"  FY{fy}: obligations {agg['obligations_incurred']/1e9:.1f}B, "
+        print(f"  FY{fy}: obligations {agg['obligations_incurred']/1e9:.1f}B "
+              f"(direct {agg['obligations_incurred_direct']/1e9:.1f}B, "
+              f"reimbursable {agg['obligations_incurred_reimbursable']/1e9:.1f}B), "
               f"UDO {agg['undelivered_orders_unpaid']/1e9:.1f}B{note}")
     write(out, "obligations.json", payload("file_b_obligations", vintage,
           {"dm_obligation_stage": stage_rows, "dm_object_class": oc_rows,
@@ -3223,6 +3251,13 @@ def _fund_life(avail_type, bpoa, epoa):
 # needs, at a twentieth of the rows.
 EXEC_DETAIL_YEARS = 3
 
+# The measures split by funding source on the account and object-class rollups.
+# The detail table carries funding_source on the row itself.
+EXEC_SPLIT = ["obligations", "gross_outlays", "undelivered_unpaid", "delivered_unpaid",
+              "deobligations"]
+def _split_zero():
+    return {f"{k}_{side}": 0.0 for k in EXEC_SPLIT for side in ("direct", "reimbursable")}
+
 
 def step_execution(out):
     import pyarrow.dataset as ds
@@ -3310,19 +3345,27 @@ def step_execution(out):
                 a = acct_fy.setdefault((fy, tas), {"fiscal_year": fy, "scope": "DOW",
                     "treasury_account": tas, "fund_life": life, "detail_rows": 0,
                     **{name: 0.0 for _, name in EXEC_MEASURES},
-                    "upward_adjustments": 0.0, "downward_adjustments": 0.0})
+                    "upward_adjustments": 0.0, "downward_adjustments": 0.0,
+                    **_split_zero()})
                 o = oc_fy.setdefault((fy, oc), {"fiscal_year": fy, "scope": "DOW",
                     "object_class_code": oc,
                     "object_class_name": str(c["object_class_name"][i0] or oc),
                     "major_class": major_class(oc), "detail_rows": 0,
                     **{name: 0.0 for _, name in EXEC_MEASURES},
-                    "upward_adjustments": 0.0, "downward_adjustments": 0.0})
+                    "upward_adjustments": 0.0, "downward_adjustments": 0.0,
+                    **_split_zero()})
+                side = _funding_side(k[2])
                 for row in (a, o):
                     row["detail_rows"] += 1
                     for key, v in m.items(): row[key] = round(row[key] + v, 2)
+                    if side:
+                        for key in EXEC_SPLIT:
+                            row[f"{key}_{side}"] = round(row[f"{key}_{side}"] + m[key], 2)
 
         periods = sorted({c["submission_period"][i] for i in rows if c["submission_period"][i]})
         obl = sum(v["obligations"] for (f, _), v in acct_fy.items() if f == fy)
+        obl_d = sum(v["obligations_direct"] for (f, _), v in acct_fy.items() if f == fy)
+        obl_r = sum(v["obligations_reimbursable"] for (f, _), v in acct_fy.items() if f == fy)
         fy_rows.append({"fiscal_year": fy, "scope": "DOW",
             "submission_period": periods[0] if len(periods) == 1 else None,
             "source_rows": len(rows), "detail_rows": emitted, "collapsed_rows": collapsed_rows,
@@ -3331,7 +3374,9 @@ def step_execution(out):
             "object_classes": len([1 for (f, _) in oc_fy if f == fy]),
             "activities": len([1 for (f, _) in act_dim if f == fy]),
             "has_activity_names": any(v["activity_name"] for (f, _), v in act_dim.items() if f == fy),
-            "obligations": round(obl, 2)})
+            "obligations": round(obl, 2),
+            "obligations_direct": round(obl_d, 2),
+            "obligations_reimbursable": round(obl_r, 2)})
         print(f"  FY{fy}: {len(rows):,} source rows -> "
               f"{emitted:,} detail rows{'' if keep_detail else ' (rollup only)'}"
               f"{f', {collapsed_rows:,} PARK-replicated counted once' if collapsed_rows else ''}")
@@ -4120,15 +4165,302 @@ def step_currency(out):
               f" revealed {newest['reveal_date']}")
     print(f"  {len(rows):,} submission periods, {sum(1 for r in rows if r['is_revealed']):,} revealed")
     write(out, "currency.json", payload("submission_calendar", now.date().isoformat(),
-          {"dm_submission_period": rows}, source_path=SUBMISSION_PERIODS_URL))
+          {"dm_submission_period": rows}, source_path=SUBMISSION_PERIODS_URL,
+          # The first records exactly as the API returned them, every field, for
+          # the raw-data page. The loader ignores keys outside `rows`.
+          raw_sample=feed.get("available_periods", [])[:RAW_ROWS]))
 
+
+
+# ------------------------------------------------------------------- raw ---
+# THE RECORDS AS THEY ARE HELD, before any rule on this site touches them.
+#
+# Every figure on the site is a transform of these files -- a scope filter, a
+# grain rule, a memo rule, a program year, a funding side. A reader who wants to
+# check any of it has to be able to see what the transform started from, so this
+# step publishes the first RAW_ROWS records of every tabular source the ETL reads,
+# with EVERY column, untouched: no renaming, no filtering, no rounding, no type
+# coercion beyond turning a value into text so it can be shown.
+#
+#   USASpending account files  File A, File B, File C (contracts, assistance,
+#                              unlinked) -- one partition per fiscal year
+#   USASpending award files    contracts (FPDS) and financial assistance, newest
+#                              warehouse vintage
+#   President's Budget         every -1 exhibit workbook the exhibit and display
+#                              steps read, first sheet, with the rows printed
+#                              above the header kept as a preamble
+#   Submission calendar        the API's own records, when the currency step has
+#                              reached it
+#
+# The warehouse is parquet converted from the USASpending CSV downloads with the
+# column names unchanged (account_manifest.json records rows_source = rows_kept,
+# no duplicates removed). The workbooks are read with the standard library rather
+# than openpyxl so that a cell is shown as the file stores it: a number is the
+# number, not a date openpyxl decided it looked like.
+RAW_ROWS = 5
+
+
+def _raw_text(v):
+    import datetime as _dt
+    import decimal as _dec
+    if v is None: return None
+    if isinstance(v, (_dt.datetime, _dt.date, _dt.time)): return v.isoformat()
+    if isinstance(v, bool): return "true" if v else "false"
+    if isinstance(v, float):
+        return repr(int(v)) if v.is_integer() and abs(v) < 1e15 else repr(v)
+    if isinstance(v, _dec.Decimal): return format(v, "f")
+    if isinstance(v, (bytes, bytearray)): return v.hex()
+    if isinstance(v, (list, dict)): return json.dumps(v, default=str)
+    return str(v)
+
+
+def _xlsx_sheets(path):
+    """[(sheet_name, member_path)] in workbook order, from the package itself."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+          "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+          "pr": "http://schemas.openxmlformats.org/package/2006/relationships"}
+    with zipfile.ZipFile(path) as z:
+        wb = ET.fromstring(z.read("xl/workbook.xml"))
+        rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+        target = {r.get("Id"): r.get("Target") for r in rels.findall("pr:Relationship", ns)}
+        out = []
+        for sh in wb.find("m:sheets", ns).findall("m:sheet", ns):
+            rid = sh.get(f"{{{ns['r']}}}id")
+            t = target.get(rid, "")
+            t = t.lstrip("/")
+            member = t if t.startswith("xl/") else f"xl/{t}"
+            out.append((sh.get("name"), member))
+        return out
+
+
+def _xlsx_rows(path, member):
+    """Yield every row of one worksheet as a list of cell values, as stored.
+
+    Shared strings resolve to their text, inline and formula strings to theirs,
+    booleans to True/False, numbers to int or float. Empty cells between two
+    populated ones are None, placed by the cell reference rather than by order."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+    M = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    def col_index(ref):
+        n = 0
+        for ch in ref:
+            if ch.isalpha(): n = n * 26 + (ord(ch.upper()) - 64)
+            else: break
+        return n - 1
+    with zipfile.ZipFile(path) as z:
+        shared = []
+        if "xl/sharedStrings.xml" in z.namelist():
+            for si in ET.fromstring(z.read("xl/sharedStrings.xml")).iter(f"{M}si"):
+                shared.append("".join(t.text or "" for t in si.iter(f"{M}t")))
+        with z.open(member) as fh:
+            for _ev, el in ET.iterparse(fh, events=("end",)):
+                if el.tag != f"{M}row": continue
+                cells = {}
+                for c in el.findall(f"{M}c"):
+                    ref, typ = c.get("r") or "", c.get("t")
+                    v = c.find(f"{M}v")
+                    if typ == "s" and v is not None:
+                        val = shared[int(v.text)]
+                    elif typ == "inlineStr":
+                        val = "".join(t.text or "" for t in c.iter(f"{M}t"))
+                    elif typ in ("str", "e"):
+                        val = v.text if v is not None else None
+                    elif typ == "b":
+                        val = (v is not None and v.text == "1")
+                    elif v is not None and v.text is not None:
+                        try:
+                            f = float(v.text)
+                            val = int(f) if f.is_integer() and "." not in v.text and "E" not in v.text.upper() else f
+                        except ValueError:
+                            val = v.text
+                    else:
+                        val = None
+                    if val is not None:
+                        cells[col_index(ref) if ref else len(cells)] = val
+                el.clear()
+                width = (max(cells) + 1) if cells else 0
+                yield [cells.get(i) for i in range(width)]
+
+
+def _raw_parquet(key, group, label, base, sample_dir, note):
+    import pyarrow.dataset as ds
+    whole = ds.dataset(base, format="parquet")
+    part = ds.dataset(sample_dir, format="parquet")
+    head = part.head(RAW_ROWS)
+    names = head.column_names
+    types = {f.name: str(f.type) for f in part.schema}
+    cols = [{"name": n, "type": types.get(n, "")} for n in names]
+    data = {n: head[n].to_pylist() for n in names}
+    rows = [{"source_key": key, "row_no": i + 1,
+             "values_json": json.dumps([_raw_text(data[n][i]) for n in names])}
+            for i in range(head.num_rows)]
+    src = {"source_key": key, "group_label": group, "label": label, "file_format": "parquet",
+           "file_path": os.path.relpath(base, ROOT), "sample_path": os.path.relpath(sample_dir, ROOT),
+           "sheet_name": None, "total_rows": whole.count_rows(), "file_count": len(whole.files),
+           "column_count": len(names), "columns_json": json.dumps(cols), "preamble_json": None,
+           "note": note}
+    return src, rows
+
+
+def _newest_dir(base, prefix):
+    subs = sorted(d for d in os.listdir(base) if d.startswith(prefix) and os.path.isdir(os.path.join(base, d)))
+    return os.path.join(base, subs[-1]) if subs else None
+
+
+def step_raw(out):
+    sources, rows = [], []
+    order = 0
+    def add(src, rs):
+        nonlocal order
+        order += 1
+        src["sort_order"] = order
+        sources.append(src); rows.extend(rs)
+        print(f"  {src['label']}: {src['column_count']} columns, {src['total_rows'] if src['total_rows'] is not None else '?'} rows, "
+              f"{len(rs)} shown")
+
+    # ---- account files
+    acct = os.path.join(WAREHOUSE, "accounts")
+    for key, sub, label, note in (
+        ("file_a", "file_a", "File A — Account Balances (TAS)",
+         "One row per Treasury Account Symbol per submission. Every agency identifier in the download, including 011, which is outside Department scope."),
+        ("file_b", "file_b", "File B — Object Class and Program Activity (TAS)",
+         "One row per account × program activity × object class × direct/reimbursable × emergency code. From FY2026 program_activity_name is null and the reporting key identifies the activity."),
+        ("file_c_contracts", "file_c_contracts", "File C — Award financial, contracts",
+         "Award-level obligations linked to accounts, one cumulative snapshot per submission period."),
+        ("file_c_assistance", "file_c_assistance", "File C — Award financial, assistance", ""),
+        ("file_c_unlinked", "file_c_unlinked", "File C — Award financial, unlinked", ""),
+    ):
+        base = os.path.join(acct, sub)
+        if not os.path.isdir(base): continue
+        sample = _newest_dir(base, "fiscal_year=")
+        if not sample: continue
+        add(*_raw_parquet(key, "USASpending account files (DATA Act Files A–C)", label, base, sample,
+                          f"{note} Sample partition: {os.path.basename(sample)}.".strip()))
+
+    # ---- award files, newest vintage
+    for key, sub, label, note in (
+        ("contracts", "contracts", "Contract transactions (FPDS) — prime award actions",
+         "Prime contract actions (FPDS) from the USASpending Department of Defense contract download, one row per action, with the columns the warehouse keeps. DoD actions publish on a 90-day delay."),
+        ("assistance", "assistance", "Financial assistance transactions", ""),
+    ):
+        base = os.path.join(WAREHOUSE, sub)
+        if not os.path.isdir(base): continue
+        vint = _newest_dir(base, "vintage=")
+        if not vint: continue
+        sample = _newest_dir(vint, "fy=")
+        if not sample: continue
+        others = sorted(d for d in os.listdir(base) if d.startswith("vintage=") and os.path.join(base, d) != vint)
+        src, rs = _raw_parquet(key, "USASpending award files", label, vint, sample,
+                               f"{note} Vintage {os.path.basename(vint)[8:]}, sample partition {os.path.basename(sample)}."
+                               + (f" Also held: {', '.join(o[8:] for o in others)}." if others else ""))
+        # Say so when a code and its description sit under each other's names, as
+        # action_type / action_type_code do in the contract warehouse: read from
+        # the sampled values, so the note goes away when the conversion is fixed.
+        names = [c["name"] for c in json.loads(src["columns_json"])]
+        if "action_type" in names and "action_type_code" in names:
+            vals = [json.loads(r["values_json"]) for r in rs]
+            a = [v[names.index("action_type")] for v in vals if v[names.index("action_type")]]
+            b = [v[names.index("action_type_code")] for v in vals if v[names.index("action_type_code")]]
+            if a and b and all(len(x) <= 2 for x in a) and all(len(x) > 2 for x in b):
+                src["note"] += (" In these records action_type holds the one-letter code and action_type_code"
+                                " the description: the two names are swapped relative to their contents.")
+        add(src, rs)
+
+    # ---- President's Budget exhibit workbooks the ETL reads
+    root = os.path.join(KB, "11-Budget-Justification/_Archive")
+    if os.path.isdir(root):
+        wanted = []
+        for pb in PB_YEARS:
+            for ex in EXHIBITS:
+                wanted.append((pb, ex))
+        for pb in PB_DISPLAY_YEARS:
+            for ex in PB_EXHIBITS:
+                wanted.append((pb, ex))
+        seen = set()
+        for pb, ex in sorted(set(wanted), key=lambda t: (-t[0], t[1])):
+            path = _exhibit_files(root, pb, ex)
+            if not path or path in seen: continue
+            seen.add(path)
+            sheets = _xlsx_sheets(path)
+            if not sheets: continue
+            sheet, member = sheets[0]
+            preamble, header, data, total = [], None, [], 0
+            for r in _xlsx_rows(path, member):
+                if header is None:
+                    if r and r[0] == "Account":
+                        header = r
+                    else:
+                        while r and r[-1] is None: r.pop()
+                        if r: preamble.append([_raw_text(v) for v in r])
+                    continue
+                if not any(v is not None for v in r): continue
+                total += 1
+                if len(data) < RAW_ROWS: data.append(r)
+            if header is None:
+                header = []
+            width = max([len(header)] + [len(r) for r in data])
+            def colname(i):
+                h = header[i] if i < len(header) else None
+                if h not in (None, ""): return str(h)
+                n, s2 = i + 1, ""
+                while n: n, rem = divmod(n - 1, 26); s2 = chr(65 + rem) + s2
+                return f"(column {s2})"
+            cols = [{"name": colname(i), "type": "cell"} for i in range(width)]
+            key = f"pb{pb}_{ex}"
+            src = {"source_key": key, "group_label": "President's Budget -1 exhibit workbooks",
+                   "label": f"PB{pb} {ex.upper().replace('R1', 'R-1').replace('P1R', 'P-1R').replace('P1', 'P-1').replace('O1', 'O-1').replace('M1', 'M-1').replace('RF1', 'RF-1').replace('C1', 'C-1')}",
+                   "file_format": "xlsx", "file_path": os.path.relpath(path, ROOT),
+                   "sample_path": os.path.relpath(path, ROOT), "sheet_name": sheet,
+                   "total_rows": total, "file_count": 1, "column_count": width,
+                   "columns_json": json.dumps(cols), "preamble_json": json.dumps(preamble[:6]),
+                   "note": f"First of {len(sheets)} sheet{'s' if len(sheets) != 1 else ''}: "
+                           + ", ".join(n for n, _ in sheets[:8]) + ("…" if len(sheets) > 8 else "")
+                           + ". Rows above the header are kept as printed."}
+            rs = [{"source_key": key, "row_no": i + 1,
+                   "values_json": json.dumps([_raw_text(r[j]) if j < len(r) else None for j in range(width)])}
+                  for i, r in enumerate(data)]
+            add(src, rs)
+
+    # ---- submission calendar, as the API returned it
+    cur = os.path.join(out, "currency.json")
+    if os.path.exists(cur):
+        with open(cur) as fh:
+            cp = json.load(fh)
+        sample = cp.get("raw_sample") or []
+        if sample:
+            names = []
+            for rec in sample:
+                for k in rec:
+                    if k not in names: names.append(k)
+            src = {"source_key": "submission_periods", "group_label": "USASpending API",
+                   "label": "Submission periods (api/v2/references/submission_periods)",
+                   "file_format": "json", "file_path": SUBMISSION_PERIODS_URL,
+                   "sample_path": SUBMISSION_PERIODS_URL, "sheet_name": None,
+                   "total_rows": len(cp.get("rows", {}).get("dm_submission_period", [])),
+                   "file_count": 1, "column_count": len(names),
+                   "columns_json": json.dumps([{"name": n, "type": "json"} for n in names]),
+                   "preamble_json": None,
+                   "note": f"Fetched {cp.get('vintage')}. The API's own field names."}
+            rs = [{"source_key": "submission_periods", "row_no": i + 1,
+                   "values_json": json.dumps([_raw_text(rec.get(n)) for n in names])}
+                  for i, rec in enumerate(sample)]
+            add(src, rs)
+
+    write(out, "raw.json", payload("raw_samples", now_iso()[:10],
+          {"dm_raw_source": sources, "dm_raw_row": rows},
+          source_path="warehouse + 11-Budget-Justification/_Archive + api.usaspending.gov"))
 
 # ------------------------------------------------------------------- main ---
 STEPS = {"exhibits": step_exhibits, "pb_display": step_pb_display, "execution": step_execution, "timing": step_timing, "currency": step_currency, "sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
          "filec": step_filec, "assistance": step_assistance, "program": step_program,
          "knowledge": step_knowledge,
          "crosswalk": step_crosswalk, "catalog": step_catalog,
-         "jbook": step_jbook}
+         "jbook": step_jbook,
+         # Last, so it can read the currency step's raw API records from staging.
+         "raw": step_raw}
 
 def main():
     ap = argparse.ArgumentParser()

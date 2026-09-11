@@ -337,18 +337,21 @@ export default async function SystemView({ searchParams }: {
                 <span className="font-mono">{e.account}</span> · {e.title}
               </h3>
               <DataTable
-                head={['Fiscal year', 'Budgetary resources', 'Obligations incurred',
-                       'Unobligated', 'Gross outlays', 'Obligated share']}
-                rows={e.rows.map((r) => [
-                  `FY${r.fiscalYear}${r.isPartialYear ? ' *' : ''}`,
-                  fmtT(Number(r.totalBudgetaryResources)),
-                  fmtT(Number(r.obligationsIncurred)),
-                  fmtT(Number(r.unobligatedBalance)),
-                  fmtT(Number(r.grossOutlays)),
-                  Number(r.totalBudgetaryResources)
-                    ? fmtPct(Number(r.obligationsIncurred) / Number(r.totalBudgetaryResources) * 100)
-                    : '—',
-                ])} />
+                head={['Fiscal year', 'Budgetary resources (D+R)', 'Obligations (D+R)', 'Direct (File B)',
+                       'Reimbursable (File B)', 'Direct rate', 'Unobligated', 'Gross outlays']}
+                rows={e.rows.map((r) => {
+                  const den = Number(r.totalBudgetaryResources) - Math.max(0, Number(r.offsettingCollections ?? 0));
+                  return [
+                    `FY${r.fiscalYear}${r.isPartialYear ? ' *' : ''}`,
+                    fmtT(Number(r.totalBudgetaryResources)),
+                    fmtT(Number(r.obligationsIncurred)),
+                    r.directObligations != null ? fmtT(Number(r.directObligations)) : '—',
+                    r.reimbursableObligations != null ? fmtT(Number(r.reimbursableObligations)) : '—',
+                    r.directObligations != null && den >= 1e6 ? fmtPct(Number(r.directObligations) / den * 100) : '—',
+                    fmtT(Number(r.unobligatedBalance)),
+                    fmtT(Number(r.grossOutlays)),
+                  ];
+                })} />
             </div>
           ))}
           <Caveat>

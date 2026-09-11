@@ -9,7 +9,7 @@
       "grain": "Treasury Account Symbol x fiscal year",
       "description": "Budgetary resources, obligations incurred, unobligated balance and gross outlays at TAS grain, as submitted by reporting agencies. The backbone of the execution chain. Every Department account is also kept with its period of availability, as the resources the program-year view rates obligations against.",
       "refresh_cadence": "daily",
-      "limitations": "Carries five agency identifier codes; 011 (Executive Office of the President) is not the Department and is excluded from every DOW scope. The current fiscal year is a period-to-date submission, not a closed year.",
+      "limitations": "Carries five agency identifier codes; 011 (Executive Office of the President) is not the Department and is excluded from every DOW scope. The current fiscal year is a period-to-date submission, not a closed year. File A carries no direct/reimbursable attribute: its obligations and resources include reimbursable work, so the direct split shown beside them comes from File B.",
       "sort_order": 10
     },
     {
@@ -152,7 +152,7 @@
       "grain": "fiscal year x Treasury account x object class x program activity x direct or reimbursable x emergency fund code",
       "description": "File B published at the grain it is reported at rather than as one row per fiscal year: obligations, undelivered and delivered orders unpaid, prepaid and paid outlays, deobligations, and the upward and downward adjustments to prior-year orders, for every Treasury account in Department scope. Each account carries the period of availability read as a fund life, because annual authority expires on 30 September and multi-year and no-year authority does not. Each account also carries its program year -- the beginning of its period of availability -- so a fiscal year's execution can be split into the current year's money and the prior years' money still executing in it.",
       "refresh_cadence": "monthly, as the Department's submissions are published",
-      "limitations": "One submission per fiscal year is held, so there is no within-year series in the account chain at all -- this file gives the Department's position, never a curve, and within-year timing can only be read from contract action dates, which cover a third of obligations. The current fiscal year is period-to-date at its latest submission and is not comparable with a closed year without saying so. From the FY2026 submission the program activity name is null on every row, so an activity can be identified by its reporting key but not read. Rows that differ only by reporting key and repeat one figure are counted once, which is a repair of a source defect rather than a property of the file. Detail is carried for the three most recent fiscal years; earlier years are held as account and object-class rollups.",
+      "limitations": "One submission per fiscal year is held, so there is no within-year series in the account chain at all -- this file gives the Department's position, never a curve, and within-year timing can only be read from contract action dates, which cover a third of obligations. The current fiscal year is period-to-date at its latest submission and is not comparable with a closed year without saying so. From the FY2026 submission the program activity name is null on every row, so an activity can be identified by its reporting key but not read. Rows that differ only by reporting key and repeat one figure are counted once, which is a repair of a source defect rather than a property of the file. Detail is carried for the three most recent fiscal years; earlier years are held as account and object-class rollups. Direct and reimbursable obligations are carried separately and every execution figure defaults to direct: reimbursable work is paid back by a customer, and when the customer is another Department account the same work is already that customer's direct obligation.",
       "sort_order": 98
     },
     {
@@ -176,6 +176,17 @@
       "refresh_cadence": "monthly, with each submission window",
       "limitations": "Fetched over the network and therefore the one extract here that can fail without the load failing: where it cannot be reached nothing is written, the previous calendar stays with its own fetch date, and the page reports on that date rather than implying it is current. It describes the government-wide calendar, not any one agency's compliance with it -- a period being revealed does not guarantee that the Department submitted into it.",
       "sort_order": 100
+    },
+    {
+      "key": "raw_samples",
+      "label": "Raw data samples",
+      "source_system": "USASpending account and award downloads (parquet warehouse); OUSD(C) President's Budget -1 exhibit workbooks; USASpending API",
+      "source_path": "data/usaspending/warehouse/**; knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification/_Archive/FY*/_Year-Level/*.xlsx; api.usaspending.gov/api/v2/references/submission_periods/",
+      "grain": "One row per source file (dm_raw_source) and one row per sample record (dm_raw_row): the first five records of each file, every column",
+      "description": "The files the extract reads, before anything is done to them. For every source a figure on this site comes from -- File A, File B, the three File C award-financial files, the FPDS contract transactions, the assistance transactions, each President's Budget exhibit workbook, and the submission calendar -- the first five records with every column the file carries, in file order and under the file's own names. Parquet samples come from the newest fiscal-year partition (or, for award files, the newest vintage and fiscal year); workbooks from their first sheet, with the rows printed above the header kept. Values are stored as the text the file holds.",
+      "refresh_cadence": "With every extract (scripts/etl_analytics.py --step raw, included in --step all)",
+      "limitations": "A sample, not the file: five records show what the columns are and what the values look like, not what the file totals. The first records of a file are whatever order the file is stored in, not a representative draw. The warehouse is parquet converted from the USASpending CSV downloads with column names unchanged; the contract and assistance warehouse keeps a subset of the download's columns (64 and 30), so a column USASpending publishes and the warehouse did not keep does not appear. Workbook cells are shown as stored, so an amount the exhibit prints in thousands is shown as the thousands figure. Only the first sheet of each workbook is sampled; C-1, which the extract reads sheet by sheet, lists its other sheets by name.",
+      "sort_order": 101
     }
   ],
   "controls": [
@@ -601,6 +612,33 @@
       "authority": "OMB Circular A-11, Section 130 (SF 133 / Statement of Budgetary Resources line structure); Treasury USSGL",
       "severity": "critical",
       "sort_order": 342
+    },
+    {
+      "code": "DR-01",
+      "name": "Direct and reimbursable execution are split correctly",
+      "assertion": "For every fiscal year, direct and reimbursable File B obligations agree between the stage totals and the account rollups to within 0.01%; no account rollup lacks the split or splits to more than its own total; and for every year carrying detail, each account's direct and reimbursable figures equal its detail rows summed by their own funding source.",
+      "rationale": "File B marks every row direct or reimbursable, and the site now reports execution as direct by default. A reimbursable obligation is work an account performs for a customer and is paid back for; when the customer is another Department account the same work is also that customer's direct obligation, so adding the two overstates the Department's own execution. A split that does not foot is worse than no split, because every direct figure on the site would then disagree with its own total. The control recomputes the split from tables it was not written into, and a missing split fails it rather than being read as zero.",
+      "authority": "OMB Circular A-11, Section 130 (direct and reimbursable obligations reported separately on the SF 133); DATA Act File B element direct_or_reimbursable_funding_source",
+      "severity": "critical",
+      "sort_order": 343
+    },
+    {
+      "code": "DR-02",
+      "name": "How much of File B is reimbursable",
+      "assertion": "For every fiscal year the reimbursable share of File B obligations and the account carrying the most of it are published; more than 0.1% of obligations with no funding source is reported.",
+      "rationale": "This is a measurement, not a check on the extract: it is the size of the overstatement a direct-plus-reimbursable total would carry. FY2025: $212.9B of $1,451.1B (14.7%), $152.0B of it in the Defense Working Capital Fund. A handful of rows each year carry no funding source; they stay in the total and in neither side, and their amount is stated rather than assumed away.",
+      "authority": "OMB Circular A-11, Section 20 (reimbursable obligations and offsetting collections); DoD FMR Volume 11B (working capital funds)",
+      "severity": "high",
+      "sort_order": 344
+    },
+    {
+      "code": "RAW-01",
+      "name": "Raw samples are the files the figures come from, column for column",
+      "assertion": "Every raw sample record carries exactly one value per column of its file and the records are numbered 1 to min(5, file rows); every file a current load's figures come from -- File A, File B, File C contracts, contract and assistance transactions, and each (PB year, exhibit) workbook with a line in the load -- has a sample; and the File A and File B sample records carry the submission period the published statements are labelled with, and the contract sample is the vintage the contract figures use.",
+      "rationale": "The raw-data page exists so a reader can check a figure against the record it started from and see what a file does and does not carry -- that File A has no direct/reimbursable flag and File B does, for instance. A sample that shifts a value one column over, stops one file short, or comes from a different vintage than the figures would make that check say the wrong thing with the authority of raw data. The control recomputes structure from the rows themselves, coverage from the loads and exhibit lines the sample did not produce, and currency from the published statements.",
+      "authority": "DATA Act Information Model Schema (Files A-C element names); OMB M-17-04 data quality; GAO-14-704G Green Book principle 13 (use quality information)",
+      "severity": "critical",
+      "sort_order": 345
     }
   ],
   "audit_posture": {

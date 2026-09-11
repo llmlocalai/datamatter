@@ -1,6 +1,6 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-10 (execution by program year)
+- **Last updated:** 2026-09-11 (direct/reimbursable correction; raw data page)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (2026-09-10):** `tsc --noEmit` clean and `next build` green, 27 routes,
   run against a full local Postgres load of every staged extract. All 18 pages and
@@ -17,6 +17,37 @@
   TIME-04, neither of which did until it was rewritten).
 
 ---
+
+## Done — 2026-09-11 (sixteenth pass) — direct vs reimbursable; raw data page
+
+Asked for: *stop counting reimbursable execution on the direct side — go through
+File A and File B and correct everything — then a Method page that shows the raw
+data of every file, five records each, every data element.*
+
+- [x] **ETL splits File B by `direct_or_reimbursable_funding_source`** in both
+  `step_obligations` (stage) and `step_execution` (account and object-class
+  rollups, `dm_exec_fy`). Schema: nullable `*_direct` / `*_reimbursable` ALTERs.
+- [x] **Pages default to direct.** `/execution` (tiles, D/R table by year, object
+  classes, fund life, components, rates table with direct rate beside D+R),
+  `/funds-control` (direct rate tile and trend, federal account / function /
+  TAS), home tile, `/program` account tables (direct and reimbursable columns),
+  both drill-downs (`side` chips: Direct / Reimbursable / Direct + reimbursable).
+- [x] **File A corrections.** File A has no D/R column, so direct amounts come from
+  File B and the direct rate's denominator is TBR less offsetting-collection
+  authority (`lib/funding.ts`). FY2025 direct rate 73.4% (D+R 80.0%); FY2026 P10
+  59.5% (61.5%).
+- [x] **`DR-01`** (critical), **`DR-02`** (high) — pass, and proved able to fail.
+- [x] **`/raw-data`** under Method: 39 files, 5 records each, every column, two
+  layouts (as filed / field by field), column finder, D/R attribute by file read
+  from the column lists. `step_raw`, `dm_raw_source`, `dm_raw_row`.
+- [x] **`RAW-01`** (critical) — structure, coverage, currency; passes, and failed
+  on a shifted value, a dropped workbook and a stale File A period.
+- Found reading the raw records: in the contract warehouse `action_type` holds the
+  one-letter code and `action_type_code` the description (swapped names). The
+  site stores `action_type` and does not display it; fix in the warehouse
+  conversion, not the ETL.
+- Open: File C also carries D/R. Linkage stays D+R because FPDS has no such
+  field; a File C direct/reimbursable breakdown is not built.
 
 ## Done — 2026-09-10 (fifteenth pass) — execution tracked by program year
 
