@@ -94,6 +94,18 @@ body {
 
   --chart-surface: #0a1929;
   --grid-line: rgba(51, 78, 104, 0.35);
+
+  /* Program year: how old the money is relative to the year executing it. An
+     ORDERED scale, so one hue stepping monotonically -- the current year's money
+     brightest, older money dimmer -- validated as an ordinal ramp on #0a1929
+     (monotone L, visible gaps, dimmest step 3.35:1). No-year money has no program
+     year and sits outside the order, so it is a neutral grey rather than a fifth
+     step; against the dimmest step it clears normal-vision dE 17.7. */
+  --py-0: #bcd8fa;      /* the fiscal year's own money */
+  --py-1: #7fb3f0;      /* one year old */
+  --py-2: #4a8fe0;      /* two years old */
+  --py-3: #2a6bc0;      /* three or more */
+  --py-noyear: #8795a8; /* no program year */
 }
 
 /* Alert panels. Written as real classes because Tailwind's opacity modifier

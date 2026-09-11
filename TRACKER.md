@@ -1,6 +1,6 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-10 (currency: the warehouse is a submission period behind)
+- **Last updated:** 2026-09-10 (execution by program year)
 - **Live site:** https://datamatter.vercel.app
 - **Build status (2026-09-10):** `tsc --noEmit` clean and `next build` green, 27 routes,
   run against a full local Postgres load of every staged extract. All 18 pages and
@@ -17,6 +17,42 @@
   TIME-04, neither of which did until it was rewritten).
 
 ---
+
+## Done — 2026-09-10 (fifteenth pass) — execution tracked by program year
+
+Asked for: *track execution by File B, a detailed multi-layer drill-down chart
+above the contract chart, and a filter so a year's execution can be read as its
+own money only, or as a chosen then-year's money.*
+
+- [x] **Program year on every account.** ETL now keeps `bpoa`/`epoa` (read for
+  `fund_life` and previously thrown away) on `dm_exec_account`, and emits
+  `dm_exec_resource`: File A for **every** Department account with its period of
+  availability, as the denominator. Schema: one new table, three `ALTER`s.
+- [x] **`/api/exec/program-year`** — one level of the drill for a fiscal year and
+  program-year filter (`all` / `current` / `prior` / `old` / `noyear` / a year),
+  File B amounts, File A resources and rate per row, crumbs, and the chosen
+  program year across every fiscal year it executes in.
+- [x] **"Execution by program year" section** on `/execution`, above the contract
+  chart: fiscal-year × age-of-money bars (click a segment to filter), six tiles,
+  drill component → appropriation → Treasury account → program activity → object
+  class (or object class first), and the program-year life panel. FY2021–23 are
+  account rollups, so their drill stops at the Treasury account, and says so.
+- [x] **`POA-01`** (high) and **`POA-02`** (critical). Both pass on the P10 load;
+  both were made to fail on a corrupted extract (three misfiled accounts, one
+  orphaned account, one dropped $151.5B File A account) and each caught it.
+
+**Measured, FY2026 at P10:** $864.4B of $1,363.3B File B obligations are FY2026
+money, obligated at 75.1% of its $1.15T resources; FY2025 money is $186.8B.
+
+**Verified:** the ETL steps were run against the real warehouse parquet through
+a pure-Python reader and reproduced the Mac's staged `sbr.json` and
+`execution.json` row for row before any change; full load into a local
+Postgres replica of the live state (old code first, then migrate + new load) —
+all 47 controls ran, the same seven pre-existing failures, both new controls
+pass; `tsc --noEmit` clean; the chart exercised in Chromium at 1400px and 400px
+(no horizontal scroll, no console errors). **`next build` could not run in the
+sandbox** (no SWC binary for x64 and no registry access) — run `npm run verify`
+on the Mac before pushing.
 
 ## Done — 2026-09-10 (fourteenth pass) — how current is this, actually
 

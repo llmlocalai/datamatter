@@ -102,16 +102,32 @@ MEASURE_MAP = [
   ("gross_outlays","gross_outlay_amount"),
 ]
 
+# The period of availability, read for the program-year view. Kept out of
+# FILE_A_COLS because other steps read that list and have no use for it.
+FILE_A_POA_COLS = ["beginning_period_of_availability", "ending_period_of_availability",
+                   "availability_type_code"]
+
+
+def _poa_year(v):
+    """A period-of-availability year as an int, or None. The column arrives as an
+    int from some extracts and as a string from others; zero means absent."""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
 def step_sbr(out):
     import pyarrow.dataset as ds
     base = os.path.join(WAREHOUSE, "accounts/file_a")
-    fy_rows, dim_rows = [], []
+    fy_rows, dim_rows, resource_rows = [], [], []
     vintage = mtime_date(base)
     for fy in FY_RANGE:
         p = os.path.join(base, f"fiscal_year={fy}")
         if not os.path.isdir(p): continue
-        t = ds.dataset(p, format="parquet").to_table(columns=FILE_A_COLS)
-        cols = {c: t[c].to_pylist() for c in FILE_A_COLS}
+        t = ds.dataset(p, format="parquet").to_table(columns=FILE_A_COLS + FILE_A_POA_COLS)
+        cols = {c: t[c].to_pylist() for c in FILE_A_COLS + FILE_A_POA_COLS}
         n = t.num_rows
         subs = sorted({s for s in cols["submission_period"] if s})
         period = subs[-1] if subs else None
@@ -121,6 +137,7 @@ def step_sbr(out):
         counts  = collections.Counter()
         dims    = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(float)))
         labels  = {}
+        resources = {}
         for i in range(n):
             code = cols["agency_identifier_code"][i] or "???"
             scopes = ["ALL"] + ([("DOW")] if code in DOW_CODES else ["NON_DOW"]) + [f"AGENCY:{code}"]
@@ -129,6 +146,30 @@ def step_sbr(out):
                 for dest, src in MEASURE_MAP:
                     buckets[sc][dest] += (cols[src][i] or 0.0)
             if code not in DOW_CODES: continue
+            # Every Department account, not the largest forty: these are the
+            # denominators of the program-year view, and an account left out
+            # would show its File B obligations against no resources at all.
+            tas = str(cols["treasury_account_symbol"][i] or "")
+            r = resources.get(tas)
+            if r is None:
+                r = resources[tas] = {
+                    "fiscal_year": fy, "scope": "DOW", "treasury_account": tas,
+                    "treasury_account_name": str(cols["treasury_account_name"][i] or ""),
+                    "federal_account": str(cols["federal_account_symbol"][i] or ""),
+                    "federal_account_name": str(cols["federal_account_name"][i] or ""),
+                    "agency_code": code,
+                    "bpoa": _poa_year(cols["beginning_period_of_availability"][i]),
+                    "epoa": _poa_year(cols["ending_period_of_availability"][i]),
+                    "availability_type": (str(cols["availability_type_code"][i] or "").strip() or None),
+                    "fund_life": _fund_life(cols["availability_type_code"][i],
+                                            cols["beginning_period_of_availability"][i],
+                                            cols["ending_period_of_availability"][i]),
+                    "submission_period": cols["submission_period"][i],
+                    "source_rows": 0,
+                    **{dest: 0.0 for dest, _ in MEASURE_MAP}}
+            r["source_rows"] += 1
+            for dest, src in MEASURE_MAP:
+                r[dest] += (cols[src][i] or 0.0)
             for dimension, keycol, labcol in (
                 ("agency","agency_identifier_code","agency_identifier_name"),
                 ("budget_function","budget_function","budget_function"),
@@ -166,9 +207,13 @@ def step_sbr(out):
                 dim_rows.append({"fiscal_year": fy, "scope": "DOW", "dimension": dimension,
                                  "dim_key": k, "dim_label": labels[(dimension,k)],
                                  "rank_in_dim": rank, **{kk: round(vv,2) for kk,vv in m.items()}})
-        print(f"  FY{fy}: {n:,} TAS rows, period {period}{' (PARTIAL)' if partial else ''}")
+        for r in resources.values():
+            resource_rows.append({k: (round(v, 2) if isinstance(v, float) else v) for k, v in r.items()})
+        print(f"  FY{fy}: {n:,} TAS rows, period {period}{' (PARTIAL)' if partial else ''}, "
+              f"{len(resources):,} Department accounts")
     write(out, "sbr.json", payload("file_a_sbr", vintage,
-          {"dm_sbr_fy": fy_rows, "dm_sbr_dim": dim_rows}, source_path="accounts/file_a"))
+          {"dm_sbr_fy": fy_rows, "dm_sbr_dim": dim_rows, "dm_exec_resource": resource_rows},
+          source_path="accounts/file_a"))
 
 # ---------------------------------------------------------------- File B ----
 OC_GROUPS = [(("11","12","13"), "Personnel compensation and benefits"),
@@ -3233,7 +3278,16 @@ def step_execution(out):
                     "agency_code": agency, "agency_name": AGENCY_NAME.get(agency, ""),
                     "budget_function": str(c["budget_function"][i0] or ""),
                     "budget_subfunction": str(c["budget_subfunction"][i0] or ""),
-                    "fund_life": life})
+                    "fund_life": life,
+                    # The PROGRAM YEAR: the fiscal year the money was appropriated
+                    # for, which is the beginning of its period of availability.
+                    # A fiscal year's File B holds every program year still
+                    # executing in it, so FY2026 obligations include FY2025 and
+                    # older money; this is what separates them. Null on no-year
+                    # accounts, which have no program year.
+                    "bpoa": _poa_year(c["beginning_period_of_availability"][i0]),
+                    "epoa": _poa_year(c["ending_period_of_availability"][i0]),
+                    "availability_type": (str(c["availability_type_code"][i0] or "").strip() or None)})
                 if rep:
                     kind = "collapsed"
                     count = len({str(c["program_activity_reporting_key"][i] or "") for i in idx})

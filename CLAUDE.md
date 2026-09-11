@@ -172,6 +172,37 @@ the extract against itself and passed a deliberate $1M corruption of an O-1 line
   identifies an activity; nothing reads it. Do not borrow a name from another
   year's row that happens to share a key.
 
+### Execution by program year — the period of availability, not the fiscal year
+
+A fiscal year's File B holds **every program year still executing in it**. FY2026
+obligations at P10 are $1,363.3B, of which **$864.4B is FY2026 money**, $186.8B
+FY2025, $22.8B FY2024, $16.1B FY2023, and $264.5B no-year. A rate that mixes them
+answers nothing a program office asks, so `/execution` opens its File B section
+with a program-year view (`lib/program-year.ts`, `/api/exec/program-year`,
+`components/execution/ProgramYearExplorer.tsx`).
+
+- **Program year = `beginning_period_of_availability`.** Carried as `bpoa`/`epoa`
+  on `dm_exec_account` (File B) and `dm_exec_resource` (File A, every Department
+  account — `dm_sbr_dim` keeps only forty TAS and must not be used as a
+  denominator). Null means no-year, and nothing else: `POA-01` asserts it.
+- **`POA-01` re-derives the years from the Treasury account symbol**
+  (`017-2025/2027-1506-000`), which writes them independently of the column. Do
+  not parse the symbol in page code as a fallback — that is a second, unchecked
+  implementation of what the control checks. A database without the columns
+  withholds the section.
+- **`POA-02` (critical) foots the split**: File A accounts to the SBR total, and
+  no File B account without the dimension row that carries its program year.
+- **The rate is File A over File A** (obligations incurred / total budgetary
+  resources), so it foots to the SBR; the amounts are File B's. Mixing File B's
+  numerator with File A's denominator passes 100% wherever TIE-01 disagrees.
+- **A later year's "available" is carried-in balance plus recoveries, not new
+  money**, so a program year's rows across fiscal years never add up to a
+  lifetime total. Show obligated-in-year and unobligated-at-end; never a
+  cumulative percentage of the first year's resources — recoveries push it past
+  100%.
+- Still a position per submission, not a curve. What moves across the chart is
+  a program year's life, FY by FY.
+
 ### The warehouse does not know how old it is — CUR-01 does
 
 The account files carry the submission period they were extracted at, and a

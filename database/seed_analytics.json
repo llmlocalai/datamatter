@@ -7,7 +7,7 @@
       "source_system": "USASpending Account Balances (GTAS submission chain)",
       "source_path": "data/usaspending/warehouse/accounts/file_a",
       "grain": "Treasury Account Symbol x fiscal year",
-      "description": "Budgetary resources, obligations incurred, unobligated balance and gross outlays at TAS grain, as submitted by reporting agencies. The backbone of the execution chain.",
+      "description": "Budgetary resources, obligations incurred, unobligated balance and gross outlays at TAS grain, as submitted by reporting agencies. The backbone of the execution chain. Every Department account is also kept with its period of availability, as the resources the program-year view rates obligations against.",
       "refresh_cadence": "daily",
       "limitations": "Carries five agency identifier codes; 011 (Executive Office of the President) is not the Department and is excluded from every DOW scope. The current fiscal year is a period-to-date submission, not a closed year.",
       "sort_order": 10
@@ -150,9 +150,9 @@
       "source_system": "USASpending account breakdown by program activity and object class (File B)",
       "source_path": "data/usaspending/warehouse/accounts/file_b",
       "grain": "fiscal year x Treasury account x object class x program activity x direct or reimbursable x emergency fund code",
-      "description": "File B published at the grain it is reported at rather than as one row per fiscal year: obligations, undelivered and delivered orders unpaid, prepaid and paid outlays, deobligations, and the upward and downward adjustments to prior-year orders, for every Treasury account in Department scope. Each account carries the period of availability read as a fund life, because annual authority expires on 30 September and multi-year and no-year authority does not.",
+      "description": "File B published at the grain it is reported at rather than as one row per fiscal year: obligations, undelivered and delivered orders unpaid, prepaid and paid outlays, deobligations, and the upward and downward adjustments to prior-year orders, for every Treasury account in Department scope. Each account carries the period of availability read as a fund life, because annual authority expires on 30 September and multi-year and no-year authority does not. Each account also carries its program year -- the beginning of its period of availability -- so a fiscal year's execution can be split into the current year's money and the prior years' money still executing in it.",
       "refresh_cadence": "monthly, as the Department's submissions are published",
-      "limitations": "One submission per fiscal year is held, so there is no within-year series in the account chain at all -- this file gives the Department's position, never a curve, and within-year timing can only be read from contract action dates, which cover a third of obligations. FY2026 is period-to-date: FY2026 is period-to-date at P09 and is not comparable with a closed year without saying so. From the FY2026 submission the program activity name is null on every row, so an activity can be identified by its reporting key but not read. Rows that differ only by reporting key and repeat one figure are counted once, which is a repair of a source defect rather than a property of the file. Detail is carried for the three most recent fiscal years; earlier years are held as account and object-class rollups.",
+      "limitations": "One submission per fiscal year is held, so there is no within-year series in the account chain at all -- this file gives the Department's position, never a curve, and within-year timing can only be read from contract action dates, which cover a third of obligations. The current fiscal year is period-to-date at its latest submission and is not comparable with a closed year without saying so. From the FY2026 submission the program activity name is null on every row, so an activity can be identified by its reporting key but not read. Rows that differ only by reporting key and repeat one figure are counted once, which is a repair of a source defect rather than a property of the file. Detail is carried for the three most recent fiscal years; earlier years are held as account and object-class rollups.",
       "sort_order": 98
     },
     {
@@ -583,6 +583,24 @@
       "authority": "USASpending submission periods; OMB Circular A-11 reporting windows",
       "severity": "high",
       "sort_order": 340
+    },
+    {
+      "code": "POA-01",
+      "name": "Every account is filed under the program year its symbol states",
+      "assertion": "For every File A and File B account in Department scope, the beginning and ending periods of availability carried by the extract equal the two years written into the Treasury account symbol, and every account without a program year is a no-year account.",
+      "rationale": "The program-year view splits a fiscal year's execution by the year the money was appropriated for: FY2026's File B carries FY2025 procurement still being obligated, expired FY2025 operation and maintenance taking its adjustments, and FY2026 money, and an execution rate that mixes them answers no question a program office asks. The year is taken from the published period-of-availability columns. The account symbol writes the same two years independently, so this control re-derives them from the symbol rather than reading the extract's own answer back: where the two disagree, every figure on that account is filed under the wrong program year.",
+      "authority": "Treasury Financial Manual, Volume I, Part 2, Chapter 1500 (Treasury Account Symbol components); 31 U.S.C. 1502(a) (a fixed-period appropriation is available only for obligations incurred within its period of availability)",
+      "severity": "high",
+      "sort_order": 341
+    },
+    {
+      "code": "POA-02",
+      "name": "The program-year split adds up to the Statement of Budgetary Resources",
+      "assertion": "For every fiscal year, File A's account-level resources, obligations and unobligated balance sum to the Department Statement of Budgetary Resources to within 0.01%, File B's accounts sum to the year's File B obligations, and no File B account lacks the dimension row that carries its program year.",
+      "rationale": "The program-year chart rates obligations against the resources of the same accounts. If File A's account table drops accounts, every rate is measured over too little money; if a File B account has no dimension row, its obligations fall out of every program year and the parts stop adding up to the total printed above them. Both failures are silent on the page, and a drill-down that does not foot to its own total is worse than none, so this blocks the load.",
+      "authority": "OMB Circular A-11, Section 130 (SF 133 / Statement of Budgetary Resources line structure); Treasury USSGL",
+      "severity": "critical",
+      "sort_order": 342
     }
   ],
   "audit_posture": {

@@ -1310,6 +1310,49 @@ CREATE TABLE IF NOT EXISTS dm_exec_object_class_fy (
   UNIQUE (load_id, fiscal_year, scope, object_class_code)
 );
 
+-- File A at account grain: the resources a program year's obligations are
+-- measured against. dm_sbr_dim keeps only the forty largest accounts, which is
+-- right for a ranking and wrong for a denominator -- an account left out would
+-- show File B obligations against nothing. Every Department account is kept.
+--
+-- bpoa / epoa are the period of availability as published. bpoa is the PROGRAM
+-- YEAR: FY2025 procurement money is still being obligated in FY2026, and its
+-- FY2026 figures sit in the FY2026 submission beside FY2026 money. Null on
+-- no-year accounts, which have no program year. POA-01 re-derives both from the
+-- Treasury account symbol, which writes them independently.
+CREATE TABLE IF NOT EXISTS dm_exec_resource (
+  id                        bigserial PRIMARY KEY,
+  load_id                   bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year               int  NOT NULL,
+  scope                     text NOT NULL,
+  treasury_account          text NOT NULL,
+  treasury_account_name     text,
+  federal_account           text,
+  federal_account_name      text,
+  agency_code               text,
+  bpoa                      int,
+  epoa                      int,
+  availability_type         text,
+  fund_life                 text,
+  submission_period         text,
+  source_rows               int NOT NULL DEFAULT 1,
+  ba_appropriated           numeric(20,2) NOT NULL DEFAULT 0,
+  unobligated_bf            numeric(20,2) NOT NULL DEFAULT 0,
+  adjustments_to_unob_bf    numeric(20,2) NOT NULL DEFAULT 0,
+  borrowing_authority       numeric(20,2) NOT NULL DEFAULT 0,
+  contract_authority        numeric(20,2) NOT NULL DEFAULT 0,
+  spending_auth_offsetting  numeric(20,2) NOT NULL DEFAULT 0,
+  other_budgetary_resources numeric(20,2) NOT NULL DEFAULT 0,
+  total_budgetary_resources numeric(20,2) NOT NULL DEFAULT 0,
+  obligations_incurred      numeric(20,2) NOT NULL DEFAULT 0,
+  deobligations             numeric(20,2) NOT NULL DEFAULT 0,
+  unobligated_balance       numeric(20,2) NOT NULL DEFAULT 0,
+  gross_outlays             numeric(20,2) NOT NULL DEFAULT 0,
+  UNIQUE (load_id, fiscal_year, scope, treasury_account)
+);
+CREATE INDEX IF NOT EXISTS dm_exec_resource_poa_idx
+  ON dm_exec_resource (load_id, fiscal_year, bpoa);
+
 CREATE TABLE IF NOT EXISTS dm_exec_fy (
   id                 bigserial PRIMARY KEY,
   load_id            bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
@@ -1524,3 +1567,14 @@ CREATE TABLE IF NOT EXISTS dm_submission_period (
 );
 CREATE INDEX IF NOT EXISTS dm_submission_period_idx
   ON dm_submission_period (load_id, fiscal_year, fiscal_month, is_quarter);
+
+-- 2026-09-10 -- the PROGRAM YEAR on every File B account. A fiscal year's File B
+-- carries every program year still executing in it -- FY2026 obligations include
+-- $186.8B of FY2025 money and $22.8B of FY2024 -- and an execution rate that
+-- mixes them answers no question a program office asks. bpoa is published; it
+-- was read for fund_life and then thrown away. Null on no-year accounts.
+ALTER TABLE dm_exec_account ADD COLUMN IF NOT EXISTS bpoa int;
+ALTER TABLE dm_exec_account ADD COLUMN IF NOT EXISTS epoa int;
+ALTER TABLE dm_exec_account ADD COLUMN IF NOT EXISTS availability_type text;
+CREATE INDEX IF NOT EXISTS dm_exec_account_poa_idx
+  ON dm_exec_account (load_id, fiscal_year, bpoa);

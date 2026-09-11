@@ -7,6 +7,8 @@ import { PaceChart } from '@/components/execution/PaceChart';
 import SignalBoard from '@/components/execution/SignalBoard';
 import ActionTable from '@/components/execution/ActionTable';
 import ExecExplorer from '@/components/execution/ExecExplorer';
+import ProgramYearExplorer from '@/components/execution/ProgramYearExplorer';
+import { getProgramYearOverview, programYearReady } from '@/lib/program-year';
 import {
   getProvenance, getSbrSeries, getObligationStages, getSbrDim, getScopeComparison, getAwardYears,
 } from '@/lib/analytics';
@@ -63,10 +65,13 @@ export default async function ExecutionPage() {
       getExecutors(),
       getFpdsActions(undefined, undefined, 400),
     ]);
-  const [coverage, majorClasses, currency] = await Promise.all([
+  const [coverage, majorClasses, currency, pyReady] = await Promise.all([
     getContractCoverage(), getMajorClasses(lastClosed?.fiscalYear ?? focus.fiscalYear),
-    getCurrency(),
+    getCurrency(), programYearReady(),
   ]);
+  // Withheld, not approximated, when the database predates the program-year
+  // columns -- see lib/schema and lib/program-year.
+  const programYear = pyReady ? await getProgramYearOverview() : null;
   // What the timing view below covers, measured rather than asserted. The last
   // CLOSED year is the one to quote: the live year's share is depressed by the
   // reporting frontier on one side of the ratio and not the other.
@@ -366,6 +371,40 @@ export default async function ExecutionPage() {
             </div>
           </div>
         ) : <Empty />}
+      </Section>
+
+      {/* ---------------------------------------------------------------- */}
+      <Section title="Execution by program year" id="program-year"
+        note={`File B, split by the year the money was appropriated for. A fiscal year's execution is not `
+          + `that year's money: FY${focus.fiscalYear}'s obligations include prior-year procurement and `
+          + `research money still being obligated, expired annual money taking adjustments, and no-year `
+          + `money, beside FY${focus.fiscalYear}'s own appropriations. Keep to one program year, then drill `
+          + `from component to object class; each row's rate is its own obligations over its own resources.`}>
+        {programYear && programYear.years.length ? (
+          <ProgramYearExplorer
+            years={programYear.years} cells={programYear.cells}
+            defaultFy={(programYear.years.find((y) => y.fiscalYear === focus.fiscalYear)
+              ?? programYear.years[programYear.years.length - 1]).fiscalYear}
+            fileB={programYear.fileB} fileA={programYear.fileA} controls={programYear.controls} />
+        ) : (
+          <div className="alert-warning rounded-lg px-4 py-3 text-sm text-navy-100">
+            The program-year figures are not in this database yet. They need the program-year columns and
+            File A account table, which arrive with{' '}
+            <code className="font-mono text-xs">npm run migrate</code> and then{' '}
+            <code className="font-mono text-xs">npm run refresh</code>. Nothing is shown in their place,
+            because the only substitute would be reading the year out of the account symbol here, unchecked.
+          </div>
+        )}
+        <Caveat>
+          <strong className="text-navy-200">A position at each submission, not a monthly curve.</strong>{' '}
+          The warehouse holds one File B submission per fiscal year
+          {focus.submissionPeriod ? ` (FY${focus.fiscalYear} at ${focus.submissionPeriod})` : ''}, so what moves
+          across these charts is a program year&rsquo;s life — the same money in its first, second and third
+          fiscal year — not the months of one year. The program year is the beginning of the period of
+          availability; control <strong className="text-navy-200">POA-01</strong> re-derives it from every
+          Treasury account symbol and <strong className="text-navy-200">POA-02</strong> asserts the split foots
+          to the Statement of Budgetary Resources.
+        </Caveat>
       </Section>
 
       {timingReady ? (

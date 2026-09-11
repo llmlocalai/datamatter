@@ -982,6 +982,94 @@ const CONTROLS = {
     });
   },
 
+  // ---- program year --------------------------------------------------------
+  // The program-year view splits a fiscal year's execution by the year the money
+  // was appropriated for. Both halves of it have to be right: the year each
+  // account is filed under, and the resources the obligations are measured
+  // against.
+  //
+  // POA-01 RE-DERIVES the program year rather than reading it back. The ETL
+  // takes it from the published beginning_period_of_availability column; the
+  // Treasury account symbol writes the same two years independently
+  // (017-2025/2027-1506-000). Where the two disagree, one of them is not the
+  // year the money belongs to and every figure filed under it is misfiled.
+  'POA-01': async (c) => (await c.query(`
+    WITH acct AS (
+      SELECT 'File B' AS src, a.fiscal_year, a.treasury_account, a.bpoa, a.epoa, a.availability_type
+        FROM dm_exec_account a JOIN dm_load l ON l.id = a.load_id AND l.is_current
+      UNION ALL
+      SELECT 'File A', r.fiscal_year, r.treasury_account, r.bpoa, r.epoa, r.availability_type
+        FROM dm_exec_resource r JOIN dm_load l ON l.id = r.load_id AND l.is_current
+       WHERE r.scope = 'DOW'
+    ), derived AS (
+      SELECT *, substring(treasury_account from '-([0-9]{4})/[0-9]{4}-[0-9]{4}-[0-9]{3}$')::int AS sym_bpoa,
+                substring(treasury_account from '-[0-9]{4}/([0-9]{4})-[0-9]{4}-[0-9]{3}$')::int AS sym_epoa
+        FROM acct
+    )
+    SELECT fiscal_year, count(*)::int AS n,
+           count(*) FILTER (WHERE bpoa IS DISTINCT FROM sym_bpoa OR epoa IS DISTINCT FROM sym_epoa)::int AS bad,
+           count(*) FILTER (WHERE bpoa IS NULL AND coalesce(availability_type, '') <> 'X')::int AS unresolved,
+           max(src || ' ' || treasury_account || ' carries ' || coalesce(bpoa::text, 'none') || '/'
+               || coalesce(epoa::text, 'none'))
+             FILTER (WHERE bpoa IS DISTINCT FROM sym_bpoa OR epoa IS DISTINCT FROM sym_epoa) AS example
+      FROM derived GROUP BY fiscal_year ORDER BY fiscal_year`)).rows.map((r) => ({
+    fiscal_year: r.fiscal_year, observed: r.bad + r.unresolved, expected: 0, tolerance: 0,
+    variance_pct: r.n ? (r.bad + r.unresolved) / r.n * 100 : 0,
+    status: r.bad + r.unresolved === 0 ? 'pass' : 'fail',
+    message: r.bad + r.unresolved === 0
+      ? `FY${r.fiscal_year}: all ${Number(r.n).toLocaleString()} File A and File B accounts carry the `
+        + 'program year their Treasury account symbol states; every account without one is no-year.'
+      : `FY${r.fiscal_year}: ${r.bad} of ${Number(r.n).toLocaleString()} accounts carry a period of `
+        + `availability their symbol contradicts${r.example ? ` (e.g. ${r.example})` : ''}, and `
+        + `${r.unresolved} have no program year without being no-year. Their figures are filed under `
+        + 'the wrong program year.' })),
+
+  // POA-02 is the footing, and it is critical for the same reason EXEC-01 is: a
+  // drill-down whose parts do not add up to the figure printed above it is
+  // worse than no drill-down. Two ways it breaks, both silent on the page:
+  // File A's account table dropping accounts (a rate over too few resources),
+  // and a File B account with no dimension row (its money falls out of every
+  // program year and lands in none).
+  'POA-02': async (c) => (await c.query(`
+    WITH a AS (
+      SELECT r.fiscal_year, sum(r.total_budgetary_resources) AS tbr, sum(r.obligations_incurred) AS obl,
+             sum(r.unobligated_balance) AS unob
+        FROM dm_exec_resource r JOIN dm_load l ON l.id = r.load_id AND l.is_current
+       WHERE r.scope = 'DOW' GROUP BY r.fiscal_year
+    ), b AS (
+      SELECT f.fiscal_year, sum(f.obligations) AS obl,
+             count(*) FILTER (WHERE ac.treasury_account IS NULL)::int AS orphans
+        FROM dm_exec_account_fy f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+        LEFT JOIN dm_exec_account ac ON ac.load_id = f.load_id AND ac.fiscal_year = f.fiscal_year
+                                    AND ac.treasury_account = f.treasury_account
+       WHERE f.scope = 'DOW' GROUP BY f.fiscal_year
+    )
+    SELECT s.fiscal_year, s.total_budgetary_resources AS s_tbr, s.obligations_incurred AS s_obl,
+           s.unobligated_balance AS s_unob, a.tbr, a.obl, a.unob,
+           e.obligations AS e_obl, b.obl AS b_obl, coalesce(b.orphans, 0) AS orphans
+      FROM dm_sbr_fy s JOIN dm_load ls ON ls.id = s.load_id AND ls.is_current
+      LEFT JOIN a ON a.fiscal_year = s.fiscal_year
+      LEFT JOIN b ON b.fiscal_year = s.fiscal_year
+      LEFT JOIN dm_exec_fy e ON e.fiscal_year = s.fiscal_year AND e.scope = 'DOW'
+       AND e.load_id = (SELECT id FROM dm_load WHERE dataset_key = 'file_b_detail' AND is_current LIMIT 1)
+     WHERE s.scope = 'DOW' ORDER BY s.fiscal_year`)).rows.map((r) => {
+    const pct = (o, e) => Math.abs(Number(o ?? 0) - Number(e ?? 0)) / Math.max(1, Math.abs(Number(e ?? 0))) * 100;
+    const v = Math.max(pct(r.tbr, r.s_tbr), pct(r.obl, r.s_obl), pct(r.unob, r.s_unob),
+                       r.e_obl == null ? 0 : pct(r.b_obl, r.e_obl));
+    const ok = r.tbr != null && v <= 0.01 && Number(r.orphans) === 0;
+    return { fiscal_year: r.fiscal_year, observed: r.tbr, expected: r.s_tbr, tolerance: 0.01,
+      variance_pct: v, status: ok ? 'pass' : 'fail',
+      message: r.tbr == null
+        ? `FY${r.fiscal_year}: no File A account rows in this load, so no program year can be rated.`
+        : ok
+          ? `FY${r.fiscal_year}: File A accounts sum to the Statement of Budgetary Resources for total `
+            + 'resources, obligations and unobligated balance, and every File B account is filed '
+            + `under a program year, to within ${v.toFixed(4)}%.`
+          : `FY${r.fiscal_year}: the program-year split is off by ${v.toFixed(4)}%`
+            + `${Number(r.orphans) ? `, and ${r.orphans} File B accounts have no dimension row and fall `
+              + 'out of every program year' : ''}.` };
+  }),
+
 };
 
 // -------------------------------------------------------------------- main --
@@ -1103,7 +1191,13 @@ const CONTROLS = {
         'gross_outlays','outlays_prepaid','outlays_paid','deobligations','upward_adjustments',
         'downward_adjustments'],
       dm_exec_account: ['fiscal_year','treasury_account','treasury_account_name','federal_account',
-        'federal_account_name','agency_code','agency_name','budget_function','budget_subfunction','fund_life'],
+        'federal_account_name','agency_code','agency_name','budget_function','budget_subfunction','fund_life',
+        'bpoa','epoa','availability_type'],
+      dm_exec_resource: ['fiscal_year','scope','treasury_account','treasury_account_name','federal_account',
+        'federal_account_name','agency_code','bpoa','epoa','availability_type','fund_life','submission_period',
+        'source_rows','ba_appropriated','unobligated_bf','adjustments_to_unob_bf','borrowing_authority',
+        'contract_authority','spending_auth_offsetting','other_budgetary_resources','total_budgetary_resources',
+        'obligations_incurred','deobligations','unobligated_balance','gross_outlays'],
       dm_exec_activity: ['fiscal_year','activity_id','activity_kind','activity_name'],
       dm_exec_account_fy: ['fiscal_year','scope','treasury_account','fund_life','detail_rows',
         'obligations','undelivered_unpaid','undelivered_unpaid_bf','delivered_unpaid','gross_outlays',
