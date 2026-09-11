@@ -14,6 +14,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDoc, getVersion, getSkeleton } from '@/lib/jbook';
 
+/** What the exhibit is called on its own cover, by exhibit and appropriation. */
+const EXHIBIT_CAPTION = (exhibit: string | null, fundLabel: string | null) => {
+  const known: Record<string, string> = {
+    'R-2': 'Exhibit R-2, RDT&E Budget Item Justification',
+    'R-2A': 'Exhibit R-2A, RDT&E Project Justification',
+    'P-40': 'Exhibit P-40, Budget Line Item Justification',
+    'OP-5': 'Exhibit OP-5, Operation and Maintenance Detail',
+    'OP-32': 'Exhibit OP-32, Summary of Price and Program Changes',
+    'DD 1391': 'DD Form 1391, Military Construction Project Data',
+  };
+  if (exhibit && known[exhibit]) return known[exhibit];
+  if (exhibit && exhibit !== 'book') return `Exhibit ${exhibit}`;
+  return `${fundLabel ?? 'Budget'} Justification`;
+};
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -77,8 +92,11 @@ export async function GET(req: NextRequest) {
   const body: any[] = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [t(`Exhibit ${doc.exhibit}, ${doc.exhibit === 'R-2A'
-        ? 'RDT&E Project Justification' : 'RDT&E Budget Item Justification'}`
+      // The banner names the exhibit the document actually is. The first cut
+      // wrote "RDT&E Budget Item Justification" onto everything, which put an
+      // R-2 caption on an O&M book the moment this page stopped being about the
+      // R-2 alone.
+      children: [t(EXHIBIT_CAPTION(doc.exhibit, doc.fund_label)
         + `: PB ${doc.pb_year} ${doc.component}`, { bold: true, size: 22 })],
       spacing: { after: 200 },
     }),

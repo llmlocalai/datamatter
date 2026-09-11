@@ -1,43 +1,24 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { loadKnowledgeIndex, searchKnowledge } from '@/lib/knowledge-index';
 
 /**
- * Regulatory Q&A — retrieval layer for the web app.
+ * Regulatory Q&A -- retrieval layer for the web app.
  *
  * Lexical (BM25) search over the curated, authority-tagged DoD-FM knowledge
- * wiki, re-ranked by source authority. This is the serverless-safe
- * counterpart to the local ChromaDB vector index (which powers the Open WebUI
- * agent but cannot run in a Vercel function).
+ * wiki, re-ranked by source authority. This is the serverless-safe counterpart
+ * to the local ChromaDB vector index (which powers the Open WebUI agent but
+ * cannot run in a Vercel function).
  *
- * The index (app/api/data/knowledge_index.json) is pre-built by
- * scripts/etl_knowledge_index.py, so scoring at request time is O(query · top-k).
- */
-
-/**
- * The index is cached at module scope so a warm serverless instance parses
- * the ~400KB JSON once, not on every request. This does not survive a cold
- * start or a new instance -- Vercel does not guarantee a shared cache across
- * instances -- but most traffic hits a warm instance, so this removes the
- * dominant cost path without adding an external cache dependency.
+ * The scoring itself lives in lib/knowledge-index.ts because the landing-page
+ * chat retrieves from the same index: two implementations would drift, and the
+ * day they disagreed this page and the chat would cite different passages for
+ * the same question.
  *
  * Rate limiting below is an in-memory token count, scoped to one serverless
- * instance. It throttles abusive traffic to a single warm instance; it is not
- * a distributed rate limit and must not be relied on as one under multi-
- * instance load. A real limit belongs in front of Vercel (e.g. at the edge or
- * in a shared store) if this endpoint is ever exposed beyond the site's own UI.
+ * instance. It throttles abusive traffic to a single warm instance; it is not a
+ * distributed rate limit and must not be relied on as one under multi-instance
+ * load.
  */
-
-const DATA_PATH = path.join(process.cwd(), 'app', 'api', 'data');
-const INDEX_FILE = 'knowledge_index.json';
-
-let cachedIndex: Index | null = null;
-function loadIndex(): Index {
-  if (cachedIndex) return cachedIndex;
-  const raw = fs.readFileSync(path.join(DATA_PATH, INDEX_FILE), 'utf-8');
-  cachedIndex = JSON.parse(raw) as Index;
-  return cachedIndex;
-}
 
 const RATE_LIMIT = 30;            // requests
 const RATE_WINDOW_MS = 60_000;    // per minute, per instance
@@ -51,62 +32,6 @@ function rateLimited(key: string): boolean {
   }
   entry.count += 1;
   return entry.count > RATE_LIMIT;
-}
-
-interface Doc {
-  id: string;
-  page: string;
-  title: string;
-  section: string;
-  text: string;
-  source: string;
-  authority: number;
-  len: number;
-  tf: Record<string, number>;
-}
-
-interface Index {
-  doc_count: number;
-  avg_doc_len: number;
-  params: { k1: number; b: number };
-  idf: Record<string, number>;
-  docs: Doc[];
-}
-
-const TOKEN_RE = /[a-z0-9]+/g;
-const STOP = new Set(
-   "a an the of and or to in on for is are was were be been with as by at from that this it its into over under than when which do does have has will would can could should may might not no we our you they them their up out about after before if so very also just more most less many much each other all any some".split(
-      ' '
-   )
-);
-
-function tokenize(s: string): string[] {
-  return (s.toLowerCase().match(TOKEN_RE) || []).filter(
-     (t) => !STOP.has(t) && t.length > 1
-   );
-}
-
-// BM25 score of a document against a query, with an authority multiplier.
-function bm25(
-   doc: Doc,
-   qterms: string[],
-   idf: Record<string, number>,
-   k1: number,
-   b: number,
-   avgLen: number
-): number {
-  let score = 0;
-  for (const t of qterms) {
-    const tf = doc.tf[t];
-    if (!tf) continue;
-    const idfVal = idf[t] ?? 0;
-    const denom = tf + k1 * (1 - b + b * (doc.len / avgLen));
-    score += idfVal * (tf * (k1 + 1)) / denom;
-   }
-  // Authority re-rank: multiply by the page's authority weight, so primary
-  // regulation/statute/audit material is pulled above generic material on a
-  // tie. Capped so a single long doc can't dominate purely on length.
-  return score * doc.authority;
 }
 
 export async function GET(request: Request) {
@@ -130,28 +55,12 @@ export async function GET(request: Request) {
    }
 
   try {
-    const index = loadIndex();
-    const { k1, b } = index.params;
-    const qterms = tokenize(q);
-
-    if (!qterms.length) {
+    const index = loadKnowledgeIndex();
+    const results = searchKnowledge(q, topK);
+    if (!results.length) {
       return NextResponse.json({ query: q, results: [], total: 0 });
      }
-
-    const scored = index.docs
-        .map((d) => ({ doc: d, score: bm25(d, qterms, index.idf, k1, b, index.avg_doc_len) }))
-        .filter((r) => r.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, topK);
-
-    const results = scored.map((r) => ({
-       page: r.doc.page,
-       section: r.doc.section,
-       text: r.doc.text,
-       source: r.doc.source,
-       authority: r.doc.authority,
-       score: +r.score.toFixed(4),
-    }));
+    const scored = results;
 
     // A simple "answer" is the top hit; the rest are supporting context.
     const answer = results[0]

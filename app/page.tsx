@@ -8,6 +8,7 @@ import {
 } from '@/lib/analytics';
 import { pickFiscalYear } from '@/lib/fiscal';
 import { getSplitByFy, splitReady, directRate } from '@/lib/funding';
+import AskBox from '@/components/chat/AskBox';
 
 export const metadata: Metadata = {
   title: 'datamatter · Department of War budget analytics',
@@ -93,6 +94,8 @@ export default async function Home() {
           </Link>
         </div>
       </section>
+
+      <div className="mt-10"><AskBox /></div>
 
       {latest && lastRec && (
         <Section title={`FY${latest.fiscalYear}${latest.isPartialYear ? ' so far' : ''}, in four figures`}

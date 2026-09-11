@@ -1,20 +1,90 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-11 (direct/reimbursable correction; raw data page)
+- **Last updated:** 2026-09-11 (the whole justification archive; the local-model chat)
 - **Live site:** https://datamatter.vercel.app
-- **Build status (2026-09-10):** `tsc --noEmit` clean and `next build` green, 27 routes,
-  run against a full local Postgres load of every staged extract. All 18 pages and
-  all four new API endpoints requested against that build and returned 200.
-  **Not yet loaded to Neon** — the ETL reads `/Volumes/AI_DATA` and Neon is not
-  reachable from the sandbox, so `npm run refresh` still has to be run on the Mac.
-- **Control status (2026-09-10):** 45 controls. CUR-01 fails by design on the current
-  warehouse: the load is one submission period behind the published record.
-  The seven failures are all pre-existing published findings: `TIE-01` (File A vs
-  File B, FY2026), `FILEB-01` (FY2026 PARK replication), one `ASSIST-01` bucket,
-  three `FILEC-02` spreads and `WBC-02`. **All eleven new controls pass, and all
-  eleven were proved able to fail** — each was run against a deliberately
-  corrupted extract and each caught it (see the notes below on PB-01 and
-  TIME-04, neither of which did until it was rewritten).
+- **Build status (2026-09-11):** `tsc --noEmit` clean and `next build` green, 29 routes,
+  prerendered against a full local Postgres load of every staged extract. All 19
+  pages and every API endpoint requested against that build returned 200, including
+  the new `/api/chat` (SSE) exercised against a stand-in Ollama.
+  **Not yet loaded to Neon** — the ETL reads `/Volumes/AI_DATA` and the schema
+  needs migrating before the deploy: `npm run migrate` → `npm run refresh` → push.
+- **Control status (2026-09-11):** 48 controls. The three new J-book controls pass
+  and **all three were proved able to fail**: JB-01 against an edition row removed
+  from a book (critical — the load rolled back and the previous vintage stayed
+  published), JB-02 against a skeleton weight moved four points, JB-03 against an
+  exemplar taken from outside its book's own two most recent editions. The seven
+  pre-existing published findings are unchanged (`TIE-01`, `FILEB-01`, one
+  `ASSIST-01` bucket, three `FILEC-02` spreads, `WBC-02`) and `CUR-01` still
+  fails by design on a warehouse one submission period behind.
+
+---
+
+## Done — 2026-09-11 (seventeenth pass) — every book in the archive, and the chat
+
+Asked for: *a chat box on the landing page running on the local models; and
+`/jbook` simplified — one input, a mock book when nothing is supplied, the latest
+PB adopted, individual books selectable with their history weighted by year,
+timeliness attended to, and the draft editable, uploadable and revisable in place.*
+
+- [x] **The corpus went from 19 books to 2,058.** `step_jbook` now walks the whole
+  of `11-Budget-Justification` — 4,618 PDFs, FY1998–FY2027 — with a per-file parse
+  cache in `.staging/jbook_cache` (a full sweep is about eleven minutes; a re-run
+  reads only what changed). Book grain: **2,058 identities, 4,555 editions, 25,296
+  section rows, 10,967 skeleton rows, 1,370 exemplars**.
+- [x] **A book identity that survives the archive's filename drift.** BRAC1,
+  BRAC-1 and BRAC-Part-1 are one book; every filename that resolved to it is kept
+  on the row as evidence.
+- [x] **Four heading shapes, and which one fired is recorded.** An R-2 letters its
+  sections, an OP-5 numbers them in roman and letters the sub-sections of III, a
+  DD-1391 numbers them, a P-40 labels them inline. Forcing one shape on all four
+  produced an empty skeleton for three families out of four.
+- [x] **The grain is (book, PB year) and the drift is the product.** DISA's OP-5:
+  15 editions, and "C. Reconciliation of Increases and Decreases" printed
+  PB2012–PB2021 and not since. The skeleton is weighted on a three-year half-life;
+  dropped sections are shown, never scaffolded.
+- [x] **Time-sensitivity measured**: 23% of all sections carry dated, scheduled or
+  milestone language, recorded per section so a drafter sees where the book goes
+  stale first, and warned when a draft omits it where the book carries it.
+- [x] **A book states its own PB year and the folder states another.** Where they
+  differ the document wins; `pb_basis` records which.
+- [x] **Three controls, each made to fail before it counted** — JB-01 (critical),
+  JB-02, JB-03. See the build status above.
+- [x] **`/jbook` rebuilt**: fund pills → cross-appropriation search → one book, its
+  editions, its own skeleton with word bands and dated-content share, its drift.
+  Then **one field** and a scaffold: sections in this book's order, this book's word
+  bands, a bracketed placeholder in every body, defaulting to the next President's
+  Budget after the newest edition held (PB2027 → **PB2028**).
+- [x] **Editing, revision, round trip.** Sections edit in place; a section can be
+  drafted on the local model against this book's own measurements and passages,
+  with an instruction box; `lib/docx-read.ts` reads an edited .docx back (a minimal
+  zip reader over `zlib.inflateRawSync`, no new dependency) and matches headings
+  back to their sections, saving the result as a version marked imported.
+- [x] **A readiness check aimed at first-time pass**: required section empty,
+  placeholder left in, and a lexicon phrase all BLOCK; length outside the book's
+  own band and a missing schedule where the book carries one are warnings. Every
+  finding names the measurement behind it.
+- [x] **The landing-page chat.** `lib/llm.ts` (Ollama over a tunnel, Bearer or
+  Cloudflare Access), `/api/chat` streaming SSE with **sources sent first**,
+  `lib/ask.ts` retrieving definitions, books and skeleton rows beside the wiki, and
+  `lib/knowledge-index.ts` extracted so `/regulation` and the chat share one BM25.
+  Nothing is logged, the host is not published, the model is checked against the
+  server's own tag list, and offline reads as a note rather than a failure.
+
+### Open after this pass
+
+- [ ] **Neon has not been migrated or loaded.** `npm run migrate` then
+  `npm run refresh` on the Mac, then push. The build prerenders against the live
+  database, so pushing first fails the build.
+- [ ] **`LLM_BASE_URL` / `LLM_API_KEY` are not set** in `.env.local` or Vercel, so
+  the chat renders offline and says so. The tunnel in front of Ollama is the
+  remaining piece.
+- [ ] **Service books are not in the archive.** Army, Navy, Air Force and Marine
+  Corps books appear only as a few FY2003–FY2005 O&M volumes. Collecting them from
+  the service comptroller sites is a collector change, not an app change.
+- [ ] **P-40 and OP-5 exhibit-grain parsing.** The book grain covers every family;
+  the exhibit grain with bodies is still R-2/R-2A only.
+- [ ] **170 books (241 editions) have no text layer** — older scans. They carry
+  page counts, are marked in the picker, and say so; OCR is not attempted.
 
 ---
 

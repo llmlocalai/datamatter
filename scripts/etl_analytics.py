@@ -2632,17 +2632,33 @@ def step_catalog(out, only_fy=None):
 # -------------------------------------------------------------------- jbook ---
 # Learning the justification book from the books themselves.
 #
-# An R-2 is not free prose. It is a fixed sequence of lettered sections wrapped
-# around a fixed cost table, and the letters SHIFT depending on the exhibit: a
-# program-element R-2 carries a Program Change Summary and a project-level R-2A
-# does not, so Acquisition Strategy is section E on one and section D on the
-# other. Reproducing the format means encoding that, not guessing it.
+# TWO GRAINS, AND THEY ARE NOT THE SAME THING.
 #
-# What this step extracts is therefore three things: the skeleton (which sections
-# exist, in which order, for which exhibit type), the content (so a drafter can
-# read how the Department actually writes each section), and per-component style
-# measurements (so a new draft can be checked against the house voice rather than
-# against an opinion).
+#   1. THE BOOK GRAIN. Every justification book in the archive -- 4,600-odd PDFs
+#      from FY1998 to the current President's Budget, across O&M, procurement,
+#      RDT&E, MILCON, BRAC, family housing, the working capital fund, the health
+#      program and the rest -- read for its STRUCTURE. One row per book identity
+#      per PB year, the section skeleton that book actually prints, how long each
+#      section runs in words, and how much of it is time-sensitive. A book
+#      identity persists across years (`om/disa-op-5` is the same book in PB2012
+#      and PB2027), which is the axis that makes "show me this book's history"
+#      possible and that an aggregate over all books destroys.
+#
+#   2. THE EXHIBIT GRAIN. The itemised exhibits inside the current RDT&E books
+#      (R-2 program element, R-2A project), parsed with their bodies so a drafter
+#      can read how the Department actually writes each lettered section.
+#
+# THE GRAIN IS (book_key, pb_year) AND IT IS NEVER COLLAPSED. Each book restates
+# its own format: sections appear, are renamed and disappear between books, and
+# that drift is the one thing this corpus carries that no single book does. A
+# GROUP BY that drops pb_year turns twenty-nine years of format history into one
+# average book and reads like a tidy-up. JB-01 blocks a load where it happened.
+#
+# WHY BODIES ARE NOT KEPT FOR EVERY BOOK. The text of 4,600 books is several
+# gigabytes and none of it belongs in a page database. Historical books
+# contribute structure and measurement; only CURRENT books (the latest PB year
+# and the one before it) contribute exemplar bodies, capped per section. What the
+# page cannot show, it says it cannot show.
 
 _JB_HDR = re.compile(
     r"Exhibit (R-2A?|P-40[A-Z]?), (.+?): PB (\d{4}) (.+?)\s{2,}Date:\s*(.+?)\s*$")
@@ -2652,21 +2668,263 @@ _JB_PAGE = re.compile(r"Page (\d+) of (\d+)")
 _JB_APPN = re.compile(r"^(\d{4}):\s*(.+?)\s*/\s*BA (\d+):\s*(.*)$")
 _JB_SECT = re.compile(r"^([A-H])\.\s+([A-Z][A-Za-z0-9 /&(),'\-\.]{3,80}?)\s*(\(\$ in Millions\))?(?:\s{2,}.*)?$")
 _JB_PROJECT = re.compile(r"^Project \(Number/Name\)\s*(\S+)\s*/\s*(.+?)\s*$")
-_JB_NOISE = re.compile(r"^\s*(UNCLASSIFIED|THIS PAGE INTENTIONALLY LEFT BLANK)\s*$")
+_JB_NOISE = re.compile(
+    r"^\s*(UNCLASSIFIED|FOR OFFICIAL USE ONLY|THIS PAGE (?:IS )?INTENTIONALLY LEFT BLANK)\s*$", re.I)
+
+# ---- book-grain heading detectors -------------------------------------------
+# The books do not share one heading convention and no template says which one a
+# given book uses, so all four shapes are recognised and WHICH ONE FIRED IS
+# RECORDED. An R-2 letters its sections (A. Mission Description); an OP-5 numbers
+# them in roman (I. Description of Operations Financed) and letters the
+# sub-sections of III; a DD-1391 numbers them (9. COST ESTIMATES); a P-40 labels
+# them inline (Description:, Justification:). Forcing one shape on all of them
+# would silently produce an empty skeleton for three families out of four.
+_JB_H_LET = re.compile(r"^([A-H])\.\s+([A-Z][A-Za-z0-9$ /&(),'\-\.]{3,80}?)\s*(\(\$ in (?:Millions|Thousands)\))?\s*:?\s*(?:\s{2,}.*)?$")
+_JB_H_ROM = re.compile(r"^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII)\.\s+([A-Z][A-Za-z0-9$ /&(),'\-\.]{3,80}?)\s*:?\s*(?:\s{2,}.*)?$")
+_JB_H_NUM = re.compile(r"^(\d{1,2})\.\s+([A-Z][A-Z0-9$ /&(),'\-\.]{3,60}?)\s*:?\s*(?:\s{2,}.*)?$")
+_JB_H_LBL = re.compile(r"^((?:[A-Z][A-Za-z]+ ){0,3}(?:Description|Justification|Summary|Narrative|Remarks|Requirement|Strategy|Accomplishments|Plans))\s*:\s*(.*)$")
+_JB_LEVEL = {"roman": 1, "number": 1, "letter": 2, "label": 2}
+
+_JB_EXH_TAG = re.compile(r"\bExhibit[:\s]+([A-Z]{1,5}-\d{1,3}[A-Za-z]?)\b")
+_JB_EXH_BARE = re.compile(r"\b(OP-5|OP-32|OP-8|PB-15|PB-31[A-Z]?|DD (?:Form )?1391|P-40a?|P-5[a-z]?|P-21|R-2A?|R-3|R-4)\b")
+
+# Time-sensitive language. A justification book is read in a year and executed in
+# another, and the sentences that go stale first are the ones carrying a date, a
+# schedule or a milestone. These are flagged so a drafter can be shown WHERE a
+# book carries its perishable content, not so anything is rewritten automatically.
+_JB_TIME = re.compile(
+    r"\b(as of|to date|currently|to be (?:awarded|completed|delivered|fielded)|"
+    r"will (?:begin|complete|award|deliver|start|field|transition)|scheduled?|milestone|"
+    r"IOC|FOC|initial operational capability|full operational capability|"
+    r"[1-4]Q ?FY|Q[1-4] ?FY|contract award|delivery of|beginning in FY|through FY|in FY ?\d{2,4})\b", re.I)
+_JB_MONEY = re.compile(r"\$[\d,\.]+ ?(?:thousand|million|billion|[KMB])?\b", re.I)
+_JB_SENT = re.compile(r"(?<=[.!?])\s+")
+
+# Folder -> appropriation. The archive spells some of these wrong in some years
+# (01_Operation_and_Maintenanace, 07_Military_Constuction); the misspellings are
+# in the map on purpose rather than corrected in the user's files.
+JB_FUND = {
+    "01_operation_and_maintenance": ("om", "O&M"), "01_operation_and_maintenanace": ("om", "O&M"),
+    "02_procurement": ("proc", "Procurement"), "03_rdt_and_e": ("rdte", "RDT&E"),
+    "04_family_housing": ("fh", "Family Housing"), "05_brac": ("brac", "BRAC"),
+    "06_defense_working_capital_fund": ("dwcf", "Working Capital Fund"),
+    "07_military_construction": ("milcon", "MILCON"), "07_military_constuction": ("milcon", "MILCON"),
+    "08_mrap": ("mrap", "MRAP"), "15_mrap": ("mrap", "MRAP"),
+    "08_overseas_contingency": ("oco", "Contingency"), "16_overseas_contingency": ("oco", "Contingency"),
+    "09_defense_health_program": ("dhp", "Defense Health"), "08_defense_health_program": ("dhp", "Defense Health"),
+    "09_military_health_system": ("dhp", "Defense Health"),
+    "11_nato_security_investment_program": ("nsip", "NATO Security Investment"),
+    "10_nato_security_investment_program": ("nsip", "NATO Security Investment"),
+    "11_chemical_demilitarization": ("chemdemil", "Chemical Demilitarization"),
+    "12_chemical_demilitarization": ("chemdemil", "Chemical Demilitarization"),
+    "13_defense_production_act": ("dpa", "Defense Production Act"),
+    "15_revolving_funds": ("revolving", "Revolving Funds"),
+    "10_defense_emergency_response_fund": ("derf", "Emergency Response"),
+    "10_defense_emergency_response_": ("derf", "Emergency Response"),
+    "_overview-books": ("overview", "Overview"), "_green-book": ("greenbook", "Green Book"),
+    "_dash-1-exhibits": ("dash1", "-1 exhibits"), "_year-level": ("dash1", "-1 exhibits"),
+    "_reprogramming": ("reprog", "Reprogramming"), "amendment": ("amend", "Amendment"),
+}
+JB_FUND_ORDER = ["rdte", "proc", "om", "milcon", "fh", "brac", "dwcf", "dhp", "nsip",
+                 "oco", "chemdemil", "dpa", "mrap", "revolving", "derf", "dash1",
+                 "overview", "greenbook", "reprog", "amend", "other"]
+# Exemplar bodies are kept only for books this current. Everything older
+# contributes structure and measurement.
+JB_EXEMPLAR_YEARS = 2
+JB_EXEMPLAR_PER_SECTION = 2
+JB_EXEMPLAR_CHARS = 3000
+JB_HALFLIFE = 3.0          # years; a book five years old counts about a third of the newest
+JB_SKELETON_TITLES = 40    # per book, the most-seen section titles
 
 
 def _jb_pages(path):
     import subprocess
     try:
         return subprocess.run(["pdftotext", "-layout", path, "-"],
-                              capture_output=True, text=True, timeout=300).stdout.split("\f")
+                              capture_output=True, text=True, timeout=900).stdout.split("\f")
     except (OSError, subprocess.SubprocessError):
         return []
 
 
 def _jb_sentences(text):
-    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text or "") if len(s.strip()) > 20]
+    return [s.strip() for s in _JB_SENT.split(text or "") if len(s.strip()) > 20]
 
+
+def _jb_norm_title(t):
+    """A section title, reduced so the same section matches across years.
+
+    The books re-punctuate and re-parenthesise their headings constantly
+    ("Financial Summary ($ in Thousands)" vs "Financial Summary") and matching on
+    the printed string makes one section look like two. Money parentheticals and
+    punctuation go; the words stay.
+    """
+    t = re.sub(r"\(.*?\)", " ", t)
+    t = re.sub(r"[^A-Za-z ]", " ", t).upper()
+    return re.sub(r"\s+", " ", t).strip()[:60]
+
+
+def _jb_book_stem(name):
+    s = re.sub(r"_\d{4}-\d{2}-\d{2}$", "", os.path.splitext(name)[0])
+    s = re.sub(r"\b(?:PB)?\s?FY\s?\d{2,4}\b|\bPB\d{2}\b", " ", s.replace("_", " ").replace("-", " "), flags=re.I)
+    s = re.sub(r"\bPB\b|\bBudget Estimates?\b|\bJustification\b", " ", s, flags=re.I)
+    s = re.sub(r"[^A-Za-z0-9&+ ]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _jb_book_key(fund, stem):
+    """A book identity that survives the archive's filename drift.
+
+    The same book is filed as BRAC1, BRAC-1 and BRAC-Part-1 in different years.
+    Compressing the stem -- dropping the filing words and every separator --
+    makes those one identity instead of three, and every filename that resolved
+    to it is kept on the row as evidence.
+    """
+    c = re.sub(r"\b(part|book|volume|vol|justification|estimates?|pb|fy|the)\b", " ", stem, flags=re.I)
+    c = re.sub(r"[^a-z0-9]+", "", c.lower())
+    return f"{fund}/{c[:70]}" if c else f"{fund}/untitled"
+
+
+def _jb_parse_book(path):
+    """One justification book -> its structure. No bodies are kept here."""
+    pages = _jb_pages(path)
+    out = {"pages": max(0, len(pages) - 1), "text_chars": sum(len(p) for p in pages),
+           "exhibits": collections.Counter(), "pb_doc": None, "book_date": None, "sections": []}
+    cur, secs = None, []
+    for pno, page in enumerate(pages, 1):
+        if not page.strip():
+            continue
+        tags = set(_JB_EXH_TAG.findall(page)) | {
+            x.upper().replace("FORM ", "") for x in _JB_EXH_BARE.findall(page)}
+        tags = {t.rstrip("Ss") if t.endswith("s") and len(t) > 4 else t for t in tags}
+        for t in tags:
+            out["exhibits"][t] += 1
+        tag = sorted(tags)[0] if tags else None
+        if out["pb_doc"] is None:
+            m = (re.search(r"(?:Fiscal Year \(FY\)|FY|PB) ?(19\d\d|20\d\d) Budget (?:Estimates|Request)", page)
+                 or re.search(r"\bPB (19\d\d|20\d\d)\b", page))
+            if m:
+                out["pb_doc"] = int(m.group(1))
+        if out["book_date"] is None:
+            m = re.search(r"\b((?:January|February|March|April|May|June|July|August|September|"
+                          r"October|November|December) (?:19|20)\d\d)\b", page)
+            if m:
+                out["book_date"] = m.group(1)
+        for raw in page.split("\n"):
+            if _JB_NOISE.match(raw):
+                continue
+            s = raw.rstrip()
+            st = s.strip()
+            hit = None
+            for shape, rx in (("letter", _JB_H_LET), ("roman", _JB_H_ROM),
+                              ("number", _JB_H_NUM), ("label", _JB_H_LBL)):
+                m = rx.match(st)
+                if not m:
+                    continue
+                mark, title = ("", m.group(1)) if shape == "label" else (m.group(1), m.group(2))
+                title = title.strip()
+                # A numbered heading inside a performance-criteria table is a row
+                # number, not a section: "13. N/A" is data. Two words minimum.
+                if shape == "number" and (len(title) < 6 or len(title.split()) < 2
+                                          or title.upper().startswith("N/A")):
+                    continue
+                if shape == "label" and len(title) < 4:
+                    continue
+                hit = {"shape": shape, "mark": mark, "title": title, "page": pno,
+                       "exhibit": tag, "lines": [m.group(2)] if shape == "label" and m.group(2) else []}
+                break
+            if hit:
+                if cur:
+                    secs.append(cur)
+                cur = hit
+            elif cur is not None:
+                cur["lines"].append(s)
+    if cur:
+        secs.append(cur)
+    for sec in secs:
+        body = _WS.sub(" ", "\n".join(sec.pop("lines"))).strip()
+        sents = _jb_sentences(body)
+        sec.update({
+            "words": len(re.findall(r"\b\w+\b", body)),
+            "sentences": len(sents),
+            "avg_sentence_words": round(sum(len(re.findall(r"\b\w+\b", x)) for x in sents) / len(sents), 1)
+                                  if sents else None,
+            "time_hits": len(_JB_TIME.findall(body)), "money_hits": len(_JB_MONEY.findall(body)),
+            "norm": _jb_norm_title(sec["title"]), "level": _JB_LEVEL[sec["shape"]],
+            "opening": (sents[0][:300] if sents else None),
+            "body": body[:JB_EXEMPLAR_CHARS * 2]})
+    # A table of contents prints every heading in the book with no body under it.
+    # Those are the same headings, so they are dropped rather than counted twice.
+    out["sections"] = [s for s in secs if s["words"] > 0]
+    out["toc_headings"] = len(secs) - len(out["sections"])
+    out["exhibits"] = dict(out["exhibits"])
+    return out
+
+
+def _jb_cache_get(cache_dir, rel, mtime, size, build):
+    """Parse cache. 4,600 books is eleven minutes of pdftotext; a re-run that only
+    re-reads what changed is the difference between iterating and not."""
+    import hashlib
+    key = hashlib.sha1(f"{rel}|{mtime}|{size}".encode()).hexdigest()[:20]
+    f = os.path.join(cache_dir, key + ".json")
+    if os.path.exists(f):
+        try:
+            with open(f) as fh:
+                return json.load(fh)
+        except (ValueError, OSError):
+            pass
+    val = build()
+    os.makedirs(cache_dir, exist_ok=True)
+    with open(f, "w") as fh:
+        json.dump(val, fh)
+    return val
+
+
+def _jb_weighted_pct(pairs, pct):
+    """Weighted percentile over (value, weight), used so a book's own recent years
+    carry more of its measured house voice than its oldest ones."""
+    if not pairs:
+        return None
+    pairs = sorted(pairs)
+    total = sum(w for _, w in pairs)
+    if total <= 0:
+        return pairs[len(pairs) // 2][0]
+    run = 0.0
+    for v, w in pairs:
+        run += w
+        if run >= total * pct:
+            return v
+    return pairs[-1][0]
+
+
+def _jb_inventory(root):
+    """Every justification PDF, with the book identity and PB year it belongs to."""
+    rows = []
+    for dirpath, _dirs, files in os.walk(root):
+        rel = os.path.relpath(dirpath, root)
+        parts = [] if rel == "." else rel.split(os.sep)
+        if parts and parts[0] == "_Archive":
+            fy = parts[1] if len(parts) > 1 else ""
+            sub = parts[2] if len(parts) > 2 else "_root"
+            in_archive = True
+        else:
+            fy, sub, in_archive = "", (parts[0] if parts else "_root"), False
+        m = re.match(r"FY(\d{4})$", fy)
+        pb_folder = int(m.group(1)) if m else None
+        fund, label = JB_FUND.get(sub.lower(), ("other", "Other"))
+        for f in files:
+            if not f.lower().endswith(".pdf"):
+                continue
+            p = os.path.join(dirpath, f)
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            stem = _jb_book_stem(f)
+            rows.append({"path": p, "rel": os.path.relpath(p, root), "pb_folder": pb_folder,
+                         "fund": fund, "fund_label": label, "folder": sub, "stem": stem,
+                         "book_key": _jb_book_key(fund, stem), "file_name": f,
+                         "in_archive": in_archive, "bytes": st.st_size, "mtime": int(st.st_mtime)})
+    return rows
 
 def _jb_parse_page(page, pb_default):
     """One exhibit page -> (meta, sections) or None."""
@@ -2735,20 +2993,207 @@ def _jb_parse_page(page, pb_default):
     return meta, sections
 
 
+
+
 JBOOK_DIRS = [("rdte", "03_RDT_and_E", "RDT&E")]
 JBOOK_MAX_PDF = 40
 
 
 def step_jbook(out):
-    """Learn the justification book from the books: skeleton, content, style."""
+    """Learn the justification book from the books: books, skeleton, style, exhibits."""
     import glob
     root = os.path.join(KB, "11-Budget-Justification")
     if not os.path.isdir(root):
         print("  no justification corpus found, skipping"); return
     vintage = mtime_date(root)
+
+    # ================================================================ book grain
+    inv = _jb_inventory(root)
+    cache_dir = os.path.join(out, "jbook_cache")
+    parsed = []
+    for i, r in enumerate(inv, 1):
+        p = _jb_cache_get(cache_dir, r["rel"], r["mtime"], r["bytes"],
+                          lambda path=r["path"]: _jb_parse_book(path))
+        r["p"] = p
+        parsed.append(r)
+        if i % 500 == 0:
+            print(f"  {i}/{len(inv)} books read", flush=True)
+
+    # A book states its own PB year on its cover. The archive's folder says one
+    # too, and where they differ the DOCUMENT wins -- a book filed under FY2010
+    # that says "FY 2009 Budget Estimates" on page one is a FY2009 book that was
+    # filed late, and taking the folder's word for it would put it in the wrong
+    # year of its own history. Which one was used is recorded.
+    for r in parsed:
+        doc = r["p"].get("pb_doc")
+        if doc and 1996 <= doc <= 2100:
+            r["pb_year"], r["pb_basis"] = doc, "document"
+        elif r["pb_folder"]:
+            r["pb_year"], r["pb_basis"] = r["pb_folder"], "folder"
+        else:
+            r["pb_year"], r["pb_basis"] = None, "unknown"
+
+    books = collections.defaultdict(list)
+    for r in parsed:
+        if r["pb_year"]:
+            books[r["book_key"]].append(r)
+    latest_pb = max((r["pb_year"] for r in parsed if r["pb_year"]), default=None)
+
+    book_rows, year_rows, sec_rows, skel_rows, ex_rows2 = [], [], [], [], []
+    for bk, rows in sorted(books.items()):
+        rows.sort(key=lambda x: (x["pb_year"], x["file_name"]))
+        by_year = collections.defaultdict(list)
+        for r in rows:
+            by_year[r["pb_year"]].append(r)
+        years = sorted(by_year)
+        newest = years[-1]
+        fund, label = rows[-1]["fund"], rows[-1]["fund_label"]
+        title = max((r["stem"] for r in rows), key=len)
+
+        # per (book, pb_year): one row, and the per-section aggregate under it
+        seen_titles = collections.defaultdict(list)   # norm -> [(pb_year, words, ...)]
+        for y in years:
+            group = by_year[y]
+            secs = [s for r in group for s in r["p"]["sections"]]
+            weight = round(0.5 ** ((newest - y) / JB_HALFLIFE), 4)
+            # The per-title aggregate is built FIRST so the edition row can count
+            # the rows that will actually be written rather than a second,
+            # independent tally of the same thing: JB-01 re-counts these in SQL,
+            # and a control that compares two of the extract's own in-memory sums
+            # checks the extract against itself.
+            agg = collections.defaultdict(lambda: {"n": 0, "words": [], "sent": [], "time": 0,
+                                                   "money": 0, "title": None, "shape": None,
+                                                   "level": None, "mark": None, "page": None,
+                                                   "exhibit": None})
+            for order, s in enumerate(secs):
+                a = agg[s["norm"]]
+                a["n"] += 1
+                a["words"].append(s["words"])
+                if s["avg_sentence_words"]:
+                    a["sent"].append(s["avg_sentence_words"])
+                a["time"] += s["time_hits"]
+                a["money"] += s["money_hits"]
+                if a["title"] is None:
+                    a.update({"title": s["title"], "shape": s["shape"], "level": s["level"],
+                              "mark": s["mark"], "page": s["page"], "exhibit": s["exhibit"],
+                              "order": order})
+            agg = {k: v for k, v in agg.items() if k}
+            year_rows.append({
+                "book_key": bk, "pb_year": y, "files": len(group),
+                "source_file": group[0]["file_name"], "source_rel": group[0]["rel"],
+                "book_date": next((r["p"].get("book_date") for r in group if r["p"].get("book_date")), None),
+                "pb_basis": group[0]["pb_basis"],
+                "pages": sum(r["p"]["pages"] for r in group),
+                "text_chars": sum(r["p"]["text_chars"] for r in group),
+                "sections": len(secs),
+                "titles": len(agg),
+                "words": sum(s["words"] for s in secs),
+                "time_hits": sum(s["time_hits"] for s in secs),
+                "time_sections": sum(1 for a in agg.values() if a["time"] > 0),
+                "exhibits": ",".join(sorted({t for r in group for t in r["p"]["exhibits"]}))[:200] or None,
+                "recency_weight": weight, "is_latest": y == newest,
+                # A book with pages but no extractable text is a scanned image, and
+                # saying so is not the same as saying the book has no sections.
+                "has_text": sum(r["p"]["text_chars"] for r in group) > 500,
+            })
+            for norm, a in agg.items():
+                w = sorted(a["words"])
+                sec_rows.append({
+                    "book_key": bk, "pb_year": y, "norm_title": norm, "title": a["title"],
+                    "shape": a["shape"], "mark": a["mark"] or None, "level": a["level"],
+                    "exhibit": a["exhibit"], "seq": a["order"], "first_page": a["page"],
+                    "occurrences": a["n"], "median_words": w[len(w) // 2],
+                    "total_words": sum(w),
+                    "avg_sentence_words": round(sum(a["sent"]) / len(a["sent"]), 1) if a["sent"] else None,
+                    "time_hits": a["time"], "money_hits": a["money"]})
+                for wd in a["words"]:
+                    seen_titles[norm].append((y, wd, weight, a))
+
+        # ---- the skeleton of THIS book, observed across ITS OWN years ---------
+        # Share is weighted by recency: a section printed in every book since
+        # PB2020 and absent before it is a current requirement, and an unweighted
+        # share across twenty-nine years would rank it below one that was dropped
+        # a decade ago.
+        wsum = sum(round(0.5 ** ((newest - y) / JB_HALFLIFE), 4) for y in years)
+        ranked = sorted(seen_titles.items(),
+                        key=lambda kv: -sum(w for _y, _wd, w, _a in kv[1]))[:JB_SKELETON_TITLES]
+        for norm, obs in ranked:
+            yrs = sorted({y for y, _w, _wt, _a in obs})
+            yw = sum(round(0.5 ** ((newest - y) / JB_HALFLIFE), 4) for y in yrs)
+            # The printed order comes from the NEWEST edition that carries the
+            # section, not the oldest. A book that reordered its sections in
+            # PB2024 is printed in that order now, and a skeleton ordered by the
+            # PB2011 edition would scaffold a book nobody has published in a
+            # decade -- while looking, on the page, like the current format.
+            a0 = max(obs, key=lambda o: o[0])[3]
+            pairs = [(wd, wt) for _y, wd, wt, _a in obs]
+            # sentence length: the weighted mean of each year's own measurement,
+            # so the newest book's voice weighs most
+            sw = [(a["sent"], wt) for _y, _wd, wt, a in obs if a["sent"]]
+            tw = sum(w for _s, w in sw)
+            skel_rows.append({
+                "book_key": bk, "norm_title": norm, "title": a0["title"], "shape": a0["shape"],
+                "level": a0["level"], "mark": a0["mark"] or None, "exhibit": a0["exhibit"],
+                "rank": a0.get("order", 0),
+                "years_seen": len(yrs), "years_total": len(years),
+                "first_seen_pb": yrs[0], "last_seen_pb": yrs[-1],
+                "share_pct": round(len(yrs) / len(years) * 100, 1),
+                "weighted_share_pct": round(yw / wsum * 100, 1) if wsum else None,
+                "is_required": yw / wsum >= 0.9 if wsum else False,
+                "is_current": yrs[-1] == newest,
+                "median_words": _jb_weighted_pct(pairs, 0.5),
+                "p10_words": _jb_weighted_pct(pairs, 0.1),
+                "p90_words": _jb_weighted_pct(pairs, 0.9),
+                "avg_sentence_words": round(
+                    sum(sum(v) / len(v) * w for v, w in sw) / tw, 1) if tw else None,
+                "time_share_pct": round(
+                    100 * sum(1 for _y, _wd, _wt, a in obs if a["time"] > 0) / len(obs), 1),
+            })
+
+        book_rows.append({
+            "book_key": bk, "fund_key": fund, "fund_label": label, "title": title,
+            "sort_order": JB_FUND_ORDER.index(fund) if fund in JB_FUND_ORDER else 99,
+            "folder": rows[-1]["folder"], "file_names": ", ".join(sorted({r["file_name"] for r in rows}))[:600],
+            "files": len(rows), "years_held": len(years),
+            "first_pb_year": years[0], "latest_pb_year": newest,
+            "latest_source_file": by_year[newest][0]["file_name"],
+            "latest_book_date": next((r["p"].get("book_date") for r in by_year[newest]
+                                      if r["p"].get("book_date")), None),
+            "pages": sum(r["p"]["pages"] for r in rows),
+            "sections": sum(len(r["p"]["sections"]) for r in rows),
+            "time_sections": sum(yr["time_sections"] for yr in year_rows if yr["book_key"] == bk),
+            "exhibits": ",".join(sorted({t for r in rows for t in r["p"]["exhibits"]}))[:200] or None,
+            "has_text": any(r["p"]["text_chars"] > 500 for r in rows),
+            "is_current": latest_pb is not None and newest >= latest_pb - (JB_EXEMPLAR_YEARS - 1),
+        })
+
+        # ---- exemplar bodies, current books only -----------------------------
+        if latest_pb is None or newest < latest_pb - (JB_EXEMPLAR_YEARS - 1):
+            continue
+        per_title = collections.defaultdict(int)
+        cands = [(s, r) for y in years[-JB_EXEMPLAR_YEARS:] for r in by_year[y]
+                 for s in r["p"]["sections"]]
+        for s, r in sorted(cands, key=lambda sr: -sr[0]["words"]):
+            if not s["norm"] or s["words"] < 60 or s["words"] > 3000:
+                continue
+            if per_title[s["norm"]] >= JB_EXEMPLAR_PER_SECTION:
+                continue
+            per_title[s["norm"]] += 1
+            ex_rows2.append({
+                "book_key": bk, "pb_year": r["pb_year"], "norm_title": s["norm"],
+                "title": s["title"], "mark": s["mark"] or None, "shape": s["shape"],
+                "source_file": r["file_name"], "page_no": s["page"], "exhibit": s["exhibit"],
+                "words": s["words"], "sentences": s["sentences"],
+                "avg_sentence_words": s["avg_sentence_words"], "time_hits": s["time_hits"],
+                "money_hits": s["money_hits"], "body": s["body"][:JB_EXEMPLAR_CHARS]})
+
+    print(f"  book grain: {len(book_rows)} books over {len(year_rows)} book-years, "
+          f"{len(sec_rows)} section rows, {len(skel_rows)} skeleton rows, "
+          f"{len(ex_rows2)} exemplars (latest PB {latest_pb})")
+
+    # ============================================================= exhibit grain
     exhibits, sections = {}, []
     files_read = 0
-
     for fund_key, folder, fund_label in JBOOK_DIRS:
         pdfs = sorted(glob.glob(os.path.join(root, folder, "*.pdf")))[:JBOOK_MAX_PDF]
         for path in pdfs:
@@ -2778,7 +3223,6 @@ def step_jbook(out):
             if found:
                 print(f"  {src}: {found} exhibit pages")
 
-    # merge repeated sections (one section can run across pages)
     merged = {}
     for s in sections:
         k = (s["_key"], s["letter"], s["title"])
@@ -2786,7 +3230,7 @@ def step_jbook(out):
         if s["body"] not in m["body"]:
             m["body"] = (m["body"] + "\n" + s["body"]).strip()[:16000]
 
-    ex_rows, sec_rows = [], []
+    ex_rows, sec_rows_ex = [], []
     for i, (key, ex) in enumerate(sorted(exhibits.items(), key=lambda kv: str(kv[0]))):
         slug = re.sub(r"[^a-z0-9]+", "-", "-".join(
             str(x) for x in (ex["component"], ex["pe"], ex.get("project_number") or "",
@@ -2797,7 +3241,7 @@ def step_jbook(out):
             if k2 != key: continue
             words = len(re.findall(r"\b\w+\b", m["body"]))
             sents = _jb_sentences(m["body"]) if not m["is_table"] else []
-            sec_rows.append({
+            sec_rows_ex.append({
                 "slug": slug, "letter": letter, "title": title, "is_table": m["is_table"],
                 "body": m["body"], "word_count": words,
                 "sentence_count": len(sents),
@@ -2806,14 +3250,10 @@ def step_jbook(out):
                     if sents else None,
                 "opening": (sents[0][:300] if sents else None)})
 
-    # -------------------------------------------------------------- skeleton --
-    # Which sections exist, in which order, for which exhibit type. Observed,
-    # not asserted: the letters shift because a project-level R-2A carries no
-    # Program Change Summary, so Acquisition Strategy is D there and E on an R-2.
     order = collections.defaultdict(collections.Counter)
     seen_in = collections.defaultdict(set)
     for e in ex_rows:
-        mine = [s for s in sec_rows if s["slug"] == e["slug"]]
+        mine = [s for s in sec_rows_ex if s["slug"] == e["slug"]]
         for s in sorted(mine, key=lambda x: x["letter"]):
             order[e["exhibit"]][(s["letter"], s["title"], s["is_table"])] += 1
             seen_in[e["exhibit"]].add(e["slug"])
@@ -2827,14 +3267,11 @@ def step_jbook(out):
                          "share_pct": round(n / total * 100, 1),
                          "is_required": n / total >= 0.9})
 
-    # ----------------------------------------------------------------- style --
-    # Measured, per component and section, so a draft can be compared with the
-    # house voice rather than with an opinion about it.
     style = []
     by = collections.defaultdict(list)
     comp_of = {e["slug"]: e["component"] for e in ex_rows}
     fund_of = {e["slug"]: e["fund_label"] for e in ex_rows}
-    for s in sec_rows:
+    for s in sec_rows_ex:
         if s["is_table"] or not s["sentence_count"]: continue
         by[(comp_of.get(s["slug"]), fund_of.get(s["slug"]), s["letter"], s["title"])].append(s)
     for (comp, fund, letter, title), rows in by.items():
@@ -2848,13 +3285,15 @@ def step_jbook(out):
             "avg_sentence_words": round(sum(asw) / len(asw), 1) if asw else None,
             "example_opening": rows[0]["opening"]})
 
-    print(f"  {files_read} books read, {len(ex_rows)} exhibits, {len(sec_rows)} sections, "
-          f"{len(skel)} skeleton rows, {len(style)} style profiles")
+    print(f"  exhibit grain: {files_read} books read, {len(ex_rows)} exhibits, "
+          f"{len(sec_rows_ex)} sections, {len(skel)} skeleton rows, {len(style)} style profiles")
     write(out, "jbook.json", payload("jbook_corpus", vintage,
-          {"dm_jbook_exhibit": ex_rows, "dm_jbook_section": sec_rows,
-           "dm_jbook_skeleton": skel, "dm_jbook_style": style},
+          {"dm_jbook_exhibit": ex_rows, "dm_jbook_section": sec_rows_ex,
+           "dm_jbook_skeleton": skel, "dm_jbook_style": style,
+           "dm_jbook_book": book_rows, "dm_jbook_book_year": year_rows,
+           "dm_jbook_book_section": sec_rows, "dm_jbook_book_skeleton": skel_rows,
+           "dm_jbook_book_exemplar": ex_rows2},
           source_path="knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification"))
-
 # ------------------------------------------------- the seven display tables ---
 # /budget shows the FY2027 President's Budget request as the Department displays
 # it: seven "-1" tables, each one an appropriation title. The exhibit spine above

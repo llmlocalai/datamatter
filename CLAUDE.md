@@ -378,6 +378,79 @@ a shared threshold only ever selects the largest of them.
   dollar threshold quietly decides they do not exist. They get a supply-group
   dimension and an exemplar bucket down to $250K.
 
+### The justification books: two grains, and the book grain is the one that drifts
+
+`/jbook` is built on every justification book in `11-Budget-Justification` —
+**2,058 book identities over 4,555 editions, PB1998 to PB2027**, across O&M,
+procurement, RDT&E, MILCON, BRAC, family housing, the working capital fund, the
+health program and the rest. Two grains, and they answer different questions:
+
+- **Book grain** (`dm_jbook_book`, `_book_year`, `_book_section`, `_book_skeleton`,
+  `_book_exemplar`) — structure and measurement for every book, every year.
+- **Exhibit grain** (`dm_jbook_exhibit`, `dm_jbook_section`, `dm_jbook_skeleton`,
+  `dm_jbook_style`) — R-2 and R-2A exhibits inside the CURRENT Defense-Wide
+  RDT&E books, with bodies. Do not merge them; do not widen the exhibit parser
+  over the archive, which would put 4,600 books' prose into Neon.
+
+**The grain is `(book_key, pb_year)` and it is never collapsed.** A book identity
+persists across editions and each edition restates its own format: DISA's OP-5
+printed "C. Reconciliation of Increases and Decreases" from PB2012 to PB2021 and
+has not since. That drift exists in no single book, and a `GROUP BY` that drops
+`pb_year` turns twenty-nine years of format history into a book nobody
+published. `JB-01` (critical) re-counts every header against its own editions and
+every edition against its own section rows, and blocks the load.
+
+**The skeleton is weighted, and the weighting is the point.** Each book's
+skeleton is measured across its OWN editions on a three-year half-life, so what
+a book does now outranks what it did in PB2011. `JB-02` re-derives every
+weighted share from the section rows and the edition weights — the independent
+path — and fails on a 0.15-point disagreement. Sections a book has stopped
+printing are shown as drift, never scaffolded into a new draft.
+
+**Bodies are held for current books only** — a book's own two most recent
+editions, capped per section. The archive is several gigabytes of prose and none
+of it belongs in a page database. A historical book therefore contributes
+structure and word bands and no text, and the page says so. `JB-03` fails an
+exemplar from outside that window or one that does not name its file and page.
+
+**Time-sensitivity is measured, not asserted.** 23% of all sections carry dated,
+scheduled or milestone language; the share is recorded per section so a drafter
+is shown where a book goes stale first. A draft whose section carries none where
+the published versions carry one in half their editions is warned, not blocked.
+
+**A book states its own PB year on its cover and the folder states another.**
+Where they differ the DOCUMENT wins (`pb_basis = 'document'`), because a book
+filed under FY2010 that says FY2009 on page one is a FY2009 book filed late, and
+the folder's word puts it in the wrong year of its own history.
+
+**Nothing drafts a figure.** The scaffold is bracketed placeholders; the local
+model is instructed to write a placeholder rather than a number it was not
+given; and the readiness check BLOCKS a save on a placeholder left behind. A
+blank is obviously unfinished, a fabricated figure survives review.
+
+### The chat, and the machine it talks to
+
+The landing page carries a chat backed by the local models on the Mac Studio.
+Vercel cannot reach a home network, so the site talks to whatever public
+hostname fronts that machine (`LLM_BASE_URL`, with `LLM_API_KEY` or a Cloudflare
+Access service token). `lib/llm.ts` is the only module that knows how.
+
+- **Nothing is logged** — not a prompt, not a completion, not a key. The footer
+  says no controlled unclassified information transits this site; a `console.log`
+  of a question in a Vercel function would make that false. Errors report the
+  STATUS, never the body. The model server's hostname is not published to the
+  browser either.
+- **The model is chosen from the server's own tag list.** Ollama accepts a name
+  it does not have and starts pulling gigabytes over somebody's home connection.
+- **Offline is a normal state.** The Mac sleeps. The page says so and keeps
+  working; `/regulation` is the retrieval half and needs no model.
+- **Retrieval is shared.** `lib/knowledge-index.ts` holds the BM25 scoring that
+  `/regulation` and the chat both call — two implementations would drift, and
+  the day they disagreed the two would cite different passages for one question.
+  `lib/ask.ts` adds the corpus: definitions, books, and skeleton rows, so "what
+  must a Program Change Summary carry" is answered from 295 books rather than
+  from whatever shares its words in the wiki.
+
 ### The crosswalks are derived, and say so
 
 Two joins leave the exhibits, and neither source carries the other's key:

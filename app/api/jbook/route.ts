@@ -13,12 +13,18 @@ import {
   screen, getLexicon, addLexiconEntry, setLexiconActive,
   upsertDoc, saveVersion, getVersion, getVersions, listDocs, getDoc,
   addUpload, getUploads, getSkeleton, getStyleProfiles, getExemplars,
+  getBookFunds, getBooks, getBook, getBookYears, getBookSkeleton, getBookSections,
+  getBookExemplars, getLatestPbYear,
 } from '@/lib/jbook';
+import { buildDraft, readiness, defaultPbYear, type Draft } from '@/lib/jbook-draft';
+import { llmStatus, llmChat, pickModel, llmConfigured } from '@/lib/llm';
+import { docxParagraphs, splitIntoSections } from '@/lib/docx-read';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const OPEN_ACTIONS = new Set(['screen', 'lexicon', 'skeleton', 'style', 'exemplars']);
+const OPEN_ACTIONS = new Set(['screen', 'lexicon', 'skeleton', 'style', 'exemplars',
+  'draft', 'readiness']);
 
 function authorised(req: NextRequest) {
   const expected = process.env.JBOOK_TOKEN;
@@ -39,6 +45,24 @@ export async function GET(req: NextRequest) {
       case 'exemplars': return NextResponse.json({
         exemplars: await getExemplars(p.get('component') ?? '', p.get('letter') ?? 'A',
                                       Number(p.get('limit')) || 3) });
+      case 'bookFunds': return NextResponse.json({ funds: await getBookFunds() });
+      case 'books':     return NextResponse.json({
+        books: await getBooks({ fund: p.get('fund') ?? undefined, q: p.get('q') ?? undefined,
+                                limit: Number(p.get('limit')) || undefined }) });
+      /** One book, its editions and its own skeleton. The grain, unmodified. */
+      case 'book': {
+        const key = p.get('key') ?? '';
+        const [book, years, skeleton] = await Promise.all([
+          getBook(key), getBookYears(key), getBookSkeleton(key)]);
+        if (!book) return NextResponse.json({ error: 'no such book' }, { status: 404 });
+        return NextResponse.json({ book, years, skeleton,
+          nextPbYear: defaultPbYear(book.latestPbYear) });
+      }
+      case 'bookYear': return NextResponse.json({
+        sections: await getBookSections(p.get('key') ?? '', Number(p.get('pb')) || 0) });
+      case 'bookExemplars': return NextResponse.json({
+        exemplars: await getBookExemplars(p.get('key') ?? '', p.get('title') ?? undefined,
+                                          Number(p.get('limit')) || 6) });
       case 'docs':      return NextResponse.json({ docs: await listDocs() });
       case 'doc': {
         const k = p.get('key') ?? '';
@@ -81,6 +105,137 @@ export async function POST(req: NextRequest) {
           blocking: hits.filter((h) => h.severity === 'block').length,
           warnings: hits.filter((h) => h.severity === 'warn').length,
         });
+      }
+      /**
+       * The scaffold. Open, because it writes nothing and invents nothing: it
+       * is this book's own sections, in this book's own order, with this book's
+       * own word bands and a placeholder in every body.
+       */
+      case 'draft': {
+        const key = String(body.bookKey ?? '');
+        const [book, skeleton] = await Promise.all([getBook(key), getBookSkeleton(key)]);
+        if (!book) return NextResponse.json({ error: 'no such book' }, { status: 404 });
+        const draft = buildDraft(book, skeleton, {
+          subject: String(body.subject ?? ''),
+          pbYear: body.pbYear ? Number(body.pbYear) : undefined,
+          threshold: body.threshold ? Number(body.threshold) : undefined,
+        });
+        return NextResponse.json({ draft, editions: (await getBookYears(key)).length });
+      }
+      /**
+       * The readiness check. Also open: it reads a draft the caller already has
+       * and writes nothing, and a drafter should be able to see what a save
+       * will say before they hold a token.
+       */
+      case 'readiness': {
+        const draft = body.draft as Draft;
+        if (!draft?.bookKey) return NextResponse.json({ error: 'a draft is required' }, { status: 400 });
+        const [skeleton, lex] = await Promise.all([getBookSkeleton(draft.bookKey), getLexicon()]);
+        const hits = screen(draft.sections.map((x) => ({ letter: x.title, body: x.body })), lex);
+        const checks = readiness(draft, skeleton, hits);
+        return NextResponse.json({ checks, hits,
+          blocking: checks.filter((c) => c.status === 'block').length,
+          warnings: checks.filter((c) => c.status === 'warn').length });
+      }
+      /**
+       * Write or revise one section with the local model.
+       *
+       * The model is given this book's own measurements and its own published
+       * passages, and is told to write for the section in hand -- nothing else
+       * about the site's data reaches it, because a justification narrative
+       * must not acquire figures from somewhere its author cannot see. What
+       * comes back is a DRAFT in a text box, not a saved version: the person
+       * writing decides whether it is right, and the screen runs on it before
+       * anything can be saved either way.
+       */
+      case 'compose': {
+        if (!llmConfigured()) {
+          return NextResponse.json({
+            error: 'No model server is configured for this deployment, so nothing can be drafted '
+              + 'for you. The scaffold, the word bands and the published examples do not need one.',
+          }, { status: 503 });
+        }
+        const status = await llmStatus();
+        if (!status.online) {
+          return NextResponse.json({ error: status.reason ?? 'The model server is not reachable.' },
+            { status: 503 });
+        }
+        const model = pickModel(body.model, status);
+        if (!model) return NextResponse.json({ error: 'no model available' }, { status: 503 });
+
+        const key = String(body.bookKey ?? '');
+        const title = String(body.title ?? '');
+        const [book, skeleton, exemplars] = await Promise.all([
+          getBook(key), getBookSkeleton(key),
+          getBookExemplars(key, String(body.normTitle ?? '') || undefined, 2)]);
+        if (!book) return NextResponse.json({ error: 'no such book' }, { status: 404 });
+        const row = skeleton.find((x) => x.normTitle === body.normTitle);
+        const lex = await getLexicon();
+        const forbidden = lex.filter((l) => l.isActive && l.severity === 'block')
+          .map((l) => l.phrase).join(', ');
+
+        const prompt = [
+          `Write section "${title}" of a ${book.fundLabel} justification book`
+            + ` (${book.title}) for FY${body.pbYear ?? defaultPbYear(book.latestPbYear)}.`,
+          body.subject ? `Subject: ${body.subject}` : '',
+          body.instruction ? `The drafter asks: ${body.instruction}` : '',
+          row ? `This section runs ${row.p10Words}-${row.p90Words} words in this book's own`
+            + ` editions (median ${row.medianWords})`
+            + `${row.avgSentenceWords ? `, sentences about ${row.avgSentenceWords} words` : ''}.` : '',
+          Number(row?.timeSharePct ?? 0) >= 50
+            ? 'The published versions of this section state dates, schedules or milestones. Where'
+              + ' you do not have one, write a bracketed placeholder such as [award date] rather'
+              + ' than inventing a date.' : '',
+          body.current ? `The current text is:\n${String(body.current).slice(0, 6000)}` : '',
+          exemplars.length
+            ? 'Passages from this same section of this same book, as published — match their'
+              + ' register and level of detail, do not copy their content:\n'
+              + exemplars.map((e) => `[${e.sourceFile} p${e.pageNo}] ${e.body.slice(0, 1200)}`).join('\n\n')
+            : '',
+          'Rules: state no dollar figure, quantity, date or milestone that the drafter has not'
+            + ' given you — write a bracketed placeholder instead. Never use these phrases: '
+            + forbidden + '. Return the section text only, with no heading and no commentary.',
+        ].filter(Boolean).join('\n\n');
+
+        const text = await llmChat([
+          { role: 'system', content: 'You draft United States Department of War budget'
+            + ' justification narrative. You write in the register of the published books:'
+            + ' plain, declarative, specific, no marketing language. You never invent a figure.' },
+          { role: 'user', content: prompt },
+        ], { model, temperature: 0.3 });
+
+        const hits = screen([{ letter: title, body: text }], lex);
+        return NextResponse.json({ text, model, hits,
+          blocking: hits.filter((h) => h.severity === 'block').length });
+      }
+      /** An edited .docx, brought back as a new version. */
+      case 'importDocx': {
+        const b64 = String(body.file ?? '');
+        if (!b64) return NextResponse.json({ error: 'no file' }, { status: 400 });
+        const buf = Buffer.from(b64, 'base64');
+        if (buf.length > 8 * 1024 * 1024) {
+          return NextResponse.json({ error: 'that file is larger than 8MB' }, { status: 413 });
+        }
+        let sections;
+        try {
+          sections = splitIntoSections(docxParagraphs(buf),
+            (body.expected ?? []) as { key: string; title: string }[]);
+        } catch (e) {
+          return NextResponse.json({
+            error: `That file could not be read as a .docx (${(e as Error).message}).` },
+            { status: 400 });
+        }
+        const lex = await getLexicon();
+        const hits = screen(sections.map((x) => ({ letter: x.title, body: x.body })), lex);
+        const key = String(body.docKey ?? '');
+        let saved = null;
+        if (key) {
+          saved = await saveVersion(key, { sections }, {
+            note: body.note ?? `imported from ${String(body.name ?? 'an edited .docx')}`,
+            author: body.author, origin: 'import', screenHits: hits.length });
+        }
+        return NextResponse.json({ sections, hits, saved,
+          matched: sections.filter((x) => x.matched).length });
       }
       case 'addPhrase': {
         if (!String(body.phrase ?? '').trim()) {

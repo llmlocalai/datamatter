@@ -10,6 +10,7 @@
  * the person writing has to decide what the sentence should say instead.
  */
 import { getPool } from './db';
+import { missingColumns } from './schema';
 
 export interface LexiconEntry {
   id: number; phrase: string; pattern: string | null;
@@ -250,4 +251,198 @@ export async function getUploads(docKey: string) {
     `SELECT id, name, kind, content, row_count AS "rowCount",
             to_char(created_at,'YYYY-MM-DD HH24:MI') AS "createdAt"
        FROM dm_jbook_upload WHERE doc_key = $1 ORDER BY id DESC`, [docKey]);
+}
+
+/* ==========================================================================
+ * THE BOOK GRAIN
+ *
+ * Everything above this line is the exhibit grain: the R-2 and R-2A exhibits
+ * inside the current Defense-Wide RDT&E books, with their bodies.
+ *
+ * Everything below is the book grain: every justification book in the archive,
+ * FY1998 to the current President's Budget, held at (book_key, pb_year) and
+ * NEVER collapsed across pb_year. A book identity persists across editions --
+ * `om/disaop5` is DISA's OP-5 in PB2012 and in PB2027 -- and each edition
+ * restates its own format. That drift is the thing this corpus carries that no
+ * single book does, and a query that groups it away is a defect. JB-01 blocks a
+ * load where the extract has done it; these queries must not undo that.
+ * ========================================================================== */
+
+export interface JBook {
+  bookKey: string; fundKey: string; fundLabel: string; title: string;
+  files: number; yearsHeld: number; firstPbYear: number; latestPbYear: number;
+  latestSourceFile: string | null; latestBookDate: string | null;
+  pages: number; sections: number; timeSections: number; exhibits: string | null;
+  hasText: boolean; isCurrent: boolean; fileNames: string | null; folder: string | null;
+}
+
+export interface JBookYear {
+  pbYear: number; files: number; sourceFile: string | null; bookDate: string | null;
+  pbBasis: string; pages: number; sections: number; titles: number; words: number;
+  timeHits: number; timeSections: number; exhibits: string | null;
+  recencyWeight: number; isLatest: boolean; hasText: boolean;
+}
+
+export interface JBookSkeletonRow {
+  normTitle: string; title: string; shape: string; mark: string | null; level: number;
+  exhibit: string | null; rank: number; yearsSeen: number; yearsTotal: number;
+  firstSeenPb: number; lastSeenPb: number; sharePct: number; weightedSharePct: number;
+  isRequired: boolean; isCurrent: boolean; medianWords: number | null;
+  p10Words: number | null; p90Words: number | null;
+  avgSentenceWords: number | null; timeSharePct: number | null;
+}
+
+export interface JBookExemplar {
+  pbYear: number; normTitle: string; title: string; mark: string | null;
+  sourceFile: string | null; pageNo: number | null; exhibit: string | null;
+  words: number; avgSentenceWords: number | null; timeHits: number; body: string;
+}
+
+/** The appropriations the archive actually holds books for, with their counts. */
+export async function getBookFunds() {
+  return q<{ fundKey: string; fundLabel: string; books: number; editions: number;
+             current: number; latestPbYear: number; firstPbYear: number; sortOrder: number }>(
+    `SELECT b.fund_key AS "fundKey", min(b.fund_label) AS "fundLabel",
+            count(*)::int AS books,
+            sum(b.years_held)::int AS editions,
+            count(*) FILTER (WHERE b.is_current)::int AS current,
+            max(b.latest_pb_year) AS "latestPbYear", min(b.first_pb_year) AS "firstPbYear",
+            min(b.sort_order) AS "sortOrder"
+       FROM dm_jbook_book b JOIN dm_load l ON l.id = b.load_id AND l.is_current
+      GROUP BY b.fund_key ORDER BY min(b.sort_order), count(*) DESC`);
+}
+
+/**
+ * Books, optionally within one appropriation and matching a search.
+ *
+ * Ordered so the books a drafter is most likely to want come first: current
+ * books before superseded ones, then the deepest history, then the title.
+ */
+export async function getBooks(opts: { fund?: string; q?: string; limit?: number } = {}) {
+  return q<JBook>(
+    `SELECT b.book_key AS "bookKey", b.fund_key AS "fundKey", b.fund_label AS "fundLabel",
+            b.title, b.files, b.years_held AS "yearsHeld", b.first_pb_year AS "firstPbYear",
+            b.latest_pb_year AS "latestPbYear", b.latest_source_file AS "latestSourceFile",
+            b.latest_book_date AS "latestBookDate", b.pages, b.sections,
+            b.time_sections AS "timeSections", b.exhibits, b.has_text AS "hasText",
+            b.is_current AS "isCurrent", b.file_names AS "fileNames", b.folder
+       FROM dm_jbook_book b JOIN dm_load l ON l.id = b.load_id AND l.is_current
+      WHERE ($1::text IS NULL OR b.fund_key = $1)
+        AND ($2::text IS NULL OR b.title ILIKE '%' || $2 || '%' OR b.book_key ILIKE '%' || $2 || '%'
+             OR coalesce(b.file_names, '') ILIKE '%' || $2 || '%')
+      ORDER BY b.is_current DESC, b.years_held DESC, b.title
+      LIMIT $3`, [opts.fund ?? null, opts.q ?? null, opts.limit ?? 400]);
+}
+
+export async function getBook(bookKey: string): Promise<JBook | null> {
+  const rows = await getBooksByKey([bookKey]);
+  return rows[0] ?? null;
+}
+
+export async function getBooksByKey(keys: string[]) {
+  if (!keys.length) return [];
+  return q<JBook>(
+    `SELECT b.book_key AS "bookKey", b.fund_key AS "fundKey", b.fund_label AS "fundLabel",
+            b.title, b.files, b.years_held AS "yearsHeld", b.first_pb_year AS "firstPbYear",
+            b.latest_pb_year AS "latestPbYear", b.latest_source_file AS "latestSourceFile",
+            b.latest_book_date AS "latestBookDate", b.pages, b.sections,
+            b.time_sections AS "timeSections", b.exhibits, b.has_text AS "hasText",
+            b.is_current AS "isCurrent", b.file_names AS "fileNames", b.folder
+       FROM dm_jbook_book b JOIN dm_load l ON l.id = b.load_id AND l.is_current
+      WHERE b.book_key = ANY($1)`, [keys]);
+}
+
+/** Every edition of one book, newest first. The grain, unmodified. */
+export async function getBookYears(bookKey: string) {
+  return q<JBookYear>(
+    `SELECT y.pb_year AS "pbYear", y.files, y.source_file AS "sourceFile",
+            y.book_date AS "bookDate", y.pb_basis AS "pbBasis", y.pages, y.sections,
+            y.titles, y.words, y.time_hits AS "timeHits", y.time_sections AS "timeSections",
+            y.exhibits, y.recency_weight AS "recencyWeight", y.is_latest AS "isLatest",
+            y.has_text AS "hasText"
+       FROM dm_jbook_book_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+      WHERE y.book_key = $1 ORDER BY y.pb_year DESC`, [bookKey]);
+}
+
+/**
+ * One book's own skeleton, measured across its own editions and weighted
+ * towards recent ones. Ordered as the book prints it, not by frequency: the
+ * order is part of the format.
+ */
+export async function getBookSkeleton(bookKey: string) {
+  return q<JBookSkeletonRow>(
+    `SELECT k.norm_title AS "normTitle", k.title, k.shape, k.mark, k.level, k.exhibit,
+            k.rank, k.years_seen AS "yearsSeen", k.years_total AS "yearsTotal",
+            k.first_seen_pb AS "firstSeenPb", k.last_seen_pb AS "lastSeenPb",
+            k.share_pct AS "sharePct", k.weighted_share_pct AS "weightedSharePct",
+            k.is_required AS "isRequired", k.is_current AS "isCurrent",
+            k.median_words AS "medianWords", k.p10_words AS "p10Words", k.p90_words AS "p90Words",
+            k.avg_sentence_words AS "avgSentenceWords", k.time_share_pct AS "timeSharePct"
+       FROM dm_jbook_book_skeleton k JOIN dm_load l ON l.id = k.load_id AND l.is_current
+      WHERE k.book_key = $1
+      ORDER BY k.level, k.rank, k.norm_title`, [bookKey]);
+}
+
+/** What one edition printed, so a reader can see the format as at that year. */
+export async function getBookSections(bookKey: string, pbYear: number) {
+  return q<{ normTitle: string; title: string; shape: string; mark: string | null;
+             level: number; exhibit: string | null; seq: number; firstPage: number | null;
+             occurrences: number; medianWords: number; totalWords: number;
+             avgSentenceWords: number | null; timeHits: number; moneyHits: number }>(
+    `SELECT s.norm_title AS "normTitle", s.title, s.shape, s.mark, s.level, s.exhibit,
+            s.seq, s.first_page AS "firstPage", s.occurrences,
+            s.median_words AS "medianWords", s.total_words AS "totalWords",
+            s.avg_sentence_words AS "avgSentenceWords", s.time_hits AS "timeHits",
+            s.money_hits AS "moneyHits"
+       FROM dm_jbook_book_section s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+      WHERE s.book_key = $1 AND s.pb_year = $2 ORDER BY s.seq`, [bookKey, pbYear]);
+}
+
+/**
+ * Example passages. Held for current books only, and every one names the file
+ * and page it came from -- a paragraph a drafter cannot trace back to a
+ * published page is an anonymous piece of prose (JB-03).
+ */
+export async function getBookExemplars(bookKey: string, normTitle?: string, limit = 6) {
+  return q<JBookExemplar>(
+    `SELECT e.pb_year AS "pbYear", e.norm_title AS "normTitle", e.title, e.mark,
+            e.source_file AS "sourceFile", e.page_no AS "pageNo", e.exhibit, e.words,
+            e.avg_sentence_words AS "avgSentenceWords", e.time_hits AS "timeHits", e.body
+       FROM dm_jbook_book_exemplar e JOIN dm_load l ON l.id = e.load_id AND l.is_current
+      WHERE e.book_key = $1 AND ($2::text IS NULL OR e.norm_title = $2)
+      ORDER BY e.pb_year DESC, e.words DESC LIMIT $3`,
+    [bookKey, normTitle ?? null, limit]);
+}
+
+/**
+ * Whether this database carries the book grain AND a load that filled it.
+ *
+ * The release order is migrate, refresh, deploy, and this is the guard for when
+ * it is not followed: the site prerenders every page against the live database,
+ * so a query naming dm_jbook_book before the migration has run would fail the
+ * BUILD rather than a request. It does NOT fall back to the exhibit grain --
+ * that is the aggregate this page was rebuilt to stop publishing, and a guard
+ * that quietly restored it would hide exactly the defect it exists for. A
+ * migrated-but-not-loaded database has the tables and no rows, which is the same
+ * answer: the books are not available yet, and the page says so.
+ */
+export async function booksReady(): Promise<boolean> {
+  try {
+    const missing = await missingColumns('dm_jbook_book', ['book_key', 'fund_key', 'years_held']);
+    if (missing.length) return false;
+    const r = await q<{ n: number }>(
+      `SELECT count(*)::int AS n FROM dm_jbook_book b
+         JOIN dm_load l ON l.id = b.load_id AND l.is_current`);
+    return (r[0]?.n ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** The newest PB year anywhere in the corpus. */
+export async function getLatestPbYear(): Promise<number | null> {
+  const rows = await q<{ pb: number }>(
+    `SELECT max(y.pb_year) AS pb FROM dm_jbook_book_year y
+       JOIN dm_load l ON l.id = y.load_id AND l.is_current`);
+  return rows[0]?.pb ?? null;
 }

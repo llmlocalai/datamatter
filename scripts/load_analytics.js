@@ -1211,6 +1211,166 @@ const CONTROLS = {
   // Treasury account symbol writes the same two years independently
   // (017-2025/2027-1506-000). Where the two disagree, one of them is not the
   // year the money belongs to and every figure filed under it is misfiled.
+  // ------------------------------------------------------------- the J-book --
+  // JB-01 is the grain. A book identity spans up to twenty-nine President's
+  // Budgets and each edition restates its own format, so (book_key, pb_year) is
+  // the grain and collapsing it averages format history into a book that was
+  // never published. This RE-COUNTS the edition rows and the section rows in SQL
+  // and compares them with what the book header and the edition row claim --
+  // reading dm_jbook_book's own years_held against dm_jbook_book_year's own
+  // count is the check that matters, because an aggregation that dropped
+  // pb_year shows up here as a header that no longer matches its detail.
+  'JB-01': async (c) => (await c.query(`
+    WITH y AS (
+      SELECT y.book_key, count(*)::int AS editions, min(y.pb_year) AS first_pb,
+             max(y.pb_year) AS last_pb
+        FROM dm_jbook_book_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+       GROUP BY 1
+    ), s AS (
+      SELECT s.book_key, s.pb_year, count(*)::int AS titles,
+             count(*) FILTER (WHERE s.time_hits > 0)::int AS time_titles
+        FROM dm_jbook_book_section s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+       GROUP BY 1, 2
+    ), hdr AS (
+      SELECT b.fund_key, count(*)::int AS books,
+             count(*) FILTER (WHERE y.editions IS DISTINCT FROM b.years_held
+                                 OR y.first_pb IS DISTINCT FROM b.first_pb_year
+                                 OR y.last_pb  IS DISTINCT FROM b.latest_pb_year)::int AS bad_header,
+             max(b.book_key) FILTER (WHERE y.editions IS DISTINCT FROM b.years_held) AS example
+        FROM dm_jbook_book b JOIN dm_load l ON l.id = b.load_id AND l.is_current
+        LEFT JOIN y ON y.book_key = b.book_key
+       GROUP BY 1
+    ), det AS (
+      SELECT b.fund_key,
+             count(*) FILTER (WHERE coalesce(s.titles, 0) IS DISTINCT FROM ye.titles
+                                 OR coalesce(s.time_titles, 0) IS DISTINCT FROM ye.time_sections)::int AS bad_edition,
+             count(*)::int AS editions,
+             max(ye.book_key || ' PB' || ye.pb_year) FILTER (
+               WHERE coalesce(s.titles, 0) IS DISTINCT FROM ye.titles) AS example
+        FROM dm_jbook_book_year ye JOIN dm_load l ON l.id = ye.load_id AND l.is_current
+        JOIN dm_jbook_book b ON b.load_id = ye.load_id AND b.book_key = ye.book_key
+        LEFT JOIN s ON s.book_key = ye.book_key AND s.pb_year = ye.pb_year
+       GROUP BY 1
+    )
+    SELECT hdr.fund_key, hdr.books, hdr.bad_header, det.editions, det.bad_edition,
+           coalesce(hdr.example, det.example) AS example
+      FROM hdr LEFT JOIN det ON det.fund_key = hdr.fund_key
+     ORDER BY hdr.books DESC`)).rows.map((r) => {
+    const bad = Number(r.bad_header) + Number(r.bad_edition ?? 0);
+    return { dimension: r.fund_key, observed: bad, expected: 0, tolerance: 0,
+      variance_pct: r.editions ? bad / Number(r.editions) * 100 : 0,
+      status: bad === 0 ? 'pass' : 'fail',
+      message: bad === 0
+        ? `${r.fund_key}: ${Number(r.books).toLocaleString()} books over `
+          + `${Number(r.editions ?? 0).toLocaleString()} editions, and every book's year span and `
+          + 'every edition\'s section count re-count in SQL to what the extract published.'
+        : `${r.fund_key}: ${r.bad_header} books and ${r.bad_edition} editions do not re-count`
+          + `${r.example ? ` (e.g. ${r.example})` : ''}. The (book, PB year) grain has been `
+          + 'collapsed or rows were dropped; a book\'s format history is wrong.' };
+  }),
+
+  // JB-02 re-derives the weighted skeleton share from the section rows and the
+  // edition weights, which is the independent path: the published figure came
+  // from the extract's own observation lists, this one comes from the rows that
+  // were actually written. A skeleton built over the wrong set of editions --
+  // or one that kept a stale weight after a new book landed -- differs here.
+  'JB-02': async (c) => (await c.query(`
+    WITH w AS (
+      SELECT y.book_key, y.pb_year, y.recency_weight
+        FROM dm_jbook_book_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+    ), tot AS (
+      SELECT book_key, sum(recency_weight) AS wsum, count(*)::int AS editions FROM w GROUP BY 1
+    ), seen AS (
+      SELECT s.book_key, s.norm_title, count(*)::int AS years_seen,
+             sum(w.recency_weight) AS wseen
+        FROM dm_jbook_book_section s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+        JOIN w ON w.book_key = s.book_key AND w.pb_year = s.pb_year
+       GROUP BY 1, 2
+    )
+    SELECT k.book_key, count(*)::int AS rows,
+           count(*) FILTER (WHERE seen.years_seen IS DISTINCT FROM k.years_seen
+                               OR tot.editions IS DISTINCT FROM k.years_total
+                               OR abs(coalesce(seen.wseen / nullif(tot.wsum, 0) * 100, -1)
+                                      - k.weighted_share_pct) > 0.15)::int AS bad,
+           max(k.book_key || ' / ' || k.norm_title) FILTER (
+             WHERE seen.years_seen IS DISTINCT FROM k.years_seen) AS example
+      FROM dm_jbook_book_skeleton k JOIN dm_load l ON l.id = k.load_id AND l.is_current
+      LEFT JOIN seen ON seen.book_key = k.book_key AND seen.norm_title = k.norm_title
+      LEFT JOIN tot ON tot.book_key = k.book_key
+     GROUP BY k.book_key HAVING count(*) FILTER (
+       WHERE seen.years_seen IS DISTINCT FROM k.years_seen
+          OR tot.editions IS DISTINCT FROM k.years_total
+          OR abs(coalesce(seen.wseen / nullif(tot.wsum, 0) * 100, -1) - k.weighted_share_pct) > 0.15) > 0
+     ORDER BY 2 DESC LIMIT 50`)).rows.length === 0
+    ? [{ dimension: 'all books', observed: 0, expected: 0, tolerance: 0.15, variance_pct: 0,
+         status: 'pass',
+         message: 'Every skeleton row re-derives from its own book\'s section rows and edition '
+           + 'weights: the years it was seen in, the years the book has, and the recency-weighted '
+           + 'share all recompute in SQL to within 0.15 points.' }]
+    : (await c.query(`
+        WITH w AS (
+          SELECT y.book_key, y.pb_year, y.recency_weight
+            FROM dm_jbook_book_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+        ), tot AS (
+          SELECT book_key, sum(recency_weight) AS wsum, count(*)::int AS editions FROM w GROUP BY 1
+        ), seen AS (
+          SELECT s.book_key, s.norm_title, count(*)::int AS years_seen, sum(w.recency_weight) AS wseen
+            FROM dm_jbook_book_section s JOIN dm_load l ON l.id = s.load_id AND l.is_current
+            JOIN w ON w.book_key = s.book_key AND w.pb_year = s.pb_year
+           GROUP BY 1, 2
+        )
+        SELECT k.book_key, k.norm_title, k.years_seen, k.years_total, k.weighted_share_pct,
+               seen.years_seen AS re_seen, tot.editions AS re_total,
+               round(coalesce(seen.wseen / nullif(tot.wsum, 0) * 100, -1), 2) AS re_share
+          FROM dm_jbook_book_skeleton k JOIN dm_load l ON l.id = k.load_id AND l.is_current
+          LEFT JOIN seen ON seen.book_key = k.book_key AND seen.norm_title = k.norm_title
+          LEFT JOIN tot ON tot.book_key = k.book_key
+         WHERE seen.years_seen IS DISTINCT FROM k.years_seen
+            OR tot.editions IS DISTINCT FROM k.years_total
+            OR abs(coalesce(seen.wseen / nullif(tot.wsum, 0) * 100, -1) - k.weighted_share_pct) > 0.15
+         ORDER BY k.book_key LIMIT 200`)).rows.map((r) => ({
+      dimension: `${r.book_key} / ${r.norm_title}`, observed: r.re_share, expected: r.weighted_share_pct,
+      tolerance: 0.15, variance_pct: Math.abs(Number(r.re_share) - Number(r.weighted_share_pct)),
+      status: 'fail',
+      message: `${r.book_key}: "${r.norm_title}" is published as seen in ${r.years_seen} of `
+        + `${r.years_total} editions at a ${r.weighted_share_pct}% weighted share, and re-derives `
+        + `from the section rows as ${r.re_seen} of ${r.re_total} at ${r.re_share}%. The skeleton `
+        + 'and the sections it is measured from disagree.' })),
+
+  // JB-03. Bodies are held only for current books, and every one names the file
+  // and page it was read from -- an exemplar a drafter cannot trace back to a
+  // published page is an anonymous paragraph, which is exactly what this feature
+  // must not produce.
+  'JB-03': async (c) => (await c.query(`
+    WITH ranked AS (
+      SELECT y.book_key, y.pb_year,
+             row_number() OVER (PARTITION BY y.book_key ORDER BY y.pb_year DESC) AS rn
+        FROM dm_jbook_book_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+    )
+    SELECT count(*)::int AS n, count(DISTINCT e.book_key)::int AS books,
+           count(*) FILTER (WHERE r.rn IS NULL OR r.rn > 2)::int AS stale,
+           count(*) FILTER (WHERE e.source_file IS NULL OR e.page_no IS NULL
+                               OR length(coalesce(e.body, '')) < 40)::int AS untraceable,
+           count(*) FILTER (WHERE b.book_key IS NULL)::int AS orphan,
+           max(e.book_key || ' PB' || e.pb_year) FILTER (
+             WHERE r.rn IS NULL OR r.rn > 2 OR e.source_file IS NULL OR b.book_key IS NULL) AS example
+      FROM dm_jbook_book_exemplar e JOIN dm_load l ON l.id = e.load_id AND l.is_current
+      LEFT JOIN ranked r ON r.book_key = e.book_key AND r.pb_year = e.pb_year
+      LEFT JOIN dm_jbook_book b ON b.load_id = e.load_id AND b.book_key = e.book_key
+                               AND b.is_current`)).rows.map((r) => {
+    const bad = Number(r.stale) + Number(r.untraceable) + Number(r.orphan);
+    return { dimension: 'exemplar bodies', observed: bad, expected: 0, tolerance: 0,
+      variance_pct: r.n ? bad / Number(r.n) * 100 : 0, status: bad === 0 ? 'pass' : 'fail',
+      message: bad === 0
+        ? `${Number(r.n).toLocaleString()} exemplar passages across ${r.books} current books, every `
+          + 'one taken from that book\'s own two most recent editions and naming the file and page it '
+          + 'was read from. Older editions contribute structure and measurement, not text.'
+        : `${bad} exemplar passages are wrong: ${r.stale} come from an edition that is not one of `
+          + `their own book\'s two most recent, ${r.untraceable} name no source file or page, `
+          + `${r.orphan} belong to a book not marked current`
+          + `${r.example ? ` (e.g. ${r.example})` : ''}.` };
+  }),
+
   'POA-01': async (c) => (await c.query(`
     WITH acct AS (
       SELECT 'File B' AS src, a.fiscal_year, a.treasury_account, a.bpoa, a.epoa, a.availability_type
@@ -1481,6 +1641,22 @@ const CONTROLS = {
         'exhibits_total','share_pct','is_required'],
       dm_jbook_style: ['component','fund_label','letter','title','sample_size',
         'median_words','min_words','max_words','avg_sentence_words','example_opening'],
+      dm_jbook_book: ['book_key','fund_key','fund_label','title','folder','file_names','files',
+        'years_held','first_pb_year','latest_pb_year','latest_source_file','latest_book_date',
+        'pages','sections','time_sections','exhibits','has_text','is_current','sort_order'],
+      dm_jbook_book_year: ['book_key','pb_year','files','source_file','source_rel','book_date',
+        'pb_basis','pages','text_chars','sections','titles','words','time_hits','time_sections',
+        'exhibits','recency_weight','is_latest','has_text'],
+      dm_jbook_book_section: ['book_key','pb_year','norm_title','title','shape','mark','level',
+        'exhibit','seq','first_page','occurrences','median_words','total_words',
+        'avg_sentence_words','time_hits','money_hits'],
+      dm_jbook_book_skeleton: ['book_key','norm_title','title','shape','mark','level','exhibit',
+        'rank','years_seen','years_total','first_seen_pb','last_seen_pb','share_pct',
+        'weighted_share_pct','is_required','is_current','median_words','p10_words','p90_words',
+        'avg_sentence_words','time_share_pct'],
+      dm_jbook_book_exemplar: ['book_key','pb_year','norm_title','title','mark','shape',
+        'source_file','page_no','exhibit','words','sentences','avg_sentence_words','time_hits',
+        'money_hits','body'],
       dm_source_row: ['source_key','source_label','row_label','why','record'],
       dm_trace_row: ['step','source_key','source_label','key_field','key_value','note',
         'is_present','record'],

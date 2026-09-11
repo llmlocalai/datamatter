@@ -929,6 +929,161 @@ CREATE TABLE IF NOT EXISTS dm_jbook_style (
   example_opening    text
 );
 
+-- ------------------------------------------------------- the book grain -----
+-- Every justification book in the archive, read for its structure.
+--
+-- THE GRAIN IS (book_key, pb_year) AND IT IS NEVER COLLAPSED. A book identity
+-- persists across President's Budgets -- `om/disaop5` is the same book in PB2012
+-- and PB2027 -- and each year's edition restates its own format. Sections appear,
+-- are renamed and are dropped between editions, and that drift is the one thing
+-- this corpus carries that no single book does: DISA's OP-5 printed "C.
+-- Reconciliation of Increases and Decreases" from PB2012 to PB2021 and has not
+-- since. A GROUP BY that drops pb_year averages twenty-nine years of format
+-- history into one book that was never published. JB-01 blocks a load where it
+-- has happened.
+--
+-- Bodies are NOT held for every book: 4,600 books is several gigabytes of text
+-- and none of it belongs in a page database. Historical editions contribute
+-- structure and measurement only; dm_jbook_book_exemplar carries capped bodies
+-- for CURRENT books alone, and the page says so rather than implying the older
+-- text is available.
+
+CREATE TABLE IF NOT EXISTS dm_jbook_book (
+  id              bigserial PRIMARY KEY,
+  load_id         bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  book_key        text NOT NULL,          -- fund/compressed-stem, stable across years
+  fund_key        text NOT NULL,          -- om | proc | rdte | milcon | brac | ...
+  fund_label      text NOT NULL,
+  title           text NOT NULL,
+  folder          text,
+  file_names      text,                   -- every filename that resolved to this identity
+  files           int NOT NULL DEFAULT 0,
+  years_held      int NOT NULL DEFAULT 0,
+  first_pb_year   int,
+  latest_pb_year  int,
+  latest_source_file text,
+  latest_book_date   text,
+  pages           int NOT NULL DEFAULT 0,
+  sections        int NOT NULL DEFAULT 0,
+  time_sections   int NOT NULL DEFAULT 0,
+  exhibits        text,                   -- exhibit tags seen anywhere in the book
+  has_text        boolean NOT NULL DEFAULT true,   -- false = scanned image, no text layer
+  is_current      boolean NOT NULL DEFAULT false,  -- carries exemplar bodies
+  sort_order      int NOT NULL DEFAULT 99,
+  UNIQUE (load_id, book_key)
+);
+CREATE INDEX IF NOT EXISTS dm_jbook_book_idx ON dm_jbook_book (load_id, fund_key, title);
+
+-- One edition of one book. pb_basis records whether the year came from the
+-- book's own cover or from the folder it was filed in; they disagree often
+-- enough that taking the folder's word for it puts a book in the wrong year of
+-- its own history.
+CREATE TABLE IF NOT EXISTS dm_jbook_book_year (
+  id              bigserial PRIMARY KEY,
+  load_id         bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  book_key        text NOT NULL,
+  pb_year         int NOT NULL,
+  files           int NOT NULL DEFAULT 1,
+  source_file     text,
+  source_rel      text,
+  book_date       text,
+  pb_basis        text NOT NULL DEFAULT 'folder',  -- document | folder | unknown
+  pages           int NOT NULL DEFAULT 0,
+  text_chars      bigint NOT NULL DEFAULT 0,
+  sections        int NOT NULL DEFAULT 0,   -- section occurrences printed in this edition
+  titles          int NOT NULL DEFAULT 0,   -- distinct normalised section titles (the rows below)
+  words           bigint NOT NULL DEFAULT 0,
+  time_hits       int NOT NULL DEFAULT 0,
+  time_sections   int NOT NULL DEFAULT 0,
+  exhibits        text,
+  recency_weight  numeric(8,4) NOT NULL DEFAULT 1,
+  is_latest       boolean NOT NULL DEFAULT false,
+  has_text        boolean NOT NULL DEFAULT true,
+  UNIQUE (load_id, book_key, pb_year)
+);
+
+-- The sections one edition prints, aggregated by normalised title. Repeated
+-- occurrences (an R-2 book prints "A. Mission Description" once per program
+-- element) are counted, not listed: occurrences carries the count.
+CREATE TABLE IF NOT EXISTS dm_jbook_book_section (
+  id              bigserial PRIMARY KEY,
+  load_id         bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  book_key        text NOT NULL,
+  pb_year         int NOT NULL,
+  norm_title      text NOT NULL,
+  title           text NOT NULL,
+  shape           text NOT NULL,          -- letter | roman | number | label
+  mark            text,                   -- A, III, 9 ... as printed
+  level           int NOT NULL DEFAULT 1,
+  exhibit         text,
+  seq             int,
+  first_page      int,
+  occurrences     int NOT NULL DEFAULT 1,
+  median_words    int,
+  total_words     bigint,
+  avg_sentence_words numeric(8,1),
+  time_hits       int NOT NULL DEFAULT 0,
+  money_hits      int NOT NULL DEFAULT 0,
+  UNIQUE (load_id, book_key, pb_year, norm_title)
+);
+CREATE INDEX IF NOT EXISTS dm_jbook_book_section_idx
+  ON dm_jbook_book_section (load_id, book_key, pb_year);
+
+-- This book's own skeleton, measured across its own editions and weighted
+-- towards the recent ones (half-life three years). Weighting is the point: a
+-- section printed in every edition since PB2020 and never before is a current
+-- requirement, and an unweighted share across twenty-nine years ranks it below
+-- one that was dropped a decade ago.
+CREATE TABLE IF NOT EXISTS dm_jbook_book_skeleton (
+  id              bigserial PRIMARY KEY,
+  load_id         bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  book_key        text NOT NULL,
+  norm_title      text NOT NULL,
+  title           text NOT NULL,
+  shape           text NOT NULL,
+  mark            text,
+  level           int NOT NULL DEFAULT 1,
+  exhibit         text,
+  rank            int NOT NULL DEFAULT 0,
+  years_seen      int NOT NULL DEFAULT 0,
+  years_total     int NOT NULL DEFAULT 0,
+  first_seen_pb   int,
+  last_seen_pb    int,
+  share_pct       numeric(6,1),
+  weighted_share_pct numeric(6,1),
+  is_required     boolean NOT NULL DEFAULT false,
+  is_current      boolean NOT NULL DEFAULT false,  -- still printed in the newest edition
+  median_words    int,
+  p10_words       int,
+  p90_words       int,
+  avg_sentence_words numeric(8,1),
+  time_share_pct  numeric(6,1),          -- share of observations carrying dated or scheduled language
+  UNIQUE (load_id, book_key, norm_title)
+);
+
+-- Capped example bodies from CURRENT books only.
+CREATE TABLE IF NOT EXISTS dm_jbook_book_exemplar (
+  id              bigserial PRIMARY KEY,
+  load_id         bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  book_key        text NOT NULL,
+  pb_year         int NOT NULL,
+  norm_title      text NOT NULL,
+  title           text NOT NULL,
+  mark            text,
+  shape           text,
+  source_file     text,
+  page_no         int,
+  exhibit         text,
+  words           int,
+  sentences       int,
+  avg_sentence_words numeric(8,1),
+  time_hits       int NOT NULL DEFAULT 0,
+  money_hits      int NOT NULL DEFAULT 0,
+  body            text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dm_jbook_book_exemplar_idx
+  ON dm_jbook_book_exemplar (load_id, book_key, norm_title);
+
 -- ---------------------------------------------------- authoring (user-owned) --
 
 -- Words and phrases that must not appear in a justification narrative.

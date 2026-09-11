@@ -124,13 +124,13 @@
     },
     {
       "key": "jbook_corpus",
-      "label": "Justification book corpus (R-2 exhibits)",
-      "source_system": "DoD Component budget justification books, FY2027 President's Budget",
+      "label": "Justification books",
+      "source_system": "DoD Component budget justification books (comptroller.defense.gov), FY1998\u2013FY2027",
       "source_path": "knowledge-bank/DOD-FM-Knowledge-Bank/11-Budget-Justification",
-      "grain": "exhibit x section",
-      "description": "Every R-2 and R-2A exhibit parsed out of the Defense-Wide RDT&E justification books into its lettered sections, with the observed format skeleton and per-component style measurements.",
+      "grain": "book \u00d7 President\u2019s Budget year \u00d7 section",
+      "description": "Every justification book in the archive, held at (book, President's Budget year) and never collapsed: the sections each edition prints, in the order it prints them, with the word band each runs to, how much of it carries dated or scheduled language, and the format drift between editions. Plus the exhibit grain underneath it \u2014 R-2 and R-2A exhibits from the current Defense-Wide RDT&E books, with their bodies.",
       "refresh_cadence": "annual, on publication of each President's Budget",
-      "limitations": "Read from the published PDFs by layout extraction, so a table section keeps its source spacing rather than being re-tabulated. Covers the Defense-Wide RDT&E volumes only; military department books and other appropriations are not yet parsed.",
+      "limitations": "Read from the published PDFs by layout extraction, so a table section keeps its source spacing rather than being re-tabulated. The archive is the Defense-Wide and Department-level material: a service's own book appears only where it was collected (a few FY2003\u2013FY2005 O&M volumes), so the picker shows what is held rather than what the Department publishes. Structure and measurements come from every edition; example TEXT is kept only for a book's two most recent editions, because the archive is several gigabytes of prose. A book with no text layer (an older scan) contributes page counts and nothing else, and says so.",
       "sort_order": 96
     },
     {
@@ -639,6 +639,33 @@
       "authority": "DATA Act Information Model Schema (Files A-C element names); OMB M-17-04 data quality; GAO-14-704G Green Book principle 13 (use quality information)",
       "severity": "critical",
       "sort_order": 345
+    },
+    {
+      "code": "JB-01",
+      "name": "A book's format history is kept at (book, PB year)",
+      "assertion": "Every book header's year span and edition count re-count in SQL from the edition rows, and every edition's distinct section titles and time-sensitive titles re-count from the section rows.",
+      "rationale": "A justification book identity spans up to twenty-nine President's Budgets and each edition restates its own format: DISA's OP-5 printed 'C. Reconciliation of Increases and Decreases' from PB2012 to PB2021 and has not since. That drift exists in no single book and is the reason this corpus is held at (book_key, pb_year). A GROUP BY that drops pb_year averages twenty-nine years into a book that was never published and reads like a tidy-up, so the header is re-counted against its own detail rather than trusted.",
+      "authority": "DoD FMR Volume 2A/2B (budget formulation and presentation); the published justification books themselves",
+      "severity": "critical",
+      "sort_order": 355
+    },
+    {
+      "code": "JB-02",
+      "name": "The skeleton re-derives from the sections it was measured from",
+      "assertion": "For every skeleton row, the editions it was seen in, the editions the book has, and the recency-weighted share all re-derive in SQL from the section rows and the edition weights, to within 0.15 percentage points.",
+      "rationale": "The skeleton is what a drafter is shown as the shape of their book, and it is weighted towards recent editions on purpose (half-life three years) so a section printed in every book since PB2020 outranks one dropped a decade ago. The published figure came from the extract's own observation lists; this control recomputes it from the rows that were actually written, which is the independent path. A skeleton measured over the wrong set of editions, or one carrying weights from before a new book landed, differs here.",
+      "authority": "Component editorial standard; measured from the published books",
+      "severity": "high",
+      "sort_order": 365
+    },
+    {
+      "code": "JB-03",
+      "name": "Exemplar text is current and traceable to a page",
+      "assertion": "Every exemplar passage comes from one of its own book's two most recent editions, belongs to a book marked current, and names the file and page it was read from.",
+      "rationale": "Bodies are held for current books only: the archive is several gigabytes of text and none of it belongs in a page database. The window is the BOOK's own last two editions, not the corpus's \u2014 a book published in PB2027 whose previous edition was PB2025 is current and both of its editions are usable material, while a book last published in PB2009 contributes structure and measurement and no text at all, which the page says rather than implies. What must never happen is an untraceable paragraph: an exemplar a drafter cannot follow back to a published page is an anonymous piece of prose, which is what this feature exists not to produce.",
+      "authority": "Site rule: every figure and every quoted passage names its source and vintage",
+      "severity": "moderate",
+      "sort_order": 375
     }
   ],
   "audit_posture": {
