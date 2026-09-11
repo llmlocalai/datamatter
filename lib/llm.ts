@@ -1,12 +1,20 @@
 /**
- * The local model server.
+ * The model chain.
  *
- * The models that know this material are on a Mac Studio, not on Vercel, and a
- * Vercel function cannot reach a machine on somebody's network. So the site
- * talks to whatever public hostname fronts that machine -- a Cloudflare tunnel
- * or a Tailscale funnel -- and this module is the only place that knows how.
+ * Three links, tried in order, and the order is the point:
  *
- * THREE RULES HOLD HERE.
+ *   1. the big local model on the Mac Studio  (default)
+ *   2. the smaller local model on the same machine
+ *   3. a commercial model, over the public internet
+ *
+ * The first two are the ones trained on this material and they cost nothing to
+ * run; the third is a paid API and a different company's servers. So the chain
+ * only ever moves DOWN it, never up, and every answer says which link produced
+ * it — an answer from the cloud model is not the same artifact as an answer
+ * from the tuned local one, and a reader who cannot tell them apart is being
+ * misled about where the sentence came from.
+ *
+ * FOUR RULES HOLD HERE.
  *
  * 1. NOTHING IS LOGGED. Not a prompt, not a completion, not a key. The footer of
  *    this site says no controlled unclassified information is present on it and
@@ -14,49 +22,76 @@
  *    is a log line in somebody else's datacentre, and would make that sentence
  *    false. Errors report the STATUS, never the body.
  *
- * 2. THE MODEL IS CHOSEN FROM WHAT THE SERVER OFFERS. A model name arriving
- *    from the browser is checked against the tag list the server itself
- *    publishes before it is used, because Ollama will happily accept a name it
- *    does not have and start pulling gigabytes over somebody's home connection.
+ * 2. FALLBACK HAPPENS BEFORE THE FIRST TOKEN, NEVER AFTER IT. Once a link has
+ *    emitted text the reader is already reading it; silently restarting on a
+ *    second model would rewrite a paragraph under their eyes. A failure after
+ *    the first token is reported as a truncated answer, which is what it is.
  *
- * 3. OFFLINE IS A NORMAL STATE, NOT AN ERROR. The Mac is asleep, the tunnel is
- *    down, the laptop moved. The page says so plainly and keeps working for
- *    everything that does not need the model.
+ * 3. A LOCAL MODEL IS USED ONLY IF THE SERVER SAYS IT HAS IT. Ollama accepts a
+ *    tag it does not hold and starts pulling gigabytes over somebody's home
+ *    connection, so the tag is checked against /api/tags first and a missing
+ *    model is a reason to move down the chain, not to start a download.
+ *
+ * 4. THE CLOUD LINK IS OPT-IN AND VISIBLE. It exists only when a key is
+ *    configured, it is always last, and the page names it when it answers.
  */
 
-export interface LlmModel { name: string; family: string | null; size: number | null;
-                            parameters: string | null; quantisation: string | null }
+export type LinkKind = 'ollama' | 'openai';
+
+export interface LlmLink {
+  id: string;
+  kind: LinkKind;
+  label: string;          // what the page calls it
+  model: string;          // the tag or model id sent to the server
+  baseUrl: string;
+  isLocal: boolean;
+  timeoutMs: number;
+  headers: Record<string, string>;
+}
+
+export interface LinkStatus {
+  id: string; label: string; model: string; isLocal: boolean;
+  state: 'ready' | 'unreachable' | 'model-missing' | 'refused' | 'unconfigured';
+  detail?: string;
+  /** Tags the local server actually holds, when it answered. */
+  available?: string[];
+}
 
 export interface LlmStatus {
   configured: boolean;
-  online: boolean;
-  models: LlmModel[];
-  defaultModel: string | null;
-  host: string | null;        // hostname only, never the key
+  online: boolean;                 // at least one link is ready
+  links: LinkStatus[];
+  defaultLink: string | null;
   checkedAt: string;
   reason?: string;
 }
 
 export interface LlmMessage { role: 'system' | 'user' | 'assistant'; content: string }
 
-const DEFAULT_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS ?? 120_000);
-const HEALTH_TIMEOUT = 6_000;
+const LOCAL_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS ?? 120_000);
+const CLOUD_TIMEOUT = Number(process.env.LLM_CLOUD_TIMEOUT_MS ?? 60_000);
+const HEALTH_TIMEOUT = Number(process.env.LLM_HEALTH_TIMEOUT_MS ?? 6_000);
 
-export function llmConfigured(): boolean {
-  return !!process.env.LLM_BASE_URL;
-}
+const trim = (s: string) => s.replace(/\/+$/, '');
 
-function base(): string {
-  const b = process.env.LLM_BASE_URL ?? '';
-  return b.replace(/\/+$/, '');
-}
-
-/** Auth headers. Bearer for a reverse proxy that checks one; Cloudflare Access
- *  service tokens for a tunnel that does. Both are optional and neither is ever
- *  returned to a caller. */
-function authHeaders(): Record<string, string> {
+/**
+ * The shared secret goes on both a Bearer header and an X-LLM-Secret header.
+ *
+ * Tailscale Funnel puts the machine on the public internet and Ollama has no
+ * authentication of its own, so SOMETHING in front of it has to check a secret.
+ * Which header that something looks at depends on what is in front — a small
+ * reverse proxy, Caddy's forward_auth, an OpenAI-compatible shim — so both are
+ * sent rather than making the choice of proxy a code change here. Neither is
+ * ever returned to a caller.
+ */
+function localHeaders(): Record<string, string> {
+  const secret = process.env.LOCAL_LLM_SHARED_SECRET ?? process.env.LLM_API_KEY ?? '';
   const h: Record<string, string> = {};
-  if (process.env.LLM_API_KEY) h.Authorization = `Bearer ${process.env.LLM_API_KEY}`;
+  if (secret) {
+    h.Authorization = `Bearer ${secret}`;
+    h['X-LLM-Secret'] = secret;
+  }
+  // A Cloudflare Access service token, for a tunnel fronted that way instead.
   if (process.env.LLM_ACCESS_CLIENT_ID && process.env.LLM_ACCESS_CLIENT_SECRET) {
     h['CF-Access-Client-Id'] = process.env.LLM_ACCESS_CLIENT_ID;
     h['CF-Access-Client-Secret'] = process.env.LLM_ACCESS_CLIENT_SECRET;
@@ -64,8 +99,35 @@ function authHeaders(): Record<string, string> {
   return h;
 }
 
-function hostOf(): string | null {
-  try { return new URL(base()).host; } catch { return null; }
+/** The chain, in order, from the environment. Absent links are simply absent. */
+export function llmChain(): LlmLink[] {
+  const chain: LlmLink[] = [];
+  const localBase = process.env.LOCAL_LLM_FUNNEL_URL ?? process.env.LLM_BASE_URL ?? '';
+  const primary = process.env.LOCAL_LLM_MODEL_PRIMARY ?? process.env.LLM_MODEL ?? '';
+  const secondary = process.env.LOCAL_LLM_MODEL_SECONDARY ?? '';
+  if (localBase && primary) {
+    chain.push({ id: 'local-primary', kind: 'ollama', label: primary, model: primary,
+      baseUrl: trim(localBase), isLocal: true, timeoutMs: LOCAL_TIMEOUT, headers: localHeaders() });
+  }
+  if (localBase && secondary && secondary !== primary) {
+    chain.push({ id: 'local-secondary', kind: 'ollama', label: secondary, model: secondary,
+      baseUrl: trim(localBase), isLocal: true, timeoutMs: LOCAL_TIMEOUT, headers: localHeaders() });
+  }
+  const cloudKey = process.env.CLOUD_LLM_API_KEY ?? process.env.GEMINI_API_KEY
+    ?? process.env.OPENAI_API_KEY ?? '';
+  const cloudModel = process.env.CLOUD_LLM_MODEL ?? '';
+  const cloudBase = process.env.CLOUD_LLM_BASE_URL
+    ?? 'https://generativelanguage.googleapis.com/v1beta/openai';
+  if (cloudKey && cloudModel) {
+    chain.push({ id: 'cloud', kind: 'openai', label: cloudModel, model: cloudModel,
+      baseUrl: trim(cloudBase), isLocal: false, timeoutMs: CLOUD_TIMEOUT,
+      headers: { Authorization: `Bearer ${cloudKey}` } });
+  }
+  return chain;
+}
+
+export function llmConfigured(): boolean {
+  return llmChain().length > 0;
 }
 
 async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -75,94 +137,114 @@ async function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<
 }
 
 /**
- * What the server has, or why it cannot be reached.
+ * Does this Ollama server hold this tag?
  *
- * `reason` is written for a reader of the page, not for a log: "the model server
- * did not answer" is what a person needs, and the status code is enough detail
- * to act on without repeating whatever the far end said.
+ * Tolerant about the two spellings people actually use — `qwen3.8:27b-q8` and
+ * `qwen3.8:27b-q8:latest` are the same model — and about nothing else. A tag
+ * that is merely SIMILAR is a different model and is not substituted.
  */
-export async function llmStatus(): Promise<LlmStatus> {
-  const checkedAt = new Date().toISOString();
-  if (!llmConfigured()) {
-    return { configured: false, online: false, models: [], defaultModel: null,
-      host: null, checkedAt,
-      reason: 'No model server is configured for this deployment (LLM_BASE_URL is unset).' };
-  }
+function tagPresent(want: string, have: string[]): boolean {
+  const norm = (s: string) => s.trim().toLowerCase().replace(/:latest$/, '');
+  const w = norm(want);
+  return have.some((h) => norm(h) === w);
+}
+
+async function probeOllama(link: LlmLink): Promise<LinkStatus> {
+  const base = { id: link.id, label: link.label, model: link.model, isLocal: link.isLocal };
   try {
     const res = await withTimeout(HEALTH_TIMEOUT, (signal) =>
-      fetch(`${base()}/api/tags`, { headers: authHeaders(), signal, cache: 'no-store' }));
-    if (!res.ok) {
-      return { configured: true, online: false, models: [], defaultModel: null,
-        host: hostOf(), checkedAt,
-        reason: res.status === 401 || res.status === 403
-          ? 'The model server refused this deployment’s credentials.'
-          : `The model server answered ${res.status}.` };
+      fetch(`${link.baseUrl}/api/tags`, { headers: link.headers, signal, cache: 'no-store' }));
+    if (res.status === 401 || res.status === 403) {
+      return { ...base, state: 'refused',
+        detail: 'The model server refused this deployment’s shared secret.' };
     }
-    const body = await res.json() as { models?: { name?: string; model?: string; size?: number;
-      details?: { family?: string; parameter_size?: string; quantization_level?: string } }[] };
-    const models: LlmModel[] = (body.models ?? []).map((m) => ({
-      name: m.name ?? m.model ?? '',
-      family: m.details?.family ?? null,
-      size: m.size ?? null,
-      parameters: m.details?.parameter_size ?? null,
-      quantisation: m.details?.quantization_level ?? null,
-    })).filter((m) => m.name);
-    // Largest first: the two big models are the ones that know this material,
-    // and a picker that opens on a 1B model makes the feature look broken.
-    models.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
-    const preferred = process.env.LLM_MODEL;
-    const defaultModel = (preferred && models.some((m) => m.name === preferred))
-      ? preferred : (models[0]?.name ?? null);
-    return { configured: true, online: models.length > 0, models, defaultModel,
-      host: hostOf(), checkedAt,
-      reason: models.length ? undefined : 'The model server is reachable but has no models loaded.' };
+    if (!res.ok) {
+      return { ...base, state: 'unreachable', detail: `The model server answered ${res.status}.` };
+    }
+    const body = await res.json() as { models?: { name?: string; model?: string }[] };
+    const have = (body.models ?? []).map((m) => m.name ?? m.model ?? '').filter(Boolean);
+    if (!tagPresent(link.model, have)) {
+      return { ...base, state: 'model-missing', available: have.slice(0, 20),
+        detail: `The server is answering but does not hold ${link.model}.` };
+    }
+    return { ...base, state: 'ready', available: have.slice(0, 20) };
   } catch (e) {
-    const aborted = (e as Error).name === 'AbortError';
-    return { configured: true, online: false, models: [], defaultModel: null,
-      host: hostOf(), checkedAt,
-      reason: aborted
+    return { ...base, state: 'unreachable',
+      detail: (e as Error).name === 'AbortError'
         ? 'The model server did not answer within six seconds — the machine is probably asleep.'
         : 'The model server could not be reached.' };
   }
 }
 
-/** Resolve a requested model against what the server actually has. */
-export function pickModel(requested: string | undefined, status: LlmStatus): string | null {
-  if (requested && status.models.some((m) => m.name === requested)) return requested;
-  return status.defaultModel;
+async function probeOpenAI(link: LlmLink): Promise<LinkStatus> {
+  const base = { id: link.id, label: link.label, model: link.model, isLocal: link.isLocal };
+  try {
+    const res = await withTimeout(HEALTH_TIMEOUT, (signal) =>
+      fetch(`${link.baseUrl}/models`, { headers: link.headers, signal, cache: 'no-store' }));
+    if (res.status === 401 || res.status === 403) {
+      return { ...base, state: 'refused', detail: 'The API key was refused.' };
+    }
+    // A provider that does not implement /models is not a provider that cannot
+    // answer: it is reported ready and the first real call decides.
+    return { ...base, state: 'ready' };
+  } catch {
+    return { ...base, state: 'unreachable', detail: 'The provider could not be reached.' };
+  }
 }
 
-export interface ChatOptions {
-  model: string;
+/** The state of every link, in chain order. */
+export async function llmStatus(): Promise<LlmStatus> {
+  const checkedAt = new Date().toISOString();
+  const chain = llmChain();
+  if (!chain.length) {
+    return { configured: false, online: false, links: [], defaultLink: null, checkedAt,
+      reason: 'No model is configured for this deployment.' };
+  }
+  const links = await Promise.all(chain.map((l) =>
+    l.kind === 'ollama' ? probeOllama(l) : probeOpenAI(l)));
+  const ready = links.find((l) => l.state === 'ready');
+  return {
+    configured: true, online: !!ready, links, defaultLink: ready?.id ?? null, checkedAt,
+    reason: ready ? undefined
+      : links[0]?.detail ?? 'No link in the model chain is answering.',
+  };
+}
+
+export interface ChainOptions {
+  /** Force one link by id. Absent means: walk the chain from the top. */
+  only?: string;
   temperature?: number;
   numCtx?: number;
   signal?: AbortSignal;
 }
 
-/**
- * Stream a chat completion as it is generated.
- *
- * Ollama returns newline-delimited JSON; this yields the text deltas. The caller
- * decides what to do with them, which keeps the route free to add its own
- * framing (sources first, then the answer) without this module knowing about
- * HTTP at all.
- */
-export async function* llmChatStream(messages: LlmMessage[], opts: ChatOptions)
-    : AsyncGenerator<{ delta?: string; done?: boolean; evalCount?: number }> {
-  const res = await withTimeout(DEFAULT_TIMEOUT, (signal) =>
-    fetch(`${base()}/api/chat`, {
+export type ChainEvent =
+  | { type: 'link'; link: LlmLink }                       // this one is being tried
+  | { type: 'delta'; text: string }
+  | { type: 'fallback'; from: LlmLink; reason: string }    // moving down the chain
+  | { type: 'done'; link: LlmLink; ms: number }
+  | { type: 'failed'; reason: string };                    // nothing answered
+
+/** One link's stream, as text deltas. Throws before the first token if it cannot start. */
+async function* streamOne(link: LlmLink, messages: LlmMessage[], opts: ChainOptions)
+    : AsyncGenerator<string> {
+  const url = link.kind === 'ollama' ? `${link.baseUrl}/api/chat`
+                                     : `${link.baseUrl}/chat/completions`;
+  const body = link.kind === 'ollama'
+    ? { model: link.model, messages, stream: true,
+        options: { temperature: opts.temperature ?? 0.2, num_ctx: opts.numCtx ?? 8192 } }
+    : { model: link.model, messages, stream: true, temperature: opts.temperature ?? 0.2 };
+
+  const res = await withTimeout(link.timeoutMs, (signal) =>
+    fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({
-        model: opts.model, messages, stream: true,
-        options: { temperature: opts.temperature ?? 0.2, num_ctx: opts.numCtx ?? 8192 },
-      }),
+      headers: { 'Content-Type': 'application/json', ...link.headers },
+      body: JSON.stringify(body),
       signal: opts.signal ?? signal,
       cache: 'no-store',
     }));
-  if (!res.ok || !res.body) {
-    throw new Error(`model server answered ${res.status}`);
-  }
+  if (!res.ok || !res.body) throw new Error(`answered ${res.status}`);
+
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
@@ -175,24 +257,86 @@ export async function* llmChatStream(messages: LlmMessage[], opts: ChatOptions)
       const line = buf.slice(0, nl).trim();
       buf = buf.slice(nl + 1);
       if (!line) continue;
-      try {
-        const obj = JSON.parse(line) as { message?: { content?: string }; done?: boolean;
-                                          eval_count?: number };
-        if (obj.message?.content) yield { delta: obj.message.content };
-        if (obj.done) yield { done: true, evalCount: obj.eval_count };
-      } catch {
-        // A partial line is normal at a chunk boundary; it is completed by the
-        // next read. Anything else is skipped rather than logged.
+      if (link.kind === 'ollama') {
+        try {
+          const o = JSON.parse(line) as { message?: { content?: string } };
+          if (o.message?.content) yield o.message.content;
+        } catch { /* a partial line at a chunk boundary is completed by the next read */ }
+      } else {
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') return;
+        try {
+          const o = JSON.parse(payload) as { choices?: { delta?: { content?: string } }[] };
+          const t = o.choices?.[0]?.delta?.content;
+          if (t) yield t;
+        } catch { /* likewise */ }
       }
     }
   }
 }
 
-/** The whole completion, for callers that cannot stream (a revision, a draft). */
-export async function llmChat(messages: LlmMessage[], opts: ChatOptions): Promise<string> {
-  let out = '';
-  for await (const part of llmChatStream(messages, opts)) {
-    if (part.delta) out += part.delta;
+/**
+ * Walk the chain until one link answers.
+ *
+ * A link is skipped when the server does not hold its model (checked, never
+ * pulled) and abandoned when it cannot start. Once it has produced a single
+ * token it owns the answer: see rule 2 above.
+ */
+export async function* llmChainStream(messages: LlmMessage[], opts: ChainOptions = {})
+    : AsyncGenerator<ChainEvent> {
+  const chain = llmChain().filter((l) => !opts.only || l.id === opts.only);
+  if (!chain.length) {
+    yield { type: 'failed', reason: 'No model is configured for this deployment.' };
+    return;
   }
-  return out;
+  const status = await llmStatus();
+  const stateOf = new Map(status.links.map((l) => [l.id, l]));
+
+  for (const link of chain) {
+    const st = stateOf.get(link.id);
+    if (st && st.state !== 'ready') {
+      yield { type: 'fallback', from: link,
+        reason: st.detail ?? `${link.label} is not available.` };
+      continue;
+    }
+    yield { type: 'link', link };
+    const started = Date.now();
+    let emitted = false;
+    try {
+      for await (const text of streamOne(link, messages, opts)) {
+        emitted = true;
+        yield { type: 'delta', text };
+      }
+      yield { type: 'done', link, ms: Date.now() - started };
+      return;
+    } catch (e) {
+      const why = (e as Error).name === 'AbortError'
+        ? `${link.label} did not finish within ${Math.round(link.timeoutMs / 1000)}s`
+        : `${link.label} ${(e as Error).message}`;
+      if (emitted) {
+        // Rule 2: the reader is already reading this answer.
+        yield { type: 'failed', reason: `${why}. The answer above is incomplete — `
+          + 'it stopped part-way rather than being rewritten by another model.' };
+        return;
+      }
+      yield { type: 'fallback', from: link, reason: why };
+    }
+  }
+  yield { type: 'failed', reason: 'No link in the model chain could answer.' };
+}
+
+/** The whole completion from the first link that answers, for non-streaming callers. */
+export async function llmChat(messages: LlmMessage[], opts: ChainOptions = {})
+    : Promise<{ text: string; link: LlmLink | null; fellBack: string[] }> {
+  let text = '';
+  let link: LlmLink | null = null;
+  const fellBack: string[] = [];
+  for await (const ev of llmChainStream(messages, opts)) {
+    if (ev.type === 'link') link = ev.link;
+    if (ev.type === 'delta') text += ev.text;
+    if (ev.type === 'fallback') fellBack.push(ev.reason);
+    if (ev.type === 'failed' && !text) throw new Error(ev.reason);
+  }
+  return { text, link, fellBack };
 }

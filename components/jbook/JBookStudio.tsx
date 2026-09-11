@@ -165,11 +165,15 @@ export default function JBookStudio({ funds, initialBooks, initialFund, lexicon,
       instruction: extra ?? instruction,
       current: section.body.startsWith('[') ? '' : section.body });
     setBusy(null);
-    if (!r.ok) { setMsg({ kind: 'err', text: r.error ?? 'the model could not be reached' }); return; }
+    if (!r.ok) { setMsg({ kind: 'err', text: r.error ?? 'no model in the chain could answer' }); return; }
     setBody(section.key, r.text.trim());
-    setMsg({ kind: 'ok', text: `${section.title} drafted by ${r.model}`
-      + `${r.blocking ? ` — ${r.blocking} phrase(s) the screen refuses are in it` : ''}. `
-      + 'Read it before you keep it.' });
+    setMsg({ kind: r.isLocal === false ? 'info' : 'ok',
+      text: `${section.title} drafted by ${r.model}`
+        + `${r.isLocal === false
+            ? ' — the commercial fallback, not the tuned local model' : ''}`
+        + `${r.fellBack?.length ? ` (${r.fellBack.join('; ')})` : ''}`
+        + `${r.blocking ? ` — ${r.blocking} phrase(s) the screen refuses are in it` : ''}. `
+        + 'Read it before you keep it.' });
   }
 
   const docKey = useMemo(() => (book && draft
@@ -461,7 +465,7 @@ export default function JBookStudio({ funds, initialBooks, initialFund, lexicon,
                       <div className="flex flex-wrap gap-2 mt-2">
                         <button className={BTN2} disabled={!llmOnline || !token || busy === `compose:${s.key}`}
                           onClick={() => compose(s)}
-                          title={!llmOnline ? 'The local model server is not reachable'
+                          title={!llmOnline ? 'No model in the chain is answering'
                             : !token ? 'An authoring token is needed' : 'Draft this section on the local model'}>
                           {busy === `compose:${s.key}` ? 'drafting…' : 'Draft on the local model'}
                         </button>

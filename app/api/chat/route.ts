@@ -13,7 +13,7 @@
  * This route never logs a prompt or a completion. See lib/llm.ts.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { llmStatus, llmChatStream, pickModel, llmConfigured, type LlmMessage } from '@/lib/llm';
+import { llmStatus, llmChainStream, llmConfigured, type LlmMessage } from '@/lib/llm';
 import { buildAskContext } from '@/lib/ask';
 
 export const runtime = 'nodejs';
@@ -47,12 +47,11 @@ async function cachedStatus(maxAgeMs = 20_000) {
 
 export async function GET() {
   const status = await cachedStatus();
-  // The hostname stays server-side. This is a public site and the model server
-  // is somebody's machine behind a tunnel: publishing where it is invites
-  // traffic that has nothing to do with this page. What a visitor needs is
-  // whether it is answering and what it can answer with.
-  const { host, ...safe } = status;
-  return NextResponse.json(safe, { headers: { 'Cache-Control': 'no-store' } });
+  // No hostname and no key ever reach the browser. This is a public site and the
+  // first two links are somebody's own machine behind a funnel: publishing where
+  // it is invites traffic that has nothing to do with this page. What a visitor
+  // needs is which links exist, which one is answering, and why the others are not.
+  return NextResponse.json(status, { headers: { 'Cache-Control': 'no-store' } });
 }
 
 function sse(event: string, data: unknown): Uint8Array {
@@ -66,7 +65,7 @@ export async function POST(req: NextRequest) {
       { status: 429, headers: { 'Retry-After': '60' } });
   }
 
-  let body: { messages?: { role: string; content: string }[]; model?: string };
+  let body: { messages?: { role: string; content: string }[]; link?: string };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: 'body must be JSON' }, { status: 400 }); }
 
@@ -83,18 +82,14 @@ export async function POST(req: NextRequest) {
 
   if (!llmConfigured()) {
     return NextResponse.json({
-      error: 'No model server is configured for this deployment, so the chat cannot answer. '
+      error: 'No model is configured for this deployment, so the chat cannot answer. '
         + 'Everything else on the site works; the search on /regulation is the retrieval half '
         + 'of this feature and needs no model.' }, { status: 503 });
   }
   const status = await cachedStatus(5_000);
   if (!status.online) {
-    return NextResponse.json({ error: status.reason ?? 'The model server is not reachable.' },
-      { status: 503 });
-  }
-  const model = pickModel(body.model, status);
-  if (!model) {
-    return NextResponse.json({ error: 'The model server has no models loaded.' }, { status: 503 });
+    return NextResponse.json({ error: status.reason ?? 'No model in the chain is answering.',
+      links: status.links }, { status: 503 });
   }
 
   const { system, context, sources } = await buildAskContext(question);
@@ -106,19 +101,31 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      controller.enqueue(sse('sources', { sources, model, retrieved: sources.length }));
-      const started = Date.now();
+      controller.enqueue(sse('sources', { sources, retrieved: sources.length }));
       try {
-        for await (const part of llmChatStream(messages, { model })) {
-          if (part.delta) controller.enqueue(sse('delta', { t: part.delta }));
-          if (part.done) controller.enqueue(sse('done', { ms: Date.now() - started, model }));
+        for await (const ev of llmChainStream(messages, { only: body.link })) {
+          // Which link is answering is sent as it happens, not at the end: an
+          // answer from the commercial fallback is a different artifact from one
+          // by the tuned local model, and a reader has to be able to tell while
+          // they are reading it rather than afterwards.
+          if (ev.type === 'link') {
+            controller.enqueue(sse('link', { id: ev.link.id, label: ev.link.label,
+              isLocal: ev.link.isLocal }));
+          }
+          if (ev.type === 'fallback') {
+            controller.enqueue(sse('fallback', { from: ev.from.id, label: ev.from.label,
+              reason: ev.reason }));
+          }
+          if (ev.type === 'delta') controller.enqueue(sse('delta', { t: ev.text }));
+          if (ev.type === 'done') {
+            controller.enqueue(sse('done', { ms: ev.ms, id: ev.link.id, label: ev.link.label,
+              isLocal: ev.link.isLocal }));
+          }
+          if (ev.type === 'failed') controller.enqueue(sse('error', { error: ev.reason }));
         }
-      } catch (e) {
-        // The status, never the body: see lib/llm.ts.
+      } catch {
         controller.enqueue(sse('error', {
-          error: (e as Error).message.includes('answered')
-            ? `The model server ${(e as Error).message}.`
-            : 'The model server stopped answering part-way through.' }));
+          error: 'The model chain stopped answering part-way through.' }));
       } finally {
         controller.close();
       }

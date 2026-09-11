@@ -17,7 +17,7 @@ import {
   getBookExemplars, getLatestPbYear,
 } from '@/lib/jbook';
 import { buildDraft, readiness, defaultPbYear, type Draft } from '@/lib/jbook-draft';
-import { llmStatus, llmChat, pickModel, llmConfigured } from '@/lib/llm';
+import { llmStatus, llmChat, llmConfigured } from '@/lib/llm';
 import { docxParagraphs, splitIntoSections } from '@/lib/docx-read';
 
 export const runtime = 'nodejs';
@@ -151,17 +151,15 @@ export async function POST(req: NextRequest) {
       case 'compose': {
         if (!llmConfigured()) {
           return NextResponse.json({
-            error: 'No model server is configured for this deployment, so nothing can be drafted '
-              + 'for you. The scaffold, the word bands and the published examples do not need one.',
+            error: 'No model is configured for this deployment, so nothing can be drafted for '
+              + 'you. The scaffold, the word bands and the published examples do not need one.',
           }, { status: 503 });
         }
         const status = await llmStatus();
         if (!status.online) {
-          return NextResponse.json({ error: status.reason ?? 'The model server is not reachable.' },
-            { status: 503 });
+          return NextResponse.json({ error: status.reason ?? 'No model in the chain is answering.',
+            links: status.links }, { status: 503 });
         }
-        const model = pickModel(body.model, status);
-        if (!model) return NextResponse.json({ error: 'no model available' }, { status: 503 });
 
         const key = String(body.bookKey ?? '');
         const title = String(body.title ?? '');
@@ -197,15 +195,20 @@ export async function POST(req: NextRequest) {
             + forbidden + '. Return the section text only, with no heading and no commentary.',
         ].filter(Boolean).join('\n\n');
 
-        const text = await llmChat([
+        const { text, link, fellBack } = await llmChat([
           { role: 'system', content: 'You draft United States Department of War budget'
             + ' justification narrative. You write in the register of the published books:'
             + ' plain, declarative, specific, no marketing language. You never invent a figure.' },
           { role: 'user', content: prompt },
-        ], { model, temperature: 0.3 });
+        ], { only: body.link, temperature: 0.3 });
 
+        // The model's own output is screened before it is handed back. A model
+        // that has read every justification book has also read every PBD
+        // reference in them, and the screen is the reason one cannot reach a
+        // page bound for Congress through this feature.
         const hits = screen([{ letter: title, body: text }], lex);
-        return NextResponse.json({ text, model, hits,
+        return NextResponse.json({ text, model: link?.label ?? null,
+          isLocal: link?.isLocal ?? null, fellBack, hits,
           blocking: hits.filter((h) => h.severity === 'block').length });
       }
       /** An edited .docx, brought back as a new version. */

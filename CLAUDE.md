@@ -428,22 +428,44 @@ model is instructed to write a placeholder rather than a number it was not
 given; and the readiness check BLOCKS a save on a placeholder left behind. A
 blank is obviously unfinished, a fabricated figure survives review.
 
-### The chat, and the machine it talks to
+### The chat, and the model chain behind it
 
-The landing page carries a chat backed by the local models on the Mac Studio.
-Vercel cannot reach a home network, so the site talks to whatever public
-hostname fronts that machine (`LLM_BASE_URL`, with `LLM_API_KEY` or a Cloudflare
-Access service token). `lib/llm.ts` is the only module that knows how.
+The landing page carries a chat. Behind it is a **chain of three models, tried in
+order and never upward**: the big local model on the Mac Studio, the smaller one
+beside it, then a commercial model over the public internet. `lib/llm.ts` is the
+only module that knows how any of them speak (Ollama's `/api/chat`, or an
+OpenAI-compatible `/chat/completions` for the third). `docs/LOCAL-LLM-SETUP.md`
+is the runbook for the machine end.
 
-- **Nothing is logged** — not a prompt, not a completion, not a key. The footer
-  says no controlled unclassified information transits this site; a `console.log`
-  of a question in a Vercel function would make that false. Errors report the
-  STATUS, never the body. The model server's hostname is not published to the
-  browser either.
-- **The model is chosen from the server's own tag list.** Ollama accepts a name
-  it does not have and starts pulling gigabytes over somebody's home connection.
-- **Offline is a normal state.** The Mac sleeps. The page says so and keeps
-  working; `/regulation` is the retrieval half and needs no model.
+- **Every answer names the model that produced it.** An answer from the
+  commercial fallback is not the same artifact as one from the tuned local model
+  — it has not read the justification books — and a reader who cannot tell them
+  apart is being misled about where the sentence came from. The page prints the
+  link that answered, and the reason for every fallback, as they happen.
+- **Fallback happens before the first token, never after it.** Once a link has
+  emitted text the reader is already reading it; restarting on a second model
+  would rewrite a paragraph under their eyes. A failure after the first token is
+  reported as a truncated answer, which is what it is.
+- **A local model is used only if the server says it holds the tag.** Ollama
+  accepts a tag it does not have and starts pulling gigabytes over somebody's
+  home connection, so `/api/tags` is checked first and a missing tag moves the
+  chain down rather than starting a download.
+- **Nothing is logged** — not a prompt, not a completion, not a key, by the site
+  or by the proxy. The footer says no controlled unclassified information
+  transits this site; a `console.log` of a question in a Vercel function would
+  make that false. Errors report the STATUS, never the body, and neither the
+  funnel hostname nor any key reaches the browser.
+- **The perimeter is `scripts/llm_funnel_proxy.js`.** Tailscale Funnel puts the
+  port on the public internet and Ollama has no authentication, so the funnel
+  points at the proxy, which checks the shared secret, allows tag-listing and
+  chat, and answers 404 to everything else — `/api/pull` on an open endpoint is
+  a stranger filling the disk. Never funnel straight to 11434.
+- **What the model writes is screened.** A model trained on the books has read
+  every PBD reference in them; `/api/jbook` action `compose` runs the forbidden
+  lexicon over the model's own output before it reaches the composer.
+- **Offline is a normal state.** The Mac sleeps. The page says which link is
+  down and why, and keeps working; `/regulation` is the retrieval half and needs
+  no model at all.
 - **Retrieval is shared.** `lib/knowledge-index.ts` holds the BM25 scoring that
   `/regulation` and the chat both call — two implementations would drift, and
   the day they disagreed the two would cite different passages for one question.

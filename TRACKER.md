@@ -63,21 +63,32 @@ timeliness attended to, and the draft editable, uploadable and revisable in plac
   placeholder left in, and a lexicon phrase all BLOCK; length outside the book's
   own band and a missing schedule where the book carries one are warnings. Every
   finding names the measurement behind it.
-- [x] **The landing-page chat.** `lib/llm.ts` (Ollama over a tunnel, Bearer or
-  Cloudflare Access), `/api/chat` streaming SSE with **sources sent first**,
-  `lib/ask.ts` retrieving definitions, books and skeleton rows beside the wiki, and
-  `lib/knowledge-index.ts` extracted so `/regulation` and the chat share one BM25.
-  Nothing is logged, the host is not published, the model is checked against the
-  server's own tag list, and offline reads as a note rather than a failure.
+- [x] **The landing-page chat, on a chain of three models.** Local qwen3.8 →
+  local qwen3.6 → a commercial model, tried in that order and never upward.
+  `lib/llm.ts` speaks both Ollama and OpenAI-compatible; `/api/chat` streams SSE
+  with **sources first** and `link` / `fallback` / `done` events, so the page names
+  the model that answered and why anything was passed over. `lib/ask.ts` retrieves
+  definitions, books and skeleton rows beside the wiki; `lib/knowledge-index.ts`
+  extracted so `/regulation` and the chat share one BM25.
+- [x] **Fallback before the first token, never after it** — a failure mid-answer is
+  reported as a truncation rather than silently rewritten by another model.
+- [x] **`scripts/llm_funnel_proxy.js`** is the perimeter in front of Ollama:
+  shared secret on either header, an allowlist of two paths, 404 to `/api/pull` and
+  everything else, no prompt text in its log. Tested: 401 unauthenticated, 200 on
+  both header styles, 404 on pull/delete/wrong-method.
+- [x] **`docs/LOCAL-LLM-SETUP.md`** — the step-by-step for the Mac end: tags,
+  secret, proxy, launchd, `tailscale funnel --bg --https=8443`, the Gemini
+  OpenAI-compatible endpoint, the environment, and how to verify each link.
 
 ### Open after this pass
 
 - [ ] **Neon has not been migrated or loaded.** `npm run migrate` then
   `npm run refresh` on the Mac, then push. The build prerenders against the live
   database, so pushing first fails the build.
-- [ ] **`LLM_BASE_URL` / `LLM_API_KEY` are not set** in `.env.local` or Vercel, so
-  the chat renders offline and says so. The tunnel in front of Ollama is the
-  remaining piece.
+- [ ] **The chain's environment is not set** in `.env.local` or Vercel
+  (`LOCAL_LLM_FUNNEL_URL`, `LOCAL_LLM_SHARED_SECRET`, the two model tags, the cloud
+  key), so the chat renders offline and says which link is missing. The funnel
+  points at Ollama and needs to point at `scripts/llm_funnel_proxy.js` instead.
 - [ ] **Service books are not in the archive.** Army, Navy, Air Force and Marine
   Corps books appear only as a few FY2003–FY2005 O&M volumes. Collecting them from
   the service comptroller sites is a collector change, not an app change.
