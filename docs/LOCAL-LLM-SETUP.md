@@ -1,136 +1,86 @@
-# The model chain — setting it up by hand
+# The model chain — how datamatter reaches the Mac Studio
 
-What this builds:
+> **Read this before touching `tailscale funnel`.** An earlier version of this
+> file told you to take port 8443 off the funnel and point it somewhere new.
+> That port is `agent-server`'s, and turning it off took `aibrainbank` and
+> DeepTutor's LLM route down with it. Nothing in this file changes the funnel's
+> existing allocation, and nothing should.
+
+## What is already on this machine
+
+Confirmed in `apps/deeptutormac/deeptutor/DEEPTUTOR_MAC_HOSTING_SOP_QA.md` and
+`apps/deeptutormac/MAC_DEEPTUTOR_FUNNEL_SETUP.md`. Tailscale Funnel allows
+exactly three public ports per tailnet and all three are spoken for:
+
+| Funnel port | Service | Local port | Authenticates with | API shape |
+|---|---|---|---|---|
+| 443 | `gateway.py` | 8787 | shared secret + model allow-list | `/health`, `/v1/chat/completions` (buffered, not streamed) |
+| 8443 | `agent-server` | 8788 | hashed keys with scopes (`keys.db`) | `/health`, `/v1/models`, `/v1/chat/completions` (streams) |
+| 10000 | DeepTutor backend | 8001 | its own | — |
+
+Both LLM paths are **OpenAI-compatible**. Neither is raw Ollama, and Ollama
+itself is never exposed. datamatter talks to **agent-server on 8443**, because
+it streams and it publishes a model list, so a wrong tag is a named error
+rather than a silent failure.
 
 ```
   datamatter (Vercel)
-        |
-        |  https, shared secret in the Authorization header
+        |  https, Bearer <agent-server key>, POST /v1/chat/completions
         v
-  llmpowerhouses.taila4b91f.ts.net:8443        Tailscale Funnel (public)
-        |
+  llmpowerhouses.taila4b91f.ts.net:8443        Tailscale Funnel (--bg, survives reboots)
         v
-  127.0.0.1:11435   scripts/llm_funnel_proxy.js   checks the secret, allows two paths
-        |
-        v
-  127.0.0.1:11434   Ollama            qwen3.8  -> first
-                                      qwen3.6  -> second
+  127.0.0.1:8788   agent-server        model: qwen3.8:27b-q8_0   -> first
+                                       model: qwen3.6:35b-a3b    -> second
         ⋮
-  generativelanguage.googleapis.com   gemini   -> last, and only if the two above are silent
+  generativelanguage.googleapis.com    gemini -> last, only if both above are silent
 ```
 
-The order is fixed in code: **local primary → local secondary → commercial**. The chain
-only moves down it, never up, and the page names the model that answered every time —
-an answer from the commercial model is a different artifact from one by the tuned local
-model, and a reader has to be able to tell.
+## If the funnel entry is missing
 
----
-
-## 1. Get the two local tags exactly right
+`--bg` entries persist across reboots; they disappear only if something removed
+them. Restore just the one port, without touching 443 or 10000:
 
 ```bash
-ollama list
+tailscale funnel --bg --https=8443 http://127.0.0.1:8788
+tailscale funnel status          # expect 443, 8443 and 10000 all listed
 ```
 
-Copy the **NAME** column exactly — `qwen3.8:27b-q8` is a different string from
-`qwen3.8 27b q8`, and the site checks the tag against the server's own list before it
-sends anything. A tag the server does not hold is a reason to move down the chain, never
-a reason to start a multi-gigabyte pull.
-
-While you are there, keep the big model resident so the first question of the day is not
-a cold load:
+Check agent-server itself is up. **401 is the healthy answer** — the server is
+there and demanding a key:
 
 ```bash
-launchctl setenv OLLAMA_KEEP_ALIVE 30m     # then restart Ollama
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8788/health    # 401 = up, 000 = down
 ```
 
-## 2. A secret, and something that checks it
+## 1 — a key for datamatter
 
-Ollama has no authentication. Funnel puts the port on the public internet. So nothing
-should ever funnel straight to 11434.
+Give the site its own key rather than reusing another app's, so it can be
+revoked on its own. `chat` scope only: datamatter does its own retrieval
+against Neon and the knowledge index, so the agent loop's tools would only
+duplicate that work and slow the answer down.
 
 ```bash
-openssl rand -base64 32        # this is LOCAL_LLM_SHARED_SECRET; keep it out of git
+cd /Volumes/AI_DATA/apps/agent-server
+python3 keys_admin.py create datamatter --scope chat
 ```
 
-Run the proxy that ships with this repo:
+Copy the raw key it prints once. It is stored hashed and cannot be read back.
+
+## 2 — the exact model tags
 
 ```bash
-cd /Volumes/AI_DATA/git/datamatter
-LLM_SHARED_SECRET='<the secret>' node scripts/llm_funnel_proxy.js
-# llm funnel proxy on 127.0.0.1:11435 -> http://127.0.0.1:11434
-# allowed: /api/tags, /api/chat, /api/show, /v1/models, /v1/chat/completions
+curl -s -H "Authorization: Bearer <the key>" \
+  https://llmpowerhouses.taila4b91f.ts.net:8443/v1/models | python3 -m json.tool
 ```
 
-It checks the secret on `Authorization: Bearer` **or** `X-LLM-Secret` (the site sends
-both), allows only tag-listing and chat, and answers **404** to everything else —
-`/api/pull`, `/api/delete`, `/api/create` are how an open model server becomes somebody
-else's disk and somebody else's GPU. It logs method, path, status and duration, and no
-prompt text.
+That list is what the site checks its configured tags against, and it carries
+`loaded` and `size_gb` per model — a tag that is not resident pays a cold load
+of tens of seconds on the first question. As of this writing the two to use are
+`qwen3.8:27b-q8_0` and `qwen3.6:35b-a3b`.
 
-Verify locally before exposing anything:
+## 3 — the commercial fallback
 
-```bash
-S='<the secret>'
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:11435/api/tags                       # 401
-curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $S" http://127.0.0.1:11435/api/tags   # 200
-curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $S" \
-     -d '{}' http://127.0.0.1:11435/api/pull                                                   # 404
-```
-
-To keep it running across reboots, `~/Library/LaunchAgents/com.datamatter.llmproxy.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.datamatter.llmproxy</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/local/bin/node</string>
-    <string>/Volumes/AI_DATA/git/datamatter/scripts/llm_funnel_proxy.js</string>
-  </array>
-  <key>EnvironmentVariables</key>
-  <dict><key>LLM_SHARED_SECRET</key><string>THE-SECRET</string></dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardErrorPath</key><string>/tmp/llmproxy.err</string>
-</dict></plist>
-```
-
-```bash
-launchctl load ~/Library/LaunchAgents/com.datamatter.llmproxy.plist
-```
-
-(`which node` first — the path above must be the real one.)
-
-## 3. Point the funnel at the proxy, not at Ollama
-
-```bash
-tailscale funnel --bg --https=8443 http://127.0.0.1:11435
-tailscale funnel status
-```
-
-Funnel allows only ports 443, 8443 and 10000; 8443 is what the site is configured for.
-`--bg` keeps it up across reboots. To take it down:
-
-```bash
-tailscale funnel --https=8443 off
-```
-
-Then check it from **off** your network — a phone on cellular is the honest test:
-
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://llmpowerhouses.taila4b91f.ts.net:8443/api/tags   # 401
-curl -s -H "Authorization: Bearer $S" https://llmpowerhouses.taila4b91f.ts.net:8443/api/tags       # your tags
-```
-
-A 401 from the open internet is the result you want: the port is reachable and useless
-without the secret.
-
-## 4. The commercial fallback
-
-A key from Google AI Studio, and the OpenAI-compatible endpoint:
+A Gemini key from AI Studio, on the OpenAI-compatible endpoint:
 
 ```bash
 curl -s https://generativelanguage.googleapis.com/v1beta/openai/chat/completions \
@@ -139,51 +89,57 @@ curl -s https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
   | head -c 300
 ```
 
-If that returns a completion, the model id is right. Any other OpenAI-compatible
-provider works the same way — set `CLOUD_LLM_BASE_URL` to its base and the model id to
-whatever it calls the model.
+## 4 — the environment
 
-## 5. Environment
-
-Same six values in `.env.local` (for `npm run dev` and `npm run verify`) and in Vercel →
-Settings → Environment Variables (Production and Preview):
+The same values in `.env.local` and in Vercel → Settings → Environment
+Variables (Production and Preview):
 
 ```
 LOCAL_LLM_FUNNEL_URL=https://llmpowerhouses.taila4b91f.ts.net:8443
-LOCAL_LLM_SHARED_SECRET=<the secret from step 2>
-LOCAL_LLM_MODEL_PRIMARY=<exact tag of qwen3.8, from step 1>
-LOCAL_LLM_MODEL_SECONDARY=<exact tag of qwen3.6, from step 1>
+LOCAL_LLM_API_KEY=<the agent-server key from step 1>
+LOCAL_LLM_MODEL_PRIMARY=qwen3.8:27b-q8_0
+LOCAL_LLM_MODEL_SECONDARY=qwen3.6:35b-a3b
+LOCAL_LLM_TIMEOUT_MS=170000
 
 CLOUD_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
 CLOUD_LLM_MODEL=gemini-3.5-flash-lite
-CLOUD_LLM_API_KEY=<the key from step 4>
+CLOUD_LLM_API_KEY=<the Gemini key>
 
 JBOOK_TOKEN=<a long random string>      # without this, authoring stays closed
 ```
 
-Nothing here is read at build time, so a change to any of them needs a redeploy only to
-reach the running functions — `vercel env add` then redeploy, or set them in the
-dashboard and redeploy.
+`/v1` is appended to `LOCAL_LLM_FUNNEL_URL` automatically; writing it either way
+works. `LOCAL_LLM_SHARED_SECRET` is still read as a fallback for the key, so an
+older configuration keeps working.
 
-Optional: `LLM_TIMEOUT_MS` (local, default 120000), `LLM_CLOUD_TIMEOUT_MS` (default
-60000), `LLM_HEALTH_TIMEOUT_MS` (default 6000).
+**Pointing at `gateway.py` on 443 instead** works too — set
+`LOCAL_LLM_FUNNEL_URL=https://llmpowerhouses.taila4b91f.ts.net` and use the
+gateway's shared secret. Two differences worth knowing: it publishes no model
+list (so a wrong tag surfaces on the first question rather than in the status
+check), and it buffers the whole completion before returning it, so answers
+arrive in one block rather than streaming.
 
-## 6. Verify the chain, from the site
+**Pointing at raw Ollama** — `LOCAL_LLM_API=ollama` switches the local links
+back to `/api/tags` and `/api/chat`. Nothing on this Mac is set up that way, and
+exposing 11434 through a funnel without something in front of it would be
+unauthenticated.
+
+## 5 — verify from the site
 
 ```bash
 curl -s https://datamatter.vercel.app/api/chat | python3 -m json.tool
 ```
 
-Every link reports its own state:
+Each link reports its own state:
 
 | state | means |
 |---|---|
 | `ready` | answering |
-| `model-missing` | the server answered but does not hold that tag — check step 1 |
-| `refused` | the secret was rejected — the site and the proxy disagree |
-| `unreachable` | asleep, funnel down, or the proxy is not running |
+| `model-missing` | the server answered and does not offer that tag — compare with step 2 |
+| `refused` | the key was rejected |
+| `unreachable` | asleep, funnel entry missing, or the service is not running |
 
-Then ask something and watch which link answers:
+Then watch which link answers:
 
 ```bash
 curl -sN -X POST https://datamatter.vercel.app/api/chat \
@@ -192,27 +148,21 @@ curl -sN -X POST https://datamatter.vercel.app/api/chat \
   | head -20
 ```
 
-`event: link` names the model that started; `event: fallback` says why a link was passed
-over; `event: done` names the model that finished. The page shows the same three things.
-
-## 7. What you will see on the page
-
-The chain strip under the chat shows all three links and their states, and the answer
-carries a line saying which model produced it — gold for a local model, amber for the
-commercial one. A fallback prints its reason above the answer ("the server is answering
-but does not hold qwen3.8:27b-q8 — moved down the chain").
+`event: link` names the model that started, `event: fallback` says why one was
+passed over, `event: done` names the model that finished. The page shows the
+same three things.
 
 ## Things worth knowing
 
-- **Fallback happens before the first token, never after it.** Once a model has started
-  writing, a failure is reported as a truncated answer rather than being silently
-  replaced by a different model's text mid-paragraph.
-- **Vercel functions stop at 120 seconds** (`maxDuration` in `app/api/chat/route.ts`). A
-  27B model on a long question with a retrieval block can approach that. If answers
-  truncate, make the 3.6 the primary or raise nothing and accept shorter answers — the
-  cloud link is not a fix for slowness, it is a fix for silence.
-- **The secret is the whole perimeter.** Rotate it by changing it in both places at
-  once; the site sends it on every request and holds nothing.
-- **No prompt, completion or key is ever logged** — not by the site, not by the proxy.
-  The footer of datamatter says no controlled unclassified information transits it, and
-  that has to stay true of the model path too.
+- **Fallback happens before the first token, never after it.** Once a model has
+  started writing, a failure is reported as a truncated answer rather than
+  being silently replaced by a different model's text mid-paragraph.
+- **Vercel functions stop at 120 seconds** (`maxDuration` in
+  `app/api/chat/route.ts`), and agent-server's own upstream timeout is 170s. The
+  site will give up first on a very slow answer. The cloud link is not a fix for
+  slowness — it only answers when the local links are silent.
+- **A cold model costs tens of seconds** on the first question. `/v1/models`
+  reports which are resident.
+- **No prompt, completion or key is ever logged** by the site. The footer of
+  datamatter says no controlled unclassified information transits it, and that
+  has to stay true of the model path too.

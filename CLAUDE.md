@@ -446,20 +446,31 @@ is the runbook for the machine end.
   emitted text the reader is already reading it; restarting on a second model
   would rewrite a paragraph under their eyes. A failure after the first token is
   reported as a truncated answer, which is what it is.
-- **A local model is used only if the server says it holds the tag.** Ollama
-  accepts a tag it does not have and starts pulling gigabytes over somebody's
-  home connection, so `/api/tags` is checked first and a missing tag moves the
-  chain down rather than starting a download.
+- **The far end is NOT raw Ollama, and assuming it was cost a day.** The Mac
+  fronts two OpenAI-compatible servers and exposes Ollama to nothing:
+  `gateway.py` on funnel :443 (shared secret, model allow-list, buffered
+  responses) and `agent-server` on funnel :8443 (hashed keys with scopes,
+  `/v1/models`, real streaming). datamatter uses **agent-server on 8443**, with
+  its own `chat`-scope key. `LOCAL_LLM_API=ollama` still exists for a
+  deployment that really does expose Ollama; nothing here may assume it.
+- **Never reconfigure a funnel port.** Tailscale Funnel allows exactly three per
+  tailnet and all three are allocated — 443 `gateway.py`, 8443 `agent-server`,
+  10000 DeepTutor. Taking one off to make room for something new takes another
+  product offline; it is documented in
+  `apps/deeptutormac/deeptutor/DEEPTUTOR_MAC_HOSTING_SOP_QA.md`, and this is
+  exactly how `aibrainbank` went dark on 2026-09-11.
+- **A model is used only if the server offers it.** `/v1/models` is checked
+  first, so a wrong tag is a named `model-missing` state rather than a silent
+  failure — or, against raw Ollama, rather than a multi-gigabyte pull.
 - **Nothing is logged** — not a prompt, not a completion, not a key, by the site
   or by the proxy. The footer says no controlled unclassified information
   transits this site; a `console.log` of a question in a Vercel function would
   make that false. Errors report the STATUS, never the body, and neither the
   funnel hostname nor any key reaches the browser.
-- **The perimeter is `scripts/llm_funnel_proxy.js`.** Tailscale Funnel puts the
-  port on the public internet and Ollama has no authentication, so the funnel
-  points at the proxy, which checks the shared secret, allows tag-listing and
-  chat, and answers 404 to everything else — `/api/pull` on an open endpoint is
-  a stranger filling the disk. Never funnel straight to 11434.
+- **The perimeter already existed.** Both servers above authenticate, so this
+  repo adds no proxy of its own; one was written and deleted the same day
+  because it duplicated `gateway.py`. Whatever is exposed must authenticate —
+  never funnel straight to 11434.
 - **What the model writes is screened.** A model trained on the books has read
   every PBD reference in them; `/api/jbook` action `compose` runs the forbidden
   lexicon over the model's own output before it reaches the composer.

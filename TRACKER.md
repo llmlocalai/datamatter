@@ -72,10 +72,17 @@ timeliness attended to, and the draft editable, uploadable and revisable in plac
   extracted so `/regulation` and the chat share one BM25.
 - [x] **Fallback before the first token, never after it** — a failure mid-answer is
   reported as a truncation rather than silently rewritten by another model.
-- [x] **`scripts/llm_funnel_proxy.js`** is the perimeter in front of Ollama:
-  shared secret on either header, an allowlist of two paths, 404 to `/api/pull` and
-  everything else, no prompt text in its log. Tested: 401 unauthenticated, 200 on
-  both header styles, 404 on pull/delete/wrong-method.
+- [x] **Corrected the same day: the far end is not raw Ollama.** The first cut
+  called `/api/tags` and `/api/chat` and could never have connected — the Mac
+  fronts `gateway.py` (:443) and `agent-server` (:8443), both OpenAI-compatible,
+  and exposes Ollama to nothing. The local links now speak `/v1` to agent-server
+  with a `chat`-scope key; `LOCAL_LLM_API=ollama` keeps the raw path available for
+  a deployment that really has one. A proxy written for that wrong assumption was
+  deleted rather than kept — `gateway.py` had already solved it.
+- [x] **Funnel ports are allocated and must not be reassigned** — 443 gateway.py,
+  8443 agent-server, 10000 DeepTutor, three per tailnet and all spoken for.
+  Telling the user to free 8443 took `aibrainbank` offline; the restore is
+  `tailscale funnel --bg --https=8443 http://127.0.0.1:8788`.
 - [x] **`docs/LOCAL-LLM-SETUP.md`** — the step-by-step for the Mac end: tags,
   secret, proxy, launchd, `tailscale funnel --bg --https=8443`, the Gemini
   OpenAI-compatible endpoint, the environment, and how to verify each link.
@@ -86,9 +93,9 @@ timeliness attended to, and the draft editable, uploadable and revisable in plac
   `npm run refresh` on the Mac, then push. The build prerenders against the live
   database, so pushing first fails the build.
 - [ ] **The chain's environment is not set** in `.env.local` or Vercel
-  (`LOCAL_LLM_FUNNEL_URL`, `LOCAL_LLM_SHARED_SECRET`, the two model tags, the cloud
-  key), so the chat renders offline and says which link is missing. The funnel
-  points at Ollama and needs to point at `scripts/llm_funnel_proxy.js` instead.
+  (`LOCAL_LLM_FUNNEL_URL`, `LOCAL_LLM_API_KEY` from `keys_admin.py create
+  datamatter --scope chat`, the two model tags, the cloud key), so the chat
+  renders offline and names which link is missing.
 - [ ] **Service books are not in the archive.** Army, Navy, Air Force and Marine
   Corps books appear only as a few FY2003–FY2005 O&M volumes. Collecting them from
   the service comptroller sites is a collector change, not an app change.

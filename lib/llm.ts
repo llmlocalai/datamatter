@@ -68,24 +68,35 @@ export interface LlmStatus {
 
 export interface LlmMessage { role: 'system' | 'user' | 'assistant'; content: string }
 
-const LOCAL_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS ?? 120_000);
+const LOCAL_TIMEOUT = Number(process.env.LOCAL_LLM_TIMEOUT_MS ?? process.env.LLM_TIMEOUT_MS ?? 120_000);
 const CLOUD_TIMEOUT = Number(process.env.LLM_CLOUD_TIMEOUT_MS ?? 60_000);
 const HEALTH_TIMEOUT = Number(process.env.LLM_HEALTH_TIMEOUT_MS ?? 6_000);
 
 const trim = (s: string) => s.replace(/\/+$/, '');
 
 /**
- * The shared secret goes on both a Bearer header and an X-LLM-Secret header.
+ * What sits behind the funnel is NOT a raw model server.
  *
- * Tailscale Funnel puts the machine on the public internet and Ollama has no
- * authentication of its own, so SOMETHING in front of it has to check a secret.
- * Which header that something looks at depends on what is in front — a small
- * reverse proxy, Caddy's forward_auth, an OpenAI-compatible shim — so both are
- * sent rather than making the choice of proxy a code change here. Neither is
- * ever returned to a caller.
+ * The first cut of this module assumed Ollama's own API on the far end and
+ * called /api/tags and /api/chat. It was wrong about the machine: the funnel
+ * fronts an OpenAI-compatible server that already authenticates — `agent-server`
+ * on :8443 (hashed keys with scopes, /v1/models, streaming /v1/chat/completions)
+ * or `gateway.py` on :443 (a shared secret and a model allow-list in front of
+ * Ollama). Both speak /v1. Raw Ollama is still supported for a deployment that
+ * really does expose it, behind LOCAL_LLM_API=ollama, but it is not the default
+ * and nothing here should assume it.
+ */
+const LOCAL_API: LinkKind = (process.env.LOCAL_LLM_API === 'ollama') ? 'ollama' : 'openai';
+
+/**
+ * The credential goes on a Bearer header, which is what both of those servers
+ * read. X-LLM-Secret rides along for any bespoke proxy that reads that instead;
+ * a server that does not know the header ignores it. Neither is ever returned
+ * to a caller, and neither is logged.
  */
 function localHeaders(): Record<string, string> {
-  const secret = process.env.LOCAL_LLM_SHARED_SECRET ?? process.env.LLM_API_KEY ?? '';
+  const secret = process.env.LOCAL_LLM_API_KEY ?? process.env.LOCAL_LLM_SHARED_SECRET
+    ?? process.env.LLM_API_KEY ?? '';
   const h: Record<string, string> = {};
   if (secret) {
     h.Authorization = `Bearer ${secret}`;
@@ -99,19 +110,39 @@ function localHeaders(): Record<string, string> {
   return h;
 }
 
+/**
+ * The base a link is called at.
+ *
+ * An OpenAI-compatible server is addressed at its /v1 root, and the funnel URL
+ * is usually written without it — so it is appended unless it is already there.
+ * Getting this wrong is invisible in configuration and fatal at request time,
+ * which is exactly the class of mistake that produced "not reachable" against a
+ * server that was answering perfectly well.
+ */
+function localBaseUrl(raw: string, kind: LinkKind): string {
+  const base = trim(raw);
+  if (kind !== 'openai') return base;
+  return /\/v1$/.test(base) ? base : `${base}/v1`;
+}
+
 /** The chain, in order, from the environment. Absent links are simply absent. */
 export function llmChain(): LlmLink[] {
   const chain: LlmLink[] = [];
   const localBase = process.env.LOCAL_LLM_FUNNEL_URL ?? process.env.LLM_BASE_URL ?? '';
   const primary = process.env.LOCAL_LLM_MODEL_PRIMARY ?? process.env.LLM_MODEL ?? '';
   const secondary = process.env.LOCAL_LLM_MODEL_SECONDARY ?? '';
+  // Both local links are the SAME server at the same URL, distinguished only by
+  // the model field — which is how the Mac's own router works: one Ollama
+  // instance, tags swapped per request, not a port per model.
   if (localBase && primary) {
-    chain.push({ id: 'local-primary', kind: 'ollama', label: primary, model: primary,
-      baseUrl: trim(localBase), isLocal: true, timeoutMs: LOCAL_TIMEOUT, headers: localHeaders() });
+    chain.push({ id: 'local-primary', kind: LOCAL_API, label: primary, model: primary,
+      baseUrl: localBaseUrl(localBase, LOCAL_API), isLocal: true,
+      timeoutMs: LOCAL_TIMEOUT, headers: localHeaders() });
   }
   if (localBase && secondary && secondary !== primary) {
-    chain.push({ id: 'local-secondary', kind: 'ollama', label: secondary, model: secondary,
-      baseUrl: trim(localBase), isLocal: true, timeoutMs: LOCAL_TIMEOUT, headers: localHeaders() });
+    chain.push({ id: 'local-secondary', kind: LOCAL_API, label: secondary, model: secondary,
+      baseUrl: localBaseUrl(localBase, LOCAL_API), isLocal: true,
+      timeoutMs: LOCAL_TIMEOUT, headers: localHeaders() });
   }
   const cloudKey = process.env.CLOUD_LLM_API_KEY ?? process.env.GEMINI_API_KEY
     ?? process.env.OPENAI_API_KEY ?? '';
@@ -176,19 +207,44 @@ async function probeOllama(link: LlmLink): Promise<LinkStatus> {
   }
 }
 
+/**
+ * Probe an OpenAI-compatible server.
+ *
+ * Three answers matter and they are genuinely different:
+ *   401/403  the credential is wrong — the server is fine, the config is not
+ *   200      it lists models, so the tag can be checked before anything is sent
+ *   404/405  it is answering but publishes no model list (gateway.py serves
+ *            only /health and /v1/chat/completions). That is not a failure and
+ *            must not read as one; the first real call decides.
+ */
 async function probeOpenAI(link: LlmLink): Promise<LinkStatus> {
   const base = { id: link.id, label: link.label, model: link.model, isLocal: link.isLocal };
   try {
     const res = await withTimeout(HEALTH_TIMEOUT, (signal) =>
       fetch(`${link.baseUrl}/models`, { headers: link.headers, signal, cache: 'no-store' }));
     if (res.status === 401 || res.status === 403) {
-      return { ...base, state: 'refused', detail: 'The API key was refused.' };
+      return { ...base, state: 'refused',
+        detail: link.isLocal
+          ? 'The local server refused this deployment\u2019s key.'
+          : 'The API key was refused.' };
     }
-    // A provider that does not implement /models is not a provider that cannot
-    // answer: it is reported ready and the first real call decides.
+    if (res.ok) {
+      const body = await res.json().catch(() => null) as { data?: { id?: string }[] } | null;
+      const have = (body?.data ?? []).map((m) => m.id ?? '').filter(Boolean);
+      if (have.length && !tagPresent(link.model, have)) {
+        return { ...base, state: 'model-missing', available: have.slice(0, 20),
+          detail: `The server is answering but does not offer ${link.model}.` };
+      }
+      return { ...base, state: 'ready', available: have.slice(0, 20) };
+    }
     return { ...base, state: 'ready' };
-  } catch {
-    return { ...base, state: 'unreachable', detail: 'The provider could not be reached.' };
+  } catch (e) {
+    return { ...base, state: 'unreachable',
+      detail: (e as Error).name === 'AbortError'
+        ? 'The server did not answer within six seconds — the machine is probably asleep.'
+        : link.isLocal
+          ? 'The local server could not be reached — check that the funnel still lists its port.'
+          : 'The provider could not be reached.' };
   }
 }
 
