@@ -1614,3 +1614,94 @@ export async function getSharedElements() {
       HAVING count(DISTINCT f.source_key) > 1
       ORDER BY count(DISTINCT f.source_key) DESC, f.field_name`);
 }
+
+// ------------------------------------------------- NFRs and material weaknesses
+/**
+ * The audit-risk record behind /nfr.
+ *
+ * One caution that belongs in the data layer rather than in page copy: none of
+ * this is an extracted Notice of Findings and Recommendations. The notices are
+ * not public documents. What the DoD OIG publishes each year is the COUNT of
+ * notices issued, reissued and closed, the per-entity tables behind those
+ * counts, and a roster of the Agency-Wide material weaknesses. The material
+ * weakness is therefore the finest grain these functions can return, and the
+ * ten-element object is built at that grain.
+ */
+export interface NfrYear {
+  fiscalYear: number; opinion: string;
+  nfrsIssued: number | null; nfrsNew: number | null;
+  nfrsReissued: number | null; nfrsClosed: number | null;
+  mwTotal: number | null; noncomplianceTotal: number | null; mwAgencyWide: number | null;
+  entityRowsPublished: boolean; rosterPublished: boolean;
+  citation: string; sourceUrl: string | null; note: string | null;
+}
+
+export async function getNfrYears() {
+  return query<NfrYear>(
+    `SELECT fiscal_year AS "fiscalYear", opinion,
+            nfrs_issued AS "nfrsIssued", nfrs_new AS "nfrsNew",
+            nfrs_reissued AS "nfrsReissued", nfrs_closed AS "nfrsClosed",
+            mw_total AS "mwTotal", noncompliance_total AS "noncomplianceTotal",
+            mw_agency_wide AS "mwAgencyWide",
+            entity_rows_published AS "entityRowsPublished",
+            roster_published AS "rosterPublished", citation, source_url AS "sourceUrl", note
+       FROM dm_nfr_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+      ORDER BY fiscal_year`);
+}
+
+/** Entity rows exist only for the years whose table foots to its own total. */
+export async function getNfrEntities(fiscalYear?: number) {
+  return query<{ fiscalYear: number; entity: string; mwCount: number | null;
+                 noncomplianceCount: number | null; nfrCount: number; citation: string }>(
+    `SELECT fiscal_year AS "fiscalYear", entity, mw_count AS "mwCount",
+            noncompliance_count AS "noncomplianceCount", nfr_count AS "nfrCount", citation
+       FROM dm_nfr_entity e JOIN dm_load l ON l.id = e.load_id AND l.is_current
+      WHERE ($1::int IS NULL OR fiscal_year = $1)
+      ORDER BY fiscal_year, sort_order`, [fiscalYear ?? null]);
+}
+
+/**
+ * The roster as each report printed it. mw_key is this site's pairing across
+ * years and printed_label is what the report actually called it that year; both
+ * are returned so a reader can reject the pairing without losing the count.
+ */
+export async function getNfrRoster() {
+  return query<{ fiscalYear: number; rank: number; mwKey: string;
+                 printedLabel: string; obstacle: string; citation: string }>(
+    `SELECT fiscal_year AS "fiscalYear", rank_in_report AS rank, mw_key AS "mwKey",
+            printed_label AS "printedLabel", obstacle, citation
+       FROM dm_nfr_mw m JOIN dm_load l ON l.id = m.load_id AND l.is_current
+      ORDER BY fiscal_year, rank_in_report`);
+}
+
+export interface NfrObject {
+  mwKey: string; label: string; obstacle: string;
+  firstRosterYear: number; lastRosterYear: number;
+  rosterYearsPresent: number; rosterYearsAvailable: number;
+  outcomeState: string; expectedRelationship: string; dataRequired: string;
+  coverage: 'testable' | 'partial' | 'absent'; coverageNote: string;
+}
+
+export async function getNfrObjects() {
+  return query<NfrObject>(
+    `SELECT mw_key AS "mwKey", label, obstacle,
+            first_roster_year AS "firstRosterYear", last_roster_year AS "lastRosterYear",
+            roster_years_present AS "rosterYearsPresent",
+            roster_years_available AS "rosterYearsAvailable",
+            outcome_state AS "outcomeState",
+            expected_relationship AS "expectedRelationship", data_required AS "dataRequired",
+            coverage, coverage_note AS "coverageNote"
+       FROM dm_nfr_object o JOIN dm_load l ON l.id = o.load_id AND l.is_current
+      ORDER BY sort_order`);
+}
+
+/** The ten elements. `basis` says reported or derived for every one of them. */
+export async function getNfrElements(mwKey?: string) {
+  return query<{ mwKey: string; elementNo: number; elementName: string;
+                 elementText: string; basis: 'reported' | 'derived'; citation: string }>(
+    `SELECT mw_key AS "mwKey", element_no AS "elementNo", element_name AS "elementName",
+            element_text AS "elementText", basis, citation
+       FROM dm_nfr_element e JOIN dm_load l ON l.id = e.load_id AND l.is_current
+      WHERE ($1::text IS NULL OR mw_key = $1)
+      ORDER BY mw_key, element_no`, [mwKey ?? null]);
+}

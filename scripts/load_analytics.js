@@ -1448,6 +1448,86 @@ const CONTROLS = {
               + 'out of every program year' : ''}.` };
   }),
 
+  // ------------------------------------------------------- NFRs (/nfr) ------
+  // These test the TRANSCRIPTION, which is the only thing that can be wrong in
+  // curated documentary data. Each report publishes both a per-entity table and
+  // its own Department total; a total its own rows do not foot to means the
+  // transcription is wrong, not that the Department disagrees with itself.
+  'NFR-01': async (c) => (await c.query(`
+    SELECT y.fiscal_year, y.nfrs_issued AS expected,
+           sum(e.nfr_count)::int AS observed, count(e.id)::int AS n
+      FROM dm_nfr_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+      LEFT JOIN dm_nfr_entity e ON e.load_id = y.load_id AND e.fiscal_year = y.fiscal_year
+     WHERE y.entity_rows_published
+     GROUP BY y.fiscal_year, y.nfrs_issued ORDER BY y.fiscal_year`)).rows.map((r) => ({
+    fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected, tolerance: 0,
+    status: Number(r.observed) === Number(r.expected) ? 'pass' : 'fail',
+    message: `FY${r.fiscal_year}: ${r.n} entity rows sum to ${Number(r.observed).toLocaleString()} `
+      + `against a published total of ${Number(r.expected).toLocaleString()}`
+      + (Number(r.observed) === Number(r.expected) ? '.' :
+         ` -- a difference of ${Math.abs(r.observed - r.expected).toLocaleString()}. `
+         + 'Withhold the year at entity grain until it foots.') })),
+
+  'NFR-02': async (c) => (await c.query(`
+    SELECT fiscal_year, nfrs_issued AS expected, (nfrs_new + nfrs_reissued)::int AS observed,
+           nfrs_new, nfrs_reissued
+      FROM dm_nfr_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+     WHERE nfrs_new IS NOT NULL AND nfrs_reissued IS NOT NULL ORDER BY fiscal_year`)).rows.map((r) => ({
+    fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected, tolerance: 0,
+    status: Number(r.observed) === Number(r.expected) ? 'pass' : 'fail',
+    message: `FY${r.fiscal_year}: ${Number(r.nfrs_new).toLocaleString()} new plus `
+      + `${Number(r.nfrs_reissued).toLocaleString()} reissued is `
+      + `${Number(r.observed).toLocaleString()} against ${Number(r.expected).toLocaleString()} issued.` })),
+
+  'NFR-03': async (c) => (await c.query(`
+    SELECT y.fiscal_year, y.mw_agency_wide AS expected, count(m.id)::int AS observed
+      FROM dm_nfr_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+      LEFT JOIN dm_nfr_mw m ON m.load_id = y.load_id AND m.fiscal_year = y.fiscal_year
+     WHERE y.roster_published
+     GROUP BY y.fiscal_year, y.mw_agency_wide ORDER BY y.fiscal_year`)).rows.map((r) => ({
+    fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected, tolerance: 0,
+    status: Number(r.observed) === Number(r.expected) ? 'pass' : 'fail',
+    message: `FY${r.fiscal_year}: the roster holds ${r.observed} material weaknesses against `
+      + `${r.expected} stated in the report.` })),
+
+  // No element may reach a page without a citation, and an object missing an
+  // element would render as a silent gap rather than as a gap that says so.
+  'NFR-04': async (c) => (await c.query(`
+    SELECT o.mw_key, count(e.id)::int AS observed,
+           count(e.id) FILTER (WHERE e.citation IS NULL OR btrim(e.citation) = '')::int AS uncited
+      FROM dm_nfr_object o JOIN dm_load l ON l.id = o.load_id AND l.is_current
+      LEFT JOIN dm_nfr_element e ON e.load_id = o.load_id AND e.mw_key = o.mw_key
+     GROUP BY o.mw_key ORDER BY o.mw_key`)).rows.map((r) => ({
+    observed: r.observed, expected: 10, tolerance: 0,
+    status: Number(r.observed) === 10 && Number(r.uncited) === 0 ? 'pass' : 'fail',
+    message: `${r.mw_key}: ${r.observed} of 10 elements`
+      + (Number(r.uncited) ? `, ${r.uncited} without a citation.` : ', all cited.') })),
+
+  // The outcome element is DERIVED from the roster, so this control re-derives
+  // it from dm_nfr_mw rather than reading the value the extract wrote. A control
+  // that reads the extract's own answer is a restatement with a verdict on it.
+  'NFR-05': async (c) => (await c.query(`
+    SELECT o.mw_key, o.outcome_state, o.last_roster_year AS expected,
+           o.roster_years_present AS expected_n,
+           max(m.fiscal_year)::int AS observed, count(m.id)::int AS observed_n,
+           (SELECT max(fiscal_year) FROM dm_nfr_mw m2 WHERE m2.load_id = o.load_id) AS current_fy
+      FROM dm_nfr_object o JOIN dm_load l ON l.id = o.load_id AND l.is_current
+      JOIN dm_nfr_mw m ON m.load_id = o.load_id AND m.mw_key = o.mw_key
+     GROUP BY o.mw_key, o.outcome_state, o.last_roster_year, o.roster_years_present, o.load_id
+     ORDER BY o.mw_key`)).rows.map((r) => {
+    const openNow = Number(r.observed) === Number(r.current_fy);
+    const ok = Number(r.observed) === Number(r.expected)
+      && Number(r.observed_n) === Number(r.expected_n)
+      && (r.outcome_state === 'open') === openNow;
+    return { observed: r.observed, expected: r.expected, tolerance: 0,
+      status: ok ? 'pass' : 'fail',
+      message: `${r.mw_key}: last on the roster FY${r.observed}, present in ${r.observed_n} roster `
+        + `years, recorded as "${r.outcome_state}"`
+        + (ok ? ' -- re-derived from the roster and agrees.'
+              : ` -- re-derivation gives FY${r.observed}/${r.observed_n} against the recorded `
+                + `FY${r.expected}/${r.expected_n}.`) };
+  }),
+
 };
 
 // -------------------------------------------------------------------- main --
@@ -1735,6 +1815,49 @@ const CONTROLS = {
         ['fiscal_year','rank_in_report','category','citation'],
         mwc.rows, { load_id: apLoad });
       console.log(`· dm_audit_mw_category        ${String(mwc.rows.length).padStart(6)} rows   vintage ${mwc.vintage}`);
+    }
+
+    // The NFR spine is built by scripts/build_nfr_seed.py from named DoD OIG and
+    // GAO reports, and is absent from a checkout that has not run it. Absent is
+    // not an error: the load proceeds and /nfr reports itself unloaded. It is
+    // kept out of seed_analytics.json because it is generated rather than kept
+    // by hand, and the generator refuses to emit a year whose per-entity table
+    // does not foot to that report's own published total.
+    const nfrPath = path.join(ROOT, 'database/seed_nfr.json');
+    if (fs.existsSync(nfrPath)) {
+      const nfr = JSON.parse(fs.readFileSync(nfrPath, 'utf-8'));
+      // extracted_at is the LOAD time, not the generator's timestamp, exactly as
+      // the curated audit seed above does it. `dm_load` is unique on
+      // (dataset_key, vintage, extracted_at), and this seed is regenerated
+      // annually rather than on every refresh -- so passing the generator's own
+      // timestamp made the SECOND `npm run refresh` after a release die on that
+      // key, having already loaded every staged measure. The generator's
+      // timestamp is kept in the notes, where it is what it actually is: when
+      // the extract was built, not when this database received it.
+      const nfrLoad = await openLoad(client, 'curated_nfr',
+        { vintage: nfr.vintage, extracted_at: new Date().toISOString(),
+          etl_version: 'build_nfr_seed.py', rows: nfr.rows,
+          source_path: `database/seed_nfr.json, built ${String(nfr.generated_at).slice(0, 16).replace('T', ' ')}` },
+        'scripts/build_nfr_seed.py');
+      const NFR_COLS = {
+        dm_nfr_year: ['fiscal_year','opinion','nfrs_issued','nfrs_new','nfrs_reissued','nfrs_closed',
+                      'mw_total','noncompliance_total','mw_agency_wide','entity_rows_published',
+                      'roster_published','citation','source_url','note'],
+        dm_nfr_entity: ['fiscal_year','sort_order','entity','mw_count','noncompliance_count',
+                        'nfr_count','citation'],
+        dm_nfr_mw: ['fiscal_year','rank_in_report','mw_key','printed_label','obstacle','citation'],
+        dm_nfr_object: ['mw_key','label','obstacle','first_roster_year','last_roster_year',
+                        'roster_years_present','roster_years_available','outcome_state',
+                        'expected_relationship','data_required','coverage','coverage_note','sort_order'],
+        dm_nfr_element: ['mw_key','element_no','element_name','element_text','basis','citation'],
+      };
+      for (const [table, cols] of Object.entries(NFR_COLS)) {
+        await client.query(`DELETE FROM ${table} WHERE load_id <> $1`, [nfrLoad]);
+        const n = await bulk(client, table, cols, nfr.rows[table] ?? [], { load_id: nfrLoad });
+        console.log(`· ${table.padEnd(26)} ${String(n).padStart(6)} rows   vintage ${nfr.vintage}`);
+      }
+    } else {
+      console.log('· database/seed_nfr.json: absent, skipped (run scripts/build_nfr_seed.py)');
     }
 
     // The SFIS/SLOA element library is curated reference with a citation, so it

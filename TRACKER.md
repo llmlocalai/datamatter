@@ -1,21 +1,69 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-11 (the whole justification archive; the local-model chat)
+- **Last updated:** 2026-09-12 (the NFR record and the ten-element audit-risk object)
 - **Live site:** https://datamatter.vercel.app
-- **Build status (2026-09-11):** `tsc --noEmit` clean and `next build` green, 29 routes,
-  prerendered against a full local Postgres load of every staged extract. All 19
-  pages and every API endpoint requested against that build returned 200, including
-  the new `/api/chat` (SSE) exercised against a stand-in Ollama.
-  **Not yet loaded to Neon** — the ETL reads `/Volumes/AI_DATA` and the schema
-  needs migrating before the deploy: `npm run migrate` → `npm run refresh` → push.
-- **Control status (2026-09-11):** 48 controls. The three new J-book controls pass
-  and **all three were proved able to fail**: JB-01 against an edition row removed
-  from a book (critical — the load rolled back and the previous vintage stayed
-  published), JB-02 against a skeleton weight moved four points, JB-03 against an
-  exemplar taken from outside its book's own two most recent editions. The seven
-  pre-existing published findings are unchanged (`TIE-01`, `FILEB-01`, one
-  `ASSIST-01` bucket, three `FILEC-02` spreads, `WBC-02`) and `CUR-01` still
-  fails by design on a warehouse one submission period behind.
+- **Build status (2026-09-12):** `tsc --noEmit` clean and `next build` green, 31 routes,
+  prerendered against a local Postgres holding the seed and the new NFR extract.
+  `/nfr` is static and `/nfr/[mw]` prerenders all 26 weakness pages; every one of
+  them, plus `/audit`, was requested against a running server and returned 200, and
+  an unknown key 404s rather than rendering at request time.
+  **Not yet loaded to Neon** — `npm run migrate` → `npm run refresh` → push.
+  The schema adds five tables, so the migrate is not optional.
+- **Control status (2026-09-12):** 58 controls. The five new NFR controls pass
+  (72 assertions across them) and **three were proved able to fail** against a
+  corrupted extract: NFR-01 against one entity row moved by 1 (critical — the load
+  rolled back), NFR-04 against a citation removed from an element (critical), and
+  NFR-05 against an outcome asserted to differ from the roster it is derived from
+  (high, recorded and published). The pre-existing published findings are
+  unchanged.
+
+---
+
+## Done — 2026-09-12 (eighteenth pass) — the NFR record, and the object behind it
+
+Asked for: *scrape every NFR for the DoD audit by fiscal year, extract ten
+elements from each, and put it on datamatter.*
+
+The first answer had to be that **the notices are not public**. The DoD OIG
+publishes counts, a per-entity table and a material-weakness roster; it does not
+publish the NFRs. So the object is built at material weakness grain and the page
+says so before it shows a figure.
+
+- [x] **Eight years transcribed from eight named reports**, FY2018 through FY2025:
+  issued, new, reissued, closed, material weaknesses, non-compliance, opinion.
+  Sources are the "Understanding the Results" series through FY2024 (the FY2024
+  roster is in **Part 2**, DODIG-2025-112, not in the Part 1 that carries the
+  counts), DODIG-2026-032 for the FY2025 roster, and GAO-26-109115 for the FY2025
+  counts, which DODIG-2026-032 does not publish.
+- [x] **The source's own total is the only real check, and it caught two things.**
+  FY2018's per-entity rows sum to 2,243 against a published 2,410, so FY2018 is
+  published at **year grain only**. And a set of FY2019 sub-allotted rows that the
+  PDF reader returned with plausible counts overshot the total by 56 — they were
+  fabricated, and Agency-Wide 287 alone lands on 3,472 exactly. Footing is what
+  stands between a summariser and the published page.
+- [x] **`scripts/build_nfr_seed.py` is the extract**, not a hand-kept JSON. It
+  refuses to emit a year that does not foot, a roster whose length disagrees with
+  the count the report states, or an object missing an element.
+- [x] **181 roster rows across 7 published rosters**, keyed by `mw_key` so a
+  weakness survives three renames. FY2023 states 28 and prints no roster, so it has
+  no rows and no column.
+- [x] **26 audit-risk objects × 10 elements = 260 rows**, each with `basis`
+  (`reported` or `derived`) and its own citation. Element 10 is computed from the
+  rosters and re-derived by NFR-05.
+- [x] **Coverage scored against this site's own sources: 1 testable, 7 partial, 18
+  absent.** The absences are the finding — the published execution files carry no
+  journal entry, no user, no trading partner and no proprietary balance.
+- [x] **`/nfr` and 26 prerendered `/nfr/[mw]` pages**, each ending in the
+  remediation chain: root cause → relationship → data → rule → ML → LLM → RPA →
+  monitoring → evidence, with steps 4-9 chipped `design` because nothing here
+  evidences they were built.
+- [x] **Fixed after the first release attempt: the seed passed its own timestamp
+  as `extracted_at`.** `seed_nfr.json` is regenerated annually, so the value does
+  not change between refreshes, and the SECOND `npm run refresh` died on
+  `dm_load`'s unique key having already reloaded every staged measure. The load
+  now takes `new Date().toISOString()` like `curated_audit` always has, and keeps
+  the generator's timestamp in the load's notes. Reproduced and then re-run three
+  times against a local Postgres to confirm.
 
 ---
 

@@ -1821,3 +1821,101 @@ CREATE TABLE IF NOT EXISTS dm_raw_row (
   values_json  text NOT NULL,           -- one value per column of the source, as text or null
   UNIQUE (load_id, source_key, row_no)
 );
+
+-- ----------------------------------- NFRs and the audit-risk object (/nfr) ---
+-- The Notice of Findings and Recommendations is the unit an auditor actually
+-- issues, and it is NOT a public document. What the DoD OIG publishes each year
+-- is the COUNT of notices and a roster of material weaknesses. So the finest
+-- grain available here is the material weakness, and the ten-element audit-risk
+-- object is built at that grain rather than pretending to a notice population
+-- nobody outside the audit holds.
+
+-- One row per audited fiscal year. entity_rows_published is false for a year
+-- whose per-entity table does not foot to its own published total; the rows are
+-- then withheld rather than published with a caveat, because a table that does
+-- not foot is a transcription, not a figure.
+CREATE TABLE IF NOT EXISTS dm_nfr_year (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int NOT NULL,
+  opinion       text NOT NULL,
+  nfrs_issued   int,
+  nfrs_new      int,
+  nfrs_reissued int,
+  nfrs_closed   int,
+  mw_total      int,                    -- all reporting entities, not Agency-Wide
+  noncompliance_total int,
+  mw_agency_wide int,
+  entity_rows_published boolean NOT NULL DEFAULT false,
+  roster_published      boolean NOT NULL DEFAULT false,
+  citation      text NOT NULL,
+  source_url    text,
+  note          text,
+  UNIQUE (load_id, fiscal_year)
+);
+
+CREATE TABLE IF NOT EXISTS dm_nfr_entity (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int NOT NULL,
+  sort_order    int NOT NULL,
+  entity        text NOT NULL,
+  mw_count      int,
+  noncompliance_count int,
+  nfr_count     int NOT NULL,
+  citation      text NOT NULL,
+  UNIQUE (load_id, fiscal_year, entity)
+);
+CREATE INDEX IF NOT EXISTS dm_nfr_entity_idx ON dm_nfr_entity (load_id, fiscal_year, sort_order);
+
+-- The roster as each report prints it. mw_key is this site's canonical pairing
+-- across years and is a judgement; printed_label is always kept beside it.
+CREATE TABLE IF NOT EXISTS dm_nfr_mw (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int NOT NULL,
+  rank_in_report int NOT NULL,
+  mw_key        text NOT NULL,
+  printed_label text NOT NULL,
+  obstacle      text NOT NULL,
+  citation      text NOT NULL,
+  UNIQUE (load_id, fiscal_year, mw_key)
+);
+CREATE INDEX IF NOT EXISTS dm_nfr_mw_key_idx ON dm_nfr_mw (load_id, mw_key, fiscal_year);
+
+CREATE TABLE IF NOT EXISTS dm_nfr_object (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  mw_key        text NOT NULL,
+  label         text NOT NULL,
+  obstacle      text NOT NULL,
+  first_roster_year int NOT NULL,
+  last_roster_year  int NOT NULL,
+  roster_years_present   int NOT NULL,
+  roster_years_available int NOT NULL,
+  outcome_state text NOT NULL,
+  expected_relationship text NOT NULL,
+  data_required text NOT NULL,
+  coverage      text NOT NULL CHECK (coverage IN ('testable','partial','absent')),
+  coverage_note text NOT NULL,
+  sort_order    int NOT NULL DEFAULT 100,
+  UNIQUE (load_id, mw_key)
+);
+
+-- The ten elements, long-form, so each carries its own basis and citation.
+-- basis is the same discipline as match_method on the crosswalks: `reported`
+-- means the cited document states it, `derived` means this site read it out of
+-- the document's narrative. Element 10 is always derived, and is computed from
+-- dm_nfr_mw rather than written by the extract.
+CREATE TABLE IF NOT EXISTS dm_nfr_element (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  mw_key        text NOT NULL,
+  element_no    int NOT NULL CHECK (element_no BETWEEN 1 AND 10),
+  element_name  text NOT NULL,
+  element_text  text NOT NULL,
+  basis         text NOT NULL CHECK (basis IN ('reported','derived')),
+  citation      text NOT NULL,
+  UNIQUE (load_id, mw_key, element_no)
+);
+CREATE INDEX IF NOT EXISTS dm_nfr_element_idx ON dm_nfr_element (load_id, mw_key, element_no);

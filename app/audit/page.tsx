@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import Shell, { PageHeader, Section } from '@/components/Shell';
 import { ProvenanceBar, Caveat } from '@/components/Provenance';
 import { StatTile, DataTable, BarList } from '@/components/charts';
@@ -118,6 +119,12 @@ export default async function AuditPage() {
           <StatTile label="NFRs closed in FY2025" value={fmtValue(nfrClosed)} tone="warning"
             sub={nfrOpen && nfrClosed ? `${fmtPct((Number(nfrClosed.metricValue ?? 0) / Number(nfrOpen.metricValue ?? 1)) * 100)} of the open total` : undefined} />
         </div>
+        <p className="text-xs text-navy-400 mt-4 leading-relaxed max-w-3xl">
+          These three figures are one year of a record that runs to FY2018.{' '}
+          <Link href="/nfr" className="text-accent-400 hover:text-accent-300">Findings and NFRs</Link>{' '}
+          carries the whole series, the per-entity tables behind it, which material weaknesses never left the
+          roster, and a ten-element audit-risk object for each one still on it.
+        </p>
         <Caveat>
           The new approach validates account balances directly with supporting documentation rather than
           working primarily through remediated internal controls, and reduces the number of standalone

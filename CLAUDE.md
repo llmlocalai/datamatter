@@ -576,6 +576,77 @@ The loader compares its `COLS` map against `information_schema` before it writes
 anything and names every missing column at once, so drift is reported up front
 rather than discovered mid-load.
 
+### The NFR record: the unit everyone names is the unit nobody publishes
+
+`/nfr` is the audit-finding page, and the first thing it has to say is what it
+is not. **A Notice of Findings and Recommendations is not a public document.**
+What the DoD OIG publishes each year is the COUNT of notices issued, reissued
+and closed, a per-entity table behind that count, and a roster of the
+Agency-Wide material weaknesses. So the finest grain available is the material
+weakness, the ten-element audit-risk object is built at that grain, and no copy
+anywhere may imply a notice population was obtained. Never describe a row here
+as an extracted NFR.
+
+**The source supplies its own check, and it is the only real one.** Each report
+prints both the per-entity table and the Department total. A table whose rows do
+not foot to that total is a transcription error, not a disagreement in the
+source. `scripts/build_nfr_seed.py` refuses to emit such a year at entity grain
+and `NFR-01` blocks a load where one reaches the database. This is how the
+FY2018 table was caught four short of its own published 2,410, and how a
+plausible-looking set of FY2019 sub-allotted rows was caught overshooting by 56.
+FY2018 is therefore published at year grain only. Do not "fix" it by adjusting a
+row until it foots.
+
+**The roster is paired across years by `mw_key`, and that pairing is ours.** The
+systems weakness was printed as *Financial Management Systems and Information
+Technology*, then *Legacy Systems*, then *Financial Management Systems
+Modernization*, without the condition changing. A roster keyed on the printed
+title reads those renames as closures and new findings. Every row keeps
+`printed_label` beside the key so a reader can reject the pairing without losing
+the count, exactly as `match_evidence` works on the crosswalks.
+
+**FY2023 has no roster and gets no column.** DODIG-2024-114 states 28 Agency-Wide
+material weaknesses and refers the roster to an appendix that is not in the
+released text. Drawing that year with every weakness absent would turn a gap in
+the record into a year of closures. A count without its roster is published as a
+count.
+
+**Element 10 is computed, never written.** `basis` on every element is `reported`
+(the cited document states it) or `derived` (this site read it out of the
+narrative), and the extract writes nine elements. The outcome is derived from
+`dm_nfr_mw` at build time and re-derived by `NFR-05` at load time, because an
+outcome asserted beside the evidence it summarises is a restatement with a
+verdict printed on it. Most of the object is `derived`, and the page says so
+element by element rather than once at the top.
+
+**`coverage` is about THIS SITE, not about the Department.** It scores whether
+the sources here could test an assertion of that kind: 1 testable, 7 partial, 18
+absent of the 26. The absences are the finding. The published execution files
+exist to report budgetary execution to the public and carry no journal entry, no
+user, no trading partner, no receipt and no proprietary balance, so a remediation
+system has to be built where the transactions are. Do not soften an `absent` to
+`partial` because an adjacent field exists.
+
+**The remediation chain on a weakness page is marked `design` from step 4 on.**
+Steps 1 to 3 carry the root cause, the expected relationship and the data
+requirement from the record. Steps 4 to 9 are a design, and nothing on this site
+evidences that any of it was built or works. The chips say which is which; do
+not present the chain as a capability.
+
+**A seed's `extracted_at` is the LOAD time, not the generator's.** `dm_load` is
+unique on `(dataset_key, vintage, extracted_at)`, and `seed_nfr.json` is
+regenerated annually rather than on every refresh. Passing `generated_at`
+straight through made the second `npm run refresh` after a release die on that
+key, having already reloaded every staged measure. `curated_audit` has always
+passed `new Date().toISOString()` for this reason; `curated_nfr` now does too,
+and keeps the generator's timestamp in the load's notes where it belongs. Any
+future seed loaded from a file committed to the repo has the same exposure.
+
+**A falling NFR count is not improvement.** A notice leaves the population when
+it is closed, when it is merged, when its entity stops being separately audited,
+or when the audit approach changes what is tested. Two of those happened inside
+FY2018-FY2025. Never write copy that reads the trend as progress.
+
 ## Things the data will not support — do not assert them
 
 - **File C vs award files is not an error estimate.** They are two reporting
