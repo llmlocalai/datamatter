@@ -1912,6 +1912,35 @@ const CONTROLS = {
       console.log(`· seed: jbook lexicon (${added} new, ${seed.jbook_lexicon.length - added} already present and left untouched)`);
     }
 
+    // ------------------------------------------------- SBR assurance suite --
+    // Runs over the loaded File A / File B population, inside this transaction,
+    // so a refresh IS a monitoring cycle. It needs the File A load to exist; on
+    // a load without it the suite is skipped rather than writing an empty run
+    // history that would read as "no exceptions found".
+    {
+      const fa = await client.query(
+        `SELECT id, vintage FROM dm_load WHERE dataset_key = 'file_a_sbr' AND is_current LIMIT 1`);
+      if (fa.rowCount) {
+        const { runSbrAssurance } = require('./sbr_run');
+        const r = await runSbrAssurance(client, fa.rows[0].id, fa.rows[0].vintage);
+        if (r.skipped) {
+          console.log('\n· SBR assurance: no File A account rows, skipped');
+        } else {
+          const exc = r.summary.filter((s) => s.code.startsWith('SBR-X'))
+            .reduce((a, s) => a + s.exceptions, 0);
+          const bad = r.summary.filter((s) => s.code.startsWith('SBR-P') && s.exceptions > 0);
+          console.log(`\n· SBR assurance: ${r.catalogue} tests, ${r.years} years, `
+            + `${exc} exceptions, ${r.cases} cases`);
+          if (bad.length) {
+            console.log(`   assurance tests with exceptions: `
+              + bad.map((b) => `${b.code} FY${b.fy}=${b.exceptions}`).join(', '));
+          }
+        }
+      } else {
+        console.log('\n· SBR assurance: no current File A load, skipped');
+      }
+    }
+
     // ------------------------------------------------------------ controls --
     console.log('\n· control suite');
     await client.query('DELETE FROM dm_control_result');

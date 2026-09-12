@@ -24,6 +24,7 @@ const GROUPS: { label: string; items: { href: string; label: string }[] }[] = [
       { href: '/reconciliation', label: 'Reconciliation' },
       { href: '/audit', label: 'Audit posture' },
       { href: '/nfr', label: 'Findings & NFRs' },
+      { href: '/sbr', label: 'SBR assurance' },
       { href: '/congressional', label: 'Congressional' } ] },
   { label: 'Method', items: [
       { href: '/ask', label: 'Ask the corpus' },

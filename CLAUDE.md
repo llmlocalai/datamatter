@@ -647,6 +647,93 @@ it is closed, when it is merged, when its entity stops being separately audited,
 or when the audit approach changes what is tested. Two of those happened inside
 FY2018-FY2025. Never write copy that reads the trend as progress.
 
+### SBR assurance: the one weakness this data can actually test
+
+`/sbr` works the Budgetary Resources material weakness end to end, because File A
+IS the Statement of Budgetary Resources and `/nfr` scores it the only one of the
+twenty-six these sources can reach. `scripts/sbr_assurance.js` holds the test
+catalogue and its SQL together; `scripts/sbr_run.js` executes it **inside the
+load transaction**, so every `npm run refresh` is a monitoring cycle and the run
+history is the control-performance evidence.
+
+**A test is not published unless its exceptions mean something.** Two obvious
+ones were written, run against the real population, and withdrawn as
+`not_testable` rows that state the reason:
+
+| Withdrawn | Why |
+|---|---|
+| component footing per account | File A publishes the seven positive sources of authority and none of the deductions, so components exceed the total on 231 of 943 FY2025 accounts by $226.1B. At Department scope the deductions net out and `SBR-02` passes, which is exactly why it looked testable at account grain. |
+| gross outlays vs resources per account | Outlays include payment against PRIOR-year obligations, so a third of accounts "fail" by design. Meaningful at Department scope (`SBR-03`), meaningless per account. |
+
+A third, `SBR-N03`, is the one that matters: **no published file carries an
+obligating document reference on an SBR line**, so the test that would answer
+the weakness rather than describe it cannot be run here at all. Name it; do not
+approximate it with something reachable.
+
+**Department-scope control does not imply account-grain test.** `SBR-01` passing
+at Department scope says nothing about whether the identity holds per account —
+it happens to (`SBR-P01`, zero breaks in 5,310 account-years), and that is
+published as assurance BECAUSE it is evidence, not decoration.
+
+**Three assertions are published as passing** (`SBR-P01`..`P03`). If one starts
+producing exceptions that is a finding about the extract and it appears in the
+same run history as everything else. Do not delete a passing test to tidy up.
+
+**`SBR-X06` is a question, not an accusation.** Obligations on expired authority
+beyond the recorded upward adjustments: adjustments to an expired account are
+lawful under 31 U.S.C. 1553(a) and new obligations are not, and these files
+cannot tell the two apart. It excludes accounts absent from File B, which are
+already reported by `SBR-X05` and would otherwise be flagged twice for one
+missing row. Never write copy that reads its 176 FY2025 exceptions as violations.
+
+**The risk score is built to be argued with.** Five components, each with the
+sentence that justifies it, in `dm_sbr_case_factor`. Exposure is scored on a LOG
+scale against a working materiality of 1% of Department budgetary resources, so
+a small exposure keeps a position in the queue instead of rounding to nothing.
+Materiality is this site's working threshold and the page says so; it is not the
+auditor's.
+
+**Derived and user-owned are separate tables and the load must never confuse
+them.** `dm_sbr_case`, `_case_factor`, `_exception`, `_run`, `_confidence` are
+replaced every load. `dm_sbr_case_state` and `dm_sbr_case_event` are entered by
+people and the load never deletes from them — a load that replaced them would
+erase the remediation record every time the warehouse refreshed. They carry no
+`load_id` and are read WITHOUT joining `dm_load`, the same trap `/controls` hit
+with `dm_control_result`.
+
+**A case cannot be closed while the current load still raises its exceptions.**
+`/api/sbr` returns 409 and offers `accepted_risk` instead. That precondition is
+the entire point of the programme: it is what stops a corrective action being
+reported complete while the control it was meant to install never operates.
+
+**The local model proposes; deterministic code decides and writes.** `lib/sbr-agent.ts`
+hands the model a facts block that SQL assembled and nothing else — no tools, no
+database. It is instructed not to conclude that a misstatement exists and not to
+write a figure that is not in the block. Output is stored as a PROPOSAL on the
+case timeline, attributed to the link that produced it, and recording one is a
+separate act by a named person. `/api/sbr?action=context` publishes the exact
+block, because an artifact whose inputs cannot be inspected is not reviewable.
+Deterministic actions need no model and keep working when the chain is down.
+
+**Writes are gated on `SBR_TOKEN`**, the same posture as `JBOOK_TOKEN`. Unset
+means writing is closed, which is right for a public deployment: nothing
+anonymous may move a remediation case. Deterministic reads stay open.
+
+**The planner has no statistics for rows inserted in the same transaction.** The
+anomaly query runs in 34ms standalone and took minutes inside the load until the
+observations were materialised into a temp table with an `ANALYZE`. The suite
+also analyses `dm_exec_resource` and `dm_exec_account_fy` before any test runs.
+A load that appears to hang on `· schema` is usually an orphaned backend from a
+killed run holding locks, not a slow query.
+
+**`/sbr/[case]` is dynamic but its params are constrained.** Next 14 answers
+**200** for a `notFound()` raised inside a fully dynamic segment — it renders the
+right page and tells a monitor a missing record is fine. `revalidate = 0` was
+tried and defeats the fix. The working shape is `revalidate = 30` plus
+`generateStaticParams` and `dynamicParams = false`, which makes an unknown key a
+routing 404 with the status to match; the console re-reads the record through
+the API after every write so nobody waits on the window.
+
 ## Things the data will not support — do not assert them
 
 - **File C vs award files is not an error estimate.** They are two reporting

@@ -1,21 +1,70 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-12 (the NFR record and the ten-element audit-risk object)
+- **Last updated:** 2026-09-12 (the SBR assurance programme)
 - **Live site:** https://datamatter.vercel.app
-- **Build status (2026-09-12):** `tsc --noEmit` clean and `next build` green, 31 routes,
-  prerendered against a local Postgres holding the seed and the new NFR extract.
-  `/nfr` is static and `/nfr/[mw]` prerenders all 26 weakness pages; every one of
-  them, plus `/audit`, was requested against a running server and returned 200, and
-  an unknown key 404s rather than rendering at request time.
+- **Build status (2026-09-12):** `tsc --noEmit` clean and `next build` green in 41s, 33 routes.
+  `/sbr` is dynamic, `/sbr/[case]` routes 1,501 constrained keys with a 30s window,
+  and an unknown key answers 404 rather than 200. Every page and every endpoint
+  was requested against a running server, the write paths were exercised with and
+  without the token, and the model paths were exercised against a stand-in
+  OpenAI-compatible server and then with it killed.
   **Not yet loaded to Neon** — `npm run migrate` → `npm run refresh` → push.
-  The schema adds five tables, so the migrate is not optional.
-- **Control status (2026-09-12):** 58 controls. The five new NFR controls pass
-  (72 assertions across them) and **three were proved able to fail** against a
-  corrupted extract: NFR-01 against one entity row moved by 1 (critical — the load
-  rolled back), NFR-04 against a citation removed from an element (critical), and
-  NFR-05 against an outcome asserted to differ from the roster it is derived from
-  (high, recorded and published). The pre-existing published findings are
-  unchanged.
+  The schema adds nine tables, so the migrate is not optional.
+- **Control status (2026-09-12):** 58 load controls, plus a 14-test SBR assurance
+  suite that runs inside the same transaction. FY2025: 298 exceptions over 8
+  exception tests, 3 assurance assertions passing on all 5,310 account-years,
+  and 3 tests withdrawn as not testable with the reason published. The NFR
+  controls and the pre-existing published findings are unchanged.
+
+---
+
+## Done — 2026-09-12 (nineteenth pass) — the SBR assurance programme
+
+Asked for: *build the technical solution for the SBR case, not the AP case, with
+the local model doing the AI and the automation; production ready.*
+
+The AP case in the blueprint cannot be built from anything here — no published
+file carries a receipt or an AP subledger. The SBR case can, because File A **is**
+the Statement of Budgetary Resources, which is why `/nfr` scores that weakness
+the only testable one of the twenty-six.
+
+- [x] **Profiled the real population before writing a test.** 5,310 File A
+  account-years, 4,812 File B, 76,297 detail rows, staged from the device and
+  loaded into a local Postgres. Every candidate test was sized against actual
+  rows first.
+- [x] **Two candidate tests were killed by that profiling.** Per-account component
+  footing flags 363 of 943 FY2025 accounts because File A publishes no deduction
+  lines; outlays-against-resources flags a third of accounts because outlays pay
+  prior-year obligations. Both are carried as `not_testable` rows that state the
+  reason. A queue of 300 false exceptions would have destroyed the programme
+  faster than no queue.
+- [x] **Eight exception tests and three assurance assertions**, each with its
+  criterion in 31 U.S.C., OMB Circular A-136/A-11 or the FMR. FY2025: `SBR-X01`
+  cancelled-account balances 3 accounts $10.27M, `SBR-X04` File A against File B
+  45 accounts $1.01B, `SBR-X06` expired authority 176 accounts $9.2B. All three
+  assurance assertions pass on every account-year.
+- [x] **The flagship finding.** The same three Air Force missile procurement
+  accounts, availability ended FY1992 to FY1994, carry the identical $10.273M in
+  every one of the six loaded years. Six years is not an error anyone is working
+  on; it is a control that does not operate.
+- [x] **`SBR-X04` is getting worse**: 6, 7, 10, 23, 45 across the closed years.
+  Visible only because the same test runs on every refresh.
+- [x] **A risk-scored queue with five explainable components.** FY2025: 4 tier-1,
+  68 tier-2, 184 tier-3. Exposure scored on a log scale against a working
+  materiality of 1% of Department budgetary resources.
+- [x] **Local model for investigation and for the automation.** `lib/sbr-agent.ts`:
+  three deterministic actions that need no model, three model-drafted proposals,
+  and a grounded copilot that streams. The model gets a facts block SQL built and
+  nothing else, is instructed not to conclude a misstatement, and its output is a
+  proposal a named person records. `/api/sbr?action=context` publishes the exact
+  block it was given.
+- [x] **A case cannot be closed while its exceptions still fire.** 409, with
+  `accepted_risk` offered instead. Proved against a live case.
+- [x] **Traps found and fixed**: the planner has no statistics for rows inserted
+  in the same transaction (34ms query, minutes inside the load, fixed with a temp
+  table and ANALYZE); `full` is a reserved word; `percentile_cont` cannot be a
+  window function; and Next 14 answers 200 for a `notFound()` inside a dynamic
+  segment, which is now a constrained-params 404.
 
 ---
 
