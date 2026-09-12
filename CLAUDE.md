@@ -788,6 +788,15 @@ silently in either direction.
   of re-deriving it. Each passed the exact corruption it existed to catch. A
   control that reads the extract's own answer is a restatement with a pass/fail
   printed on it.
+- **`Claude outputs/` is inside the repo and `tsconfig.json` includes `**/*.ts`.**
+  A draft copy of a source file left in that folder is TYPE-CHECKED by
+  `next build`, and it fails on the relative imports that only resolve from
+  `lib/` -- which is how a green local build shipped a red Vercel build:
+  `Cannot find module './db'` from `Claude outputs/lib_sbr.ts`. The folder is now
+  in `exclude` alongside `.staging`, and drafts of files that exist in the repo
+  proper do not belong there at all: three of them were already stale copies of
+  the real file by the time they were committed. Deliverables (images, posts,
+  notes) are fine; source is not.
 - Formatting crosses the server/client boundary as a **key** (`format="int"`),
   never as a function prop.
 - Vercel functions cannot scan the parquet warehouse. Do not "improve" a route by
