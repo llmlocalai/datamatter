@@ -47,6 +47,8 @@ export interface LlmLink {
   isLocal: boolean;
   timeoutMs: number;
   headers: Record<string, string>;
+  /** Whether a credential was configured at all — see probeOpenAI. */
+  hasCredential: boolean;
 }
 
 export interface LinkStatus {
@@ -134,15 +136,17 @@ export function llmChain(): LlmLink[] {
   // Both local links are the SAME server at the same URL, distinguished only by
   // the model field — which is how the Mac's own router works: one Ollama
   // instance, tags swapped per request, not a port per model.
+  const localAuth = localHeaders();
+  const hasLocalCredential = !!localAuth.Authorization;
   if (localBase && primary) {
     chain.push({ id: 'local-primary', kind: LOCAL_API, label: primary, model: primary,
       baseUrl: localBaseUrl(localBase, LOCAL_API), isLocal: true,
-      timeoutMs: LOCAL_TIMEOUT, headers: localHeaders() });
+      timeoutMs: LOCAL_TIMEOUT, headers: localAuth, hasCredential: hasLocalCredential });
   }
   if (localBase && secondary && secondary !== primary) {
     chain.push({ id: 'local-secondary', kind: LOCAL_API, label: secondary, model: secondary,
       baseUrl: localBaseUrl(localBase, LOCAL_API), isLocal: true,
-      timeoutMs: LOCAL_TIMEOUT, headers: localHeaders() });
+      timeoutMs: LOCAL_TIMEOUT, headers: localAuth, hasCredential: hasLocalCredential });
   }
   const cloudKey = process.env.CLOUD_LLM_API_KEY ?? process.env.GEMINI_API_KEY
     ?? process.env.OPENAI_API_KEY ?? '';
@@ -152,7 +156,7 @@ export function llmChain(): LlmLink[] {
   if (cloudKey && cloudModel) {
     chain.push({ id: 'cloud', kind: 'openai', label: cloudModel, model: cloudModel,
       baseUrl: trim(cloudBase), isLocal: false, timeoutMs: CLOUD_TIMEOUT,
-      headers: { Authorization: `Bearer ${cloudKey}` } });
+      headers: { Authorization: `Bearer ${cloudKey}` }, hasCredential: true });
   }
   return chain;
 }
@@ -223,9 +227,21 @@ async function probeOpenAI(link: LlmLink): Promise<LinkStatus> {
     const res = await withTimeout(HEALTH_TIMEOUT, (signal) =>
       fetch(`${link.baseUrl}/models`, { headers: link.headers, signal, cache: 'no-store' }));
     if (res.status === 401 || res.status === 403) {
+      // "No key was configured" and "the key was rejected" are the same HTTP
+      // status and completely different problems, and the page is the only
+      // place anyone will look. So they are reported as different states.
+      if (!link.hasCredential) {
+        return { ...base, state: 'unconfigured',
+          detail: link.isLocal
+            ? 'The server is answering and this deployment sent no key: set LOCAL_LLM_API_KEY '
+              + 'to a key from the model server (agent-server: keys_admin.py create <app> '
+              + '--scope chat), then redeploy.'
+            : 'No API key is configured for this provider.' };
+      }
       return { ...base, state: 'refused',
         detail: link.isLocal
-          ? 'The local server refused this deployment\u2019s key.'
+          ? 'The local server rejected this deployment\u2019s key. It must be a key the model '
+            + 'server itself issued — agent-server\u2019s keys are not gateway.py\u2019s shared secret.'
           : 'The API key was refused.' };
     }
     if (res.ok) {

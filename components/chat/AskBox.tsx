@@ -173,6 +173,16 @@ export default function AskBox() {
       </p>
 
       {status && status.links.length > 0 && <ChainStrip links={status.links} />}
+      {status?.links.some((l) => l.isLocal && l.state !== 'ready') && (
+        <div className="mb-4 text-[12px] text-amber-300 leading-relaxed">
+          {status.links.filter((l) => l.isLocal && l.state !== 'ready' && l.detail)
+            .slice(0, 1).map((l) => (
+              <p key={l.id}>
+                <span className="text-navy-200">{l.label}</span> — {l.detail}
+              </p>
+            ))}
+        </div>
+      )}
 
       {msgs.length > 0 && (
         <div className="space-y-5 mb-5 max-h-[32rem] overflow-y-auto pr-1">
@@ -306,8 +316,8 @@ function StatusPill({ status }: { status: Status | null }) {
  */
 function ChainStrip({ links }: { links: LinkState[] }) {
   const STATE: Record<string, string> = {
-    ready: 'answering', unreachable: 'not reachable', 'model-missing': 'not loaded on the server',
-    refused: 'credentials refused', unconfigured: 'not configured',
+    ready: 'answering', unreachable: 'not reachable', 'model-missing': 'not offered by the server',
+    refused: 'key rejected', unconfigured: 'no key set',
   };
   const first = links.findIndex((l) => l.state === 'ready');
   return (
