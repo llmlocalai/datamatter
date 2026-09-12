@@ -14,7 +14,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { llmStatus, llmChainStream, llmConfigured, type LlmMessage } from '@/lib/llm';
-import { buildAskContext } from '@/lib/ask';
+import { buildAskContext, corpusStatus } from '@/lib/ask';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,12 +46,15 @@ async function cachedStatus(maxAgeMs = 20_000) {
 }
 
 export async function GET() {
-  const status = await cachedStatus();
+  const [status, corpus] = await Promise.all([cachedStatus(), corpusStatus().catch(() => ({}))]);
   // No hostname and no key ever reach the browser. This is a public site and the
   // first two links are somebody's own machine behind a funnel: publishing where
   // it is invites traffic that has nothing to do with this page. What a visitor
   // needs is which links exist, which one is answering, and why the others are not.
-  return NextResponse.json(status, { headers: { 'Cache-Control': 'no-store' } });
+  // What retrieval can draw on is part of the status, not a claim in prose: a
+  // chat that answers without the corpus loaded should say so on the page rather
+  // than read as a model that has never seen the books.
+  return NextResponse.json({ ...status, corpus }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
 function sse(event: string, data: unknown): Uint8Array {
@@ -92,7 +95,7 @@ export async function POST(req: NextRequest) {
       links: status.links }, { status: 503 });
   }
 
-  const { system, context, sources } = await buildAskContext(question);
+  const { system, context, sources, retrieved } = await buildAskContext(question);
   const messages: LlmMessage[] = [
     { role: 'system', content: system },
     { role: 'system', content: context ? `CONTEXT\n${context}` : 'CONTEXT\n(nothing retrieved)' },
@@ -101,7 +104,7 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      controller.enqueue(sse('sources', { sources, retrieved: sources.length }));
+      controller.enqueue(sse('sources', { sources, retrieved, contextChars: context.length }));
       try {
         for await (const ev of llmChainStream(messages, { only: body.link })) {
           // Which link is answering is sent as it happens, not at the end: an

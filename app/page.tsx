@@ -95,8 +95,6 @@ export default async function Home() {
         </div>
       </section>
 
-      <div className="mt-10"><AskBox /></div>
-
       {latest && lastRec && (
         <Section title={`FY${latest.fiscalYear}${latest.isPartialYear ? ' so far' : ''}, in four figures`}
           note={`Department scope — agency codes 097, 021, 017 and 057. Agency 011, which appears in `
@@ -124,6 +122,11 @@ export default async function Home() {
           </div>
         </Section>
       )}
+
+      <Section title="Ask the corpus"
+        note="The local models, given this site's own material before they answer: the justification books' own text, the measures above, the controls behind them. Every answer lists what was retrieved and names the model that wrote it.">
+        <AskBox />
+      </Section>
 
       <Section title="Analytic products">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

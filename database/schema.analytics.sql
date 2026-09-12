@@ -894,6 +894,11 @@ CREATE TABLE IF NOT EXISTS dm_jbook_section (
   opening           text
 );
 CREATE INDEX IF NOT EXISTS dm_jbook_section_idx ON dm_jbook_section (load_id, slug, letter);
+-- The chat retrieves passages out of these bodies on every question. Without an
+-- index that is a full scan of every narrative section the site holds, per
+-- request, on a serverless connection.
+CREATE INDEX IF NOT EXISTS dm_jbook_section_tsv
+  ON dm_jbook_section USING gin (to_tsvector('english', body));
 
 -- The format, observed rather than asserted. The section letters SHIFT between
 -- exhibit types: a project-level R-2A carries no Program Change Summary, so
@@ -1083,6 +1088,8 @@ CREATE TABLE IF NOT EXISTS dm_jbook_book_exemplar (
 );
 CREATE INDEX IF NOT EXISTS dm_jbook_book_exemplar_idx
   ON dm_jbook_book_exemplar (load_id, book_key, norm_title);
+CREATE INDEX IF NOT EXISTS dm_jbook_book_exemplar_tsv
+  ON dm_jbook_book_exemplar USING gin (to_tsvector('english', body));
 
 -- ---------------------------------------------------- authoring (user-owned) --
 

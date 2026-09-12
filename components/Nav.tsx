@@ -25,6 +25,7 @@ const GROUPS: { label: string; items: { href: string; label: string }[] }[] = [
       { href: '/audit', label: 'Audit posture' },
       { href: '/congressional', label: 'Congressional' } ] },
   { label: 'Method', items: [
+      { href: '/ask', label: 'Ask the corpus' },
       { href: '/sources', label: 'Sources' },
       { href: '/raw-data', label: 'Raw data' },
       { href: '/definitions', label: 'Definitions' },

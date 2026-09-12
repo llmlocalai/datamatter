@@ -477,12 +477,24 @@ is the runbook for the machine end.
 - **Offline is a normal state.** The Mac sleeps. The page says which link is
   down and why, and keeps working; `/regulation` is the retrieval half and needs
   no model at all.
-- **Retrieval is shared.** `lib/knowledge-index.ts` holds the BM25 scoring that
-  `/regulation` and the chat both call — two implementations would drift, and
-  the day they disagreed the two would cite different passages for one question.
-  `lib/ask.ts` adds the corpus: definitions, books, and skeleton rows, so "what
-  must a Program Change Summary carry" is answered from 295 books rather than
-  from whatever shares its words in the wiki.
+- **Retrieval is shared, and it retrieves the TEXT.** `lib/knowledge-index.ts`
+  holds the BM25 scoring that `/regulation` and the chat both call — two
+  implementations would drift. `lib/ask.ts` retrieves the books' own passages
+  (both grains), the per-book skeleton, the site's measures, programme lines,
+  control findings, defined terms and the wiki. The first cut retrieved COUNTS
+  of books and no book text and no figures, which is why the chat read as a
+  model that had never seen the corpus.
+- **`plainto_tsquery` ANDs every word of the question** — "How does a Mission
+  Description open in a DARPA R-2?" becomes `'mission' & 'descript' & 'open' &
+  'darpa' & 'r' & '-2'`, which matches nothing, silently, every time. The
+  significant words are OR-ed and then RANKED: section title match first, then
+  the question's phrase, then how many distinct words landed. A passage clearing
+  none of those is dropped — a citation on an irrelevant passage claims the
+  corpus answered when it did not.
+- **`dm_control_result` carries no `load_id`.** The loader replaces the table
+  wholesale and `/controls` reads it with no join; joining `dm_load` there
+  returns zero rows and reports "0 of 0 assertions pass" on a database with 489
+  passing.
 
 ### The crosswalks are derived, and say so
 
