@@ -14,6 +14,7 @@ const GROUPS: { label: string; items: { href: string; label: string }[] }[] = [
       { href: '/jbook', label: 'Write a J-book' } ] },
   { label: 'Execution', items: [
       { href: '/execution', label: 'Budget to execution' },
+      { href: '/execution/timeline', label: 'Fund distribution & timeline' },
       { href: '/funds-control', label: 'Funds control' },
       { href: '/contracting', label: 'Contracting' },
       { href: '/program', label: 'By program' },

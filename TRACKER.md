@@ -1,20 +1,112 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-12 (the SBR assurance programme)
+- **Last updated:** 2026-09-17 (fund distribution and the execution timeline)
 - **Live site:** https://datamatter.vercel.app
-- **Build status (2026-09-12):** `tsc --noEmit` clean and `next build` green in 41s, 33 routes.
-  `/sbr` is dynamic, `/sbr/[case]` routes 1,501 constrained keys with a 30s window,
-  and an unknown key answers 404 rather than 200. Every page and every endpoint
-  was requested against a running server, the write paths were exercised with and
-  without the token, and the model paths were exercised against a stand-in
-  OpenAI-compatible server and then with it killed.
+- **Build status (2026-09-17):** `tsc --noEmit` clean and `next build` green, 34 routes,
+  1,559 static paths. Verified against a local Postgres replica in the cloud
+  container: every page and every endpoint requested on a running server,
+  screenshots at 1440px and 400px with no horizontal overflow and nothing under
+  the 12px type floor. The release-order guard was tested in both directions —
+  with the eight new tables DROPPED the build stays green, every page answers
+  200, `/execution/timeline` shows the migrate/refresh notice and
+  `/api/exec/timeline` answers 503 rather than an empty array.
   **Not yet loaded to Neon** — `npm run migrate` → `npm run refresh` → push.
-  The schema adds nine tables, so the migrate is not optional.
-- **Control status (2026-09-12):** 58 load controls, plus a 14-test SBR assurance
-  suite that runs inside the same transaction. FY2025: 298 exceptions over 8
-  exception tests, 3 assurance assertions passing on all 5,310 account-years,
-  and 3 tests withdrawn as not testable with the reason published. The NFR
-  controls and the pre-existing published findings are unchanged.
+  The schema adds eight tables and one column, so the migrate is not optional.
+- **Control status (2026-09-17):** 65 load controls (58 + 7 new), plus the 14-test
+  SBR assurance suite. All seven new controls were made to fail on a corrupted
+  staged extract and then restored.
+
+---
+
+## Done — 2026-09-17 (twentieth pass) — fund distribution and the execution timeline
+
+Asked for: *a page under the execution tab tracking fund distribution and the
+execution timeline; inference where the data runs out; read against shutdowns,
+CRs and when the appropriation act passes; split by fund holder (WHS, Army, MDA,
+SOCOM), Department, account and colour of money; current-year funds only; time
+series; a comprehensive report with root-cause analysis.*
+
+`/execution/timeline`, built on three populations that are deliberately never merged.
+
+- [x] **The fund holder exists, and only in one place.** FPDS
+  `funding_sub_agency_name` is populated on 100% of actions in all six years and
+  names WHS, MDA, SOCOM, DLA, DISA, DARPA, DTRA outright. The account chain does
+  NOT decompose agency 097 — File A's `owning_agency_name` reads "Department of
+  Defense" on all $1,451.5B of FY2025 — so the dated contract file is the only
+  source here that can answer "whose money". Existing `dm_fpds_*` uses the
+  AWARDING sub-agency, which is a different question; this is a new cut.
+- [x] **The dated cut by colour of money is a SAMPLE, and it is published as one.**
+  A contract action names exactly one Treasury account on 23.0 / 24.4 / 21.4 /
+  22.9 / 12.9 / 8.5% of its dollars (FY2021-FY2026), and the obligation on an
+  action is never split across the accounts named on it. Restricted further to
+  Department accounts with programme year = fiscal year it is 1.2%-6.5% of dated
+  dollars. Measured across two warehouse vintages a month apart the coverage for
+  a given year does not move, so this is a property of the source year and not a
+  lag that will fill in. It carries shape, never level, and COV-01 fails a load
+  that publishes any of it without its coverage.
+- [x] **The appropriation calendar, cited to public law.** 28 events across
+  FY2021-FY2026 in `database/seed_approp_calendar.json`: every continuing
+  resolution with its PL and through-date, both FY2026 lapses, and each full-year
+  enactment. Days without a full-year act: 87 / 165 / 89 / 174 / 365 (FY2025
+  never received one) / 125, of which 45 days of FY2026 were a lapse. Day counts
+  are derived in SQL from the dates and never stored.
+- [x] **The finding, and it is consistent.** `pre_enactment_pace_index` — the
+  average observed month before the full-year act over the year's own average
+  observed month. Every one of the five years that received an act ran BELOW its
+  own pace beforehand (0.73 / 0.84 / 0.65 / 0.77 / 0.81) and ABOVE it afterwards
+  (1.05 / 1.11 / 1.07 / 1.16 / 1.26). A raw pre-enactment SHARE is not comparable
+  between years and was the first, wrong, version of this measure.
+- [x] **It does not scale with the length of the CR**, and the page says so:
+  FY2022 ran 165 days and indexed 0.84; FY2023 ran 89 days and indexed 0.65.
+  September concentration is a SEPARATE phenomenon — it rises 14.8% → 18.8% across
+  the six years while FY2022, the second-longest CR, has the lowest September
+  share of the six.
+- [x] **Per fund holder the range is wide.** WHS 0.45 median, never once at its own
+  pace in five years; Army 0.60; Navy 0.79; Air Force and DLA both 0.84 and almost
+  flat across a calendar that varies by 280 days — the signature of a process
+  constraint rather than a funding one. DHA runs the OTHER way at 1.13, which is
+  the counter-example proving the measure does not manufacture the effect.
+- [x] **Holders on another appropriations bill are carried but not indexed.**
+  The first cut headlined DMEA ($0.6B) as the most exposed organisation and the
+  Department of Veterans Affairs as the least — both sample-size artefacts — and
+  ranked USACE (civil) worst of all, whose money is in Energy and Water with a
+  different calendar entirely. `in_defense_bill` now withholds the index for
+  those, and the page carries a floor of $4B over six years and 4 of 5 indexed years.
+- [x] **The modelled layer, and where it is withheld.** File A's measured
+  current-year obligation per appropriation and component, split into a personnel
+  share spread flat across twelve months and a remainder taking that component's
+  own service contract shape. MOD-01 (critical) checks each group foots to its
+  annual total AND that the total is the File A obligation it claims to
+  distribute; MOD-02 (critical) blocks any model of a year in progress, because
+  File B is then period-to-date while the contract shape stops at the frontier.
+- [x] **Colour of money is read off each account's own published name**, so a new
+  account arrives classified rather than becoming "Other". Unmapped across six
+  years: $14.0B, 0.177% of obligations, published as Other.
+- [x] **Seven new controls, every one proved able to fail.** CAL-01 (critical),
+  TL-01 (critical), TL-02, TL-03, MOD-01 (critical), MOD-02 (critical), COV-01.
+  TL-01 is the strong one: the monthly timeline and the daily `step_timing`
+  extract read the same contract file through different code, so it compares two
+  independent implementations rather than restating one.
+- [x] **Chart correctness.** A part-year shown as a share of its own observed
+  months reaches 100% at its reporting frontier and reads as a year that finished
+  in April. The explorer defaults to a same-point view cutting every year at the
+  live year's frontier, and says so on the figure.
+
+### Files
+`app/execution/timeline/page.tsx` · `app/api/exec/timeline/route.ts` ·
+`components/execution/CalendarStrip.tsx` · `components/execution/TimelineExplorer.tsx` ·
+`lib/timeline.ts` · `database/seed_approp_calendar.json` ·
+`step_timeline` in `scripts/etl_analytics.py` · 8 tables + 1 ALTER in
+`database/schema.analytics.sql` · CONTROLS + COLS in `scripts/load_analytics.js` ·
+7 controls and 1 dataset in `database/seed_analytics.json` · nav and a cross-link
+from `/execution`.
+
+### Open
+- The ETL step caches its contract scan in `.staging/.timeline_cache/fy<N>-<vintage>.json`.
+  The vintage is in the key, so a new warehouse vintage invalidates it by itself;
+  delete the directory only to force a re-scan of the SAME vintage.
+- `.staging/_xfer/` holds the transfer tarballs from this session's verification
+  and can be deleted.
 
 ---
 

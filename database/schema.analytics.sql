@@ -2121,3 +2121,191 @@ CREATE TABLE IF NOT EXISTS dm_sbr_case_event (
   UNIQUE (case_key, seq)
 );
 CREATE INDEX IF NOT EXISTS dm_sbr_case_event_idx ON dm_sbr_case_event (case_key, seq DESC);
+
+-- ===========================================================================
+-- Fund distribution and the execution timeline (/execution/timeline).
+--
+-- Three populations, deliberately three sets of tables. The dated layer is
+-- every contract action by FUNDING sub-agency -- the fund holder, and the only
+-- place WHS, MDA and SOCOM appear by name in any source on this site. The
+-- annual layer is File A at account grain by programme year and appropriation:
+-- the whole population, and no within-year timing at all. The modelled layer
+-- spreads the second across the months using the first's shape, and it is
+-- marked as modelled on every row.
+--
+-- Merging any two of them would produce a figure that belongs to no file.
+-- ===========================================================================
+
+-- The appropriation calendar. Curated, cited, and loaded from
+-- database/seed_approp_calendar.json. Day counts are NOT stored: they are
+-- derived in SQL from these dates, so the arithmetic on the page cannot drift
+-- away from the dates it is drawn from.
+CREATE TABLE IF NOT EXISTS dm_approp_event (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int  NOT NULL,
+  event_kind    text NOT NULL,   -- shutdown | cr | cr_extension | enactment | full_year_cr
+  start_date    date NOT NULL,
+  end_date      date,            -- null on a point event (an enactment)
+  public_law    text,
+  title         text NOT NULL,
+  basis         text NOT NULL,   -- reported (the cited document states it) | derived
+  citation      text,
+  note          text
+);
+CREATE INDEX IF NOT EXISTS dm_approp_event_idx
+  ON dm_approp_event (load_id, fiscal_year, start_date);
+
+-- OBSERVED, DATED. Contract actions by fiscal month. `is_observed` is false for
+-- every month past the reporting frontier: those months are not zero, they are
+-- unreported, and a chart that draws them as zero runs the curve flat.
+CREATE TABLE IF NOT EXISTS dm_timeline_month (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int  NOT NULL,
+  fy_month      int  NOT NULL,   -- 1 = October
+  month_label   text NOT NULL,
+  dimension     text NOT NULL,   -- total | fund_holder
+  dim_key       text NOT NULL,
+  dim_label     text NOT NULL,
+  obligation    numeric(20,2) NOT NULL DEFAULT 0,
+  action_count  int  NOT NULL DEFAULT 0,
+  cum_obligation numeric(20,2) NOT NULL DEFAULT 0,
+  share_pct     numeric(12,4) NOT NULL DEFAULT 0,
+  is_observed   boolean NOT NULL DEFAULT true
+);
+CREATE INDEX IF NOT EXISTS dm_timeline_month_idx
+  ON dm_timeline_month (load_id, dimension, dim_key, fiscal_year, fy_month);
+
+-- One row per fund holder per year. `pre_enactment_pace_index` is the measure
+-- the page is built on: the average month before the full-year act divided by
+-- the year's own average month. A raw pre-enactment SHARE is not comparable
+-- between years, because the years differ in how long the continuing resolution
+-- ran and, for a year in progress, in how many months are observed at all.
+CREATE TABLE IF NOT EXISTS dm_timeline_holder (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int  NOT NULL,
+  dim_key       text NOT NULL,
+  dim_label     text NOT NULL,
+  fy_obligation numeric(20,2) NOT NULL DEFAULT 0,
+  actions       int  NOT NULL DEFAULT 0,
+  months_observed int NOT NULL DEFAULT 0,
+  is_complete_year boolean NOT NULL DEFAULT false,
+  q1_share_pct  numeric(12,4),
+  sep_share_pct numeric(12,4),
+  pre_enactment_share_pct numeric(12,4),
+  pre_enactment_months    int,
+  pre_enactment_pace_index numeric(12,4),
+  enacted_month int,
+  cr_days       int,
+  lapse_days    int NOT NULL DEFAULT 0,
+  UNIQUE (load_id, fiscal_year, dim_key)
+);
+
+-- OBSERVED, ANNUAL. File A at account grain, rolled to programme year x colour
+-- of money x agency. `is_current_year` is programme year = fiscal year: the
+-- year's own appropriation, which is the only cut on which two fiscal years are
+-- comparable. A fiscal year's file holds every programme year still executing
+-- in it, and a rate that mixes them answers nothing a programme office asks.
+CREATE TABLE IF NOT EXISTS dm_timeline_annual (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int  NOT NULL,
+  program_year  int,             -- null is no-year money, and nothing else
+  appropriation text NOT NULL,
+  agency_code   text NOT NULL,
+  agency_name   text,
+  is_current_year boolean NOT NULL DEFAULT false,
+  accounts      int  NOT NULL DEFAULT 0,
+  resources     numeric(20,2) NOT NULL DEFAULT 0,
+  obligations   numeric(20,2) NOT NULL DEFAULT 0,
+  unobligated   numeric(20,2) NOT NULL DEFAULT 0,
+  outlays       numeric(20,2) NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS dm_timeline_annual_idx
+  ON dm_timeline_annual (load_id, fiscal_year, is_current_year, appropriation);
+
+-- The one place the dated layer and the colour of money meet, and it is a
+-- SAMPLE. A contract action names exactly one Treasury account on 8.5% to 23.0%
+-- of its dollars depending on the year, so `coverage_pct` rides on every row
+-- and the page reads shape within a year and never level across years. It is
+-- never a denominator.
+CREATE TABLE IF NOT EXISTS dm_timeline_cy_month (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int  NOT NULL,
+  fy_month      int  NOT NULL,
+  month_label   text NOT NULL,
+  appropriation text NOT NULL,
+  obligation    numeric(20,2) NOT NULL DEFAULT 0,
+  share_pct     numeric(12,4) NOT NULL DEFAULT 0,
+  sample_obligation numeric(20,2) NOT NULL DEFAULT 0,
+  coverage_pct  numeric(12,4) NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS dm_timeline_cy_month_idx
+  ON dm_timeline_cy_month (load_id, fiscal_year, appropriation, fy_month);
+
+-- What each layer can see, measured rather than asserted, so the copy on the
+-- page cannot drift away from it.
+CREATE TABLE IF NOT EXISTS dm_timeline_coverage (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int  NOT NULL,
+  measure_key   text NOT NULL,
+  measure_label text NOT NULL,
+  numerator     numeric(20,2) NOT NULL DEFAULT 0,
+  denominator   numeric(20,2) NOT NULL DEFAULT 0,
+  pct           numeric(12,4) NOT NULL DEFAULT 0,
+  note          text,
+  UNIQUE (load_id, fiscal_year, measure_key)
+);
+
+-- MODELLED. Nothing in this table is a measurement and nothing in it may be
+-- summed into a figure drawn from the two tables above. Complete years only:
+-- File B's figure for a year in progress is period-to-date at one submission
+-- and the contract shape stops at the reporting frontier, so spreading the
+-- first across the second produces a monthly figure that belongs to neither.
+CREATE TABLE IF NOT EXISTS dm_timeline_model (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int  NOT NULL,
+  fy_month      int  NOT NULL,
+  month_label   text NOT NULL,
+  appropriation text NOT NULL,
+  agency_code   text NOT NULL,
+  agency_name   text,
+  modelled_obligation numeric(20,2) NOT NULL DEFAULT 0,
+  annual_obligation   numeric(20,2) NOT NULL DEFAULT 0,
+  personnel_share_pct numeric(12,4) NOT NULL DEFAULT 0,
+  personnel_share_basis text,      -- detail | median | none
+  shape_source  text NOT NULL,     -- Army | Navy | Air Force | Department
+  method        text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dm_timeline_model_idx
+  ON dm_timeline_model (load_id, fiscal_year, appropriation, fy_month);
+
+CREATE TABLE IF NOT EXISTS dm_timeline_trend (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year   int  NOT NULL,
+  metric_key    text NOT NULL,
+  metric_label  text NOT NULL,
+  value         numeric(20,4),
+  unit          text NOT NULL,     -- usd | pct | index
+  cr_days       int,
+  lapse_days    int NOT NULL DEFAULT 0,
+  enacted_day_of_fy int,
+  months_observed int NOT NULL DEFAULT 0,
+  is_complete_year boolean NOT NULL DEFAULT false,
+  UNIQUE (load_id, fiscal_year, metric_key)
+);
+
+-- A fund holder that appears in the contract file but is not funded by the
+-- Department of Defense Appropriations Act -- the Corps of Engineers civil
+-- program, Veterans Affairs, the exchange services -- has its money on a
+-- different bill with a different calendar. Its obligations are carried,
+-- because the money is real; its pace against the DEFENSE enactment date is
+-- withheld, because that date does not govern it. Nullable and defaulted: the
+-- table is not empty when this column arrives.
+ALTER TABLE dm_timeline_holder ADD COLUMN IF NOT EXISTS in_defense_bill boolean NOT NULL DEFAULT true;

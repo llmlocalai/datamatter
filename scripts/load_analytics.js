@@ -74,6 +74,177 @@ async function openLoad(client, datasetKey, p, script) {
 // ------------------------------------------------------------- the controls --
 // Each returns [{fiscal_year, status, observed, expected, tolerance, message}]
 const CONTROLS = {
+  // ---- the execution timeline. Each of these recomputes; none reads back a
+  // figure the extract already wrote. See CLAUDE.md on why that distinction is
+  // the difference between a control and a restatement with a pass printed on it.
+  'CAL-01': async (c) => (await c.query(`
+    WITH e AS (SELECT a.* FROM dm_approp_event a
+                 JOIN dm_load l ON l.id = a.load_id AND l.is_current),
+         fy AS (SELECT DISTINCT e.fiscal_year FROM e)
+    SELECT fy.fiscal_year,
+           (SELECT count(*) FROM e WHERE e.fiscal_year = fy.fiscal_year
+              AND e.event_kind IN ('enactment','full_year_cr'))::int AS anchors,
+           (SELECT count(*) FROM e WHERE e.fiscal_year = fy.fiscal_year
+              AND e.end_date IS NOT NULL AND e.end_date < e.start_date)::int AS backwards,
+           (SELECT count(*) FROM e WHERE e.fiscal_year = fy.fiscal_year
+              AND e.event_kind = 'enactment'
+              AND (e.start_date < make_date(fy.fiscal_year - 1, 10, 1)
+                OR e.start_date > make_date(fy.fiscal_year, 9, 30)))::int AS outside,
+           (SELECT count(*) FROM e s JOIN e n ON n.fiscal_year = s.fiscal_year
+              AND n.event_kind = 'enactment'
+             WHERE s.fiscal_year = fy.fiscal_year AND s.event_kind = 'shutdown'
+               AND s.start_date >= n.start_date)::int AS overlap
+      FROM fy ORDER BY fy.fiscal_year`)).rows.map((r) => {
+    const bad = r.backwards + r.outside + r.overlap + (r.anchors === 1 ? 0 : 1);
+    return { fiscal_year: r.fiscal_year, observed: bad, expected: 0, tolerance: 0,
+      variance_pct: bad ? 100 : 0, status: bad ? 'fail' : 'pass',
+      message: bad
+        ? `FY${r.fiscal_year}: ${r.anchors} full-year anchors (expected 1), ${r.backwards} spans ending before they start, ${r.outside} enactments dated outside the fiscal year, ${r.overlap} lapses on or after the full-year act.`
+        : `FY${r.fiscal_year}: one full-year anchor, every span forward in time, the enactment inside its own year and no lapse after it.` };
+  }),
+
+  'TL-01': async (c) => (await c.query(`
+    SELECT t.fiscal_year, sum(t.obligation) AS observed,
+           max(y.frontier_obligation) AS expected
+      FROM dm_timeline_month t
+      JOIN dm_load l  ON l.id  = t.load_id AND l.is_current
+      JOIN dm_fpds_year y ON y.fiscal_year = t.fiscal_year
+      JOIN dm_load l2 ON l2.id = y.load_id AND l2.is_current
+     WHERE t.dimension = 'total' AND t.is_observed
+     GROUP BY t.fiscal_year ORDER BY t.fiscal_year`)).rows.map((r) => {
+    const v = Math.abs(r.observed - r.expected) / Math.max(1, Math.abs(r.expected)) * 100;
+    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      tolerance: 0.01, variance_pct: v, status: v <= 0.01 ? 'pass' : 'fail',
+      message: `FY${r.fiscal_year}: the monthly timeline and the daily timing extract agree on the same contract file to within ${v.toFixed(5)}%.` };
+  }),
+
+  'TL-02': async (c) => (await c.query(`
+    WITH m AS (
+      SELECT t.fiscal_year, t.dim_key, sum(t.obligation) AS s
+        FROM dm_timeline_month t JOIN dm_load l ON l.id = t.load_id AND l.is_current
+       WHERE t.dimension = 'fund_holder' AND t.is_observed
+       GROUP BY t.fiscal_year, t.dim_key),
+      d AS (
+      SELECT t.fiscal_year, sum(t.obligation) AS s
+        FROM dm_timeline_month t JOIN dm_load l ON l.id = t.load_id AND l.is_current
+       WHERE t.dimension = 'total' AND t.is_observed GROUP BY t.fiscal_year)
+    SELECT h.fiscal_year, count(*)::int AS holders,
+           count(*) FILTER (WHERE m.s IS NULL
+             OR abs(h.fy_obligation - m.s) > greatest(1, abs(h.fy_obligation) * 0.0001))::int AS mismatched,
+           (max(d.s) - sum(h.fy_obligation))::numeric AS tail
+      FROM dm_timeline_holder h
+      JOIN dm_load l3 ON l3.id = h.load_id AND l3.is_current
+      LEFT JOIN m ON m.fiscal_year = h.fiscal_year AND m.dim_key = h.dim_key
+      LEFT JOIN d ON d.fiscal_year = h.fiscal_year
+     GROUP BY h.fiscal_year ORDER BY h.fiscal_year`)).rows.map((r) => {
+    const over = Number(r.tail) < 0;
+    const bad = r.mismatched + (over ? 1 : 0);
+    return { fiscal_year: r.fiscal_year, observed: bad, expected: 0, tolerance: 0,
+      variance_pct: bad ? 100 : 0, status: bad ? 'fail' : 'pass',
+      message: bad
+        ? `FY${r.fiscal_year}: ${r.mismatched} of ${r.holders} fund holders disagree with their own monthly rows${over ? ', and the holders carried exceed the Department total' : ''}.`
+        : `FY${r.fiscal_year}: all ${r.holders} fund holders equal the sum of their own months, leaving $${(Number(r.tail) / 1e9).toFixed(1)}B in the unranked tail.` };
+  }),
+
+  'TL-03': async (c) => (await c.query(`
+    WITH cal AS (
+      SELECT a.fiscal_year,
+             (CASE WHEN EXTRACT(MONTH FROM a.start_date) >= 10
+                   THEN EXTRACT(MONTH FROM a.start_date) - 9
+                   ELSE EXTRACT(MONTH FROM a.start_date) + 3 END)::int AS em
+        FROM dm_approp_event a JOIN dm_load l ON l.id = a.load_id AND l.is_current
+       WHERE a.event_kind = 'enactment'),
+      tm AS (
+      SELECT t.fiscal_year, t.fy_month, t.obligation
+        FROM dm_timeline_month t JOIN dm_load l2 ON l2.id = t.load_id AND l2.is_current
+       WHERE t.dimension = 'total' AND t.is_observed),
+      agg AS (
+      SELECT tm.fiscal_year,
+             count(*)::numeric AS obs_months,
+             sum(tm.obligation) AS tot,
+             sum(tm.obligation) FILTER (WHERE tm.fy_month < c.em) AS pre,
+             count(*) FILTER (WHERE tm.fy_month < c.em)::numeric AS pre_n
+        FROM tm JOIN cal c ON c.fiscal_year = tm.fiscal_year
+       GROUP BY tm.fiscal_year)
+    SELECT a.fiscal_year,
+           CASE WHEN a.pre_n > 0 AND a.tot > 0
+                THEN (a.pre / a.pre_n) / (a.tot / a.obs_months) END AS recomputed,
+           tr.value AS published
+      FROM agg a
+      JOIN dm_timeline_trend tr ON tr.fiscal_year = a.fiscal_year
+       AND tr.metric_key = 'pre_enactment_pace_index'
+      JOIN dm_load l3 ON l3.id = tr.load_id AND l3.is_current
+     ORDER BY a.fiscal_year`)).rows.map((r) => {
+    const have = r.recomputed !== null && r.published !== null;
+    const v = have ? Math.abs(r.recomputed - r.published) / Math.max(0.0001, Math.abs(r.published)) * 100 : 0;
+    return { fiscal_year: r.fiscal_year, observed: r.recomputed, expected: r.published,
+      tolerance: 0.1, variance_pct: v,
+      status: !have ? 'not_applicable' : (v <= 0.1 ? 'pass' : 'fail'),
+      message: !have
+        ? `FY${r.fiscal_year}: no full-year act, so there is no before-and-after to index.`
+        : `FY${r.fiscal_year}: the pre-enactment pace index re-derives to ${Number(r.recomputed).toFixed(4)} against a published ${Number(r.published).toFixed(4)}.` };
+  }),
+
+  'MOD-01': async (c) => (await c.query(`
+    WITH m AS (
+      SELECT t.fiscal_year, t.appropriation, t.agency_code,
+             sum(t.modelled_obligation) AS modelled, max(t.annual_obligation) AS stated
+        FROM dm_timeline_model t JOIN dm_load l ON l.id = t.load_id AND l.is_current
+       GROUP BY t.fiscal_year, t.appropriation, t.agency_code),
+      a AS (
+      SELECT n.fiscal_year, n.appropriation, n.agency_code, sum(n.obligations) AS filea
+        FROM dm_timeline_annual n JOIN dm_load l2 ON l2.id = n.load_id AND l2.is_current
+       WHERE n.is_current_year
+       GROUP BY n.fiscal_year, n.appropriation, n.agency_code)
+    SELECT m.fiscal_year, count(*)::int AS groups,
+           count(*) FILTER (WHERE abs(m.modelled - m.stated)
+                                  > greatest(1, abs(m.stated) * 0.005))::int AS unfooted,
+           count(*) FILTER (WHERE a.filea IS NULL OR abs(m.stated - a.filea)
+                                  > greatest(1, abs(a.filea) * 0.005))::int AS unmatched
+      FROM m LEFT JOIN a ON a.fiscal_year = m.fiscal_year
+                        AND a.appropriation = m.appropriation
+                        AND a.agency_code = m.agency_code
+     GROUP BY m.fiscal_year ORDER BY m.fiscal_year`)).rows.map((r) => {
+    const bad = r.unfooted + r.unmatched;
+    return { fiscal_year: r.fiscal_year, observed: bad, expected: 0, tolerance: 0,
+      variance_pct: r.groups ? 100 * bad / r.groups : 0, status: bad ? 'fail' : 'pass',
+      message: bad
+        ? `FY${r.fiscal_year}: of ${r.groups} modelled groups, ${r.unfooted} do not sum to their own annual total and ${r.unmatched} do not match the File A obligation they claim to distribute.`
+        : `FY${r.fiscal_year}: all ${r.groups} modelled groups sum to their annual total and that total is File A's own current-year obligation.` };
+  }),
+
+  'MOD-02': async (c) => (await c.query(`
+    SELECT y.fiscal_year, y.full_months_observed::int AS months,
+           (SELECT count(*) FROM dm_timeline_model t
+              JOIN dm_load l2 ON l2.id = t.load_id AND l2.is_current
+             WHERE t.fiscal_year = y.fiscal_year)::int AS modelled
+      FROM dm_fpds_year y JOIN dm_load l ON l.id = y.load_id AND l.is_current
+     ORDER BY y.fiscal_year`)).rows.map((r) => {
+    const bad = r.months < 12 && r.modelled > 0;
+    return { fiscal_year: r.fiscal_year, observed: r.modelled, expected: r.months < 12 ? 0 : r.modelled,
+      tolerance: 0, variance_pct: bad ? 100 : 0, status: bad ? 'fail' : 'pass',
+      message: bad
+        ? `FY${r.fiscal_year}: observed for ${r.months} months but carries ${r.modelled} modelled rows. A year in progress gets the observed layers and no model.`
+        : (r.months < 12
+            ? `FY${r.fiscal_year}: observed for ${r.months} months and correctly carries no modelled rows.`
+            : `FY${r.fiscal_year}: a complete year, ${r.modelled} modelled rows.`) };
+  }),
+
+  'COV-01': async (c) => (await c.query(`
+    SELECT v.fiscal_year, count(*)::int AS measures,
+           count(*) FILTER (WHERE v.numerator > v.denominator * 1.0001)::int AS inverted,
+           count(*) FILTER (WHERE v.measure_key = 'current_year')::int AS has_sample,
+           max(v.pct) FILTER (WHERE v.measure_key = 'current_year') AS sample_pct
+      FROM dm_timeline_coverage v JOIN dm_load l ON l.id = v.load_id AND l.is_current
+     GROUP BY v.fiscal_year ORDER BY v.fiscal_year`)).rows.map((r) => {
+    const bad = r.inverted + (r.measures === 4 ? 0 : 1) + (r.has_sample === 1 ? 0 : 1);
+    return { fiscal_year: r.fiscal_year, observed: r.measures, expected: 4, tolerance: 0,
+      variance_pct: bad ? 100 : 0, status: bad ? 'fail' : 'pass',
+      message: bad
+        ? `FY${r.fiscal_year}: ${r.measures} coverage measures (expected 4), ${r.inverted} with a numerator above their denominator, sample coverage ${r.has_sample ? 'published' : 'MISSING'}.`
+        : `FY${r.fiscal_year}: all four coverage measures published; the programme-year sample covers ${Number(r.sample_pct).toFixed(1)}% of dated contract dollars.` };
+  }),
+
   'SBR-01': async (c) => (await c.query(`
     SELECT fiscal_year,
            total_budgetary_resources AS expected,
@@ -1585,6 +1756,7 @@ const CONTROLS = {
       ['knowledge.json',  'knowledge_bank',        'scripts/etl_analytics.py --step knowledge'],
       ['catalog.json',    'source_catalog',        'scripts/etl_analytics.py --step catalog'],
       ['jbook.json',      'jbook_corpus',          'scripts/etl_analytics.py --step jbook'],
+      ['timeline.json',   'execution_timeline',    'scripts/etl_analytics.py --step timeline'],
       ['raw.json',        'raw_samples',           'scripts/etl_analytics.py --step raw'],
     ];
     const COLS = {
@@ -1737,6 +1909,25 @@ const CONTROLS = {
       dm_jbook_book_exemplar: ['book_key','pb_year','norm_title','title','mark','shape',
         'source_file','page_no','exhibit','words','sentences','avg_sentence_words','time_hits',
         'money_hits','body'],
+      dm_approp_event: ['fiscal_year','event_kind','start_date','end_date','public_law',
+        'title','basis','citation','note'],
+      dm_timeline_month: ['fiscal_year','fy_month','month_label','dimension','dim_key','dim_label',
+        'obligation','action_count','cum_obligation','share_pct','is_observed'],
+      dm_timeline_holder: ['fiscal_year','dim_key','dim_label','fy_obligation','actions',
+        'months_observed','is_complete_year','q1_share_pct','sep_share_pct',
+        'pre_enactment_share_pct','pre_enactment_months','pre_enactment_pace_index',
+        'enacted_month','cr_days','lapse_days','in_defense_bill'],
+      dm_timeline_annual: ['fiscal_year','program_year','appropriation','agency_code','agency_name',
+        'is_current_year','accounts','resources','obligations','unobligated','outlays'],
+      dm_timeline_cy_month: ['fiscal_year','fy_month','month_label','appropriation','obligation',
+        'share_pct','sample_obligation','coverage_pct'],
+      dm_timeline_coverage: ['fiscal_year','measure_key','measure_label','numerator','denominator',
+        'pct','note'],
+      dm_timeline_model: ['fiscal_year','fy_month','month_label','appropriation','agency_code',
+        'agency_name','modelled_obligation','annual_obligation','personnel_share_pct',
+        'personnel_share_basis','shape_source','method'],
+      dm_timeline_trend: ['fiscal_year','metric_key','metric_label','value','unit','cr_days',
+        'lapse_days','enacted_day_of_fy','months_observed','is_complete_year'],
       dm_source_row: ['source_key','source_label','row_label','why','record'],
       dm_trace_row: ['step','source_key','source_label','key_field','key_value','note',
         'is_present','record'],

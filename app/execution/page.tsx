@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import Shell, { PageHeader, Section } from '@/components/Shell';
 import { ProvenanceBar, Caveat } from '@/components/Provenance';
 import { StatTile, Waterfall, StackedFY, BarList, DataTable, Empty } from '@/components/charts';
@@ -473,6 +474,15 @@ export default async function ExecutionPage() {
             + `reporting frontier — ${fpdsFocus?.frontierDate ?? 'where the file is complete'}, `
             + `${fpdsFocus?.fullMonthsObserved ?? 0} whole months in — and the gap between the two `
             + `markers is the reporting lag, not a fall in spending.`}>
+          <p className="text-sm text-navy-300 mb-6 max-w-3xl leading-relaxed">
+            This curve is the Department as a whole against the calendar year.{' '}
+            <Link href="/execution/timeline" className="text-accent-400 hover:underline">
+              Fund distribution and the execution timeline
+            </Link>{' '}
+            takes the same contract file and cuts it by fund holder — WHS, MDA, SOCOM and the rest,
+            which appear in no other source here — and reads every year against the continuing
+            resolutions, lapses and appropriation acts the Department actually operated under.
+          </p>
           {pace.length ? (
             <>
               <PaceChart points={pace} liveYear={currentFy}

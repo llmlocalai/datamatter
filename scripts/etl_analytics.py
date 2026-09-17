@@ -4892,8 +4892,500 @@ def step_raw(out):
           {"dm_raw_source": sources, "dm_raw_row": rows},
           source_path="warehouse + 11-Budget-Justification/_Archive + api.usaspending.gov"))
 
+
+# ===========================================================================
+# Fund distribution and the execution timeline.
+#
+# The ask this answers is "when did the money move, for whom, on which colour
+# of money, using only the year's own appropriation". No single file here can
+# answer it, and the honest construction is three layers kept apart:
+#
+#   OBSERVED / DATED    every contract action, by action date and by the
+#                       FUNDING sub-agency -- the fund holder, which is the
+#                       only place WHS, MDA and SOCOM appear by name in any
+#                       source on this site. A third of Department obligations.
+#   OBSERVED / ANNUAL   File A resources and File B obligations by programme
+#                       year and appropriation. The whole population, and no
+#                       within-year timing at all.
+#   MODELLED            the annual totals spread across the months, using the
+#                       shape the dated layer observed. Marked as modelled on
+#                       every row, never summed into an observed total.
+#
+# The join that would make the first two one layer does not exist at usable
+# coverage: a contract action names a Treasury account on 8.5% to 23.0% of its
+# dollars depending on the year, so a dated cut by appropriation and programme
+# year is a SAMPLE whose size moves with the year. It is published as an
+# indicator with its coverage on the same row, and it is never a denominator.
+#
+# The colour of money is read off the account's OWN PUBLISHED NAME rather than
+# from a hand-built code list, so a new account arrives classified instead of
+# silently becoming "Other", and the unmapped remainder is published.
+# ===========================================================================
+
+# Ordered: the first pattern that matches wins, so the specific titles sit
+# above the general ones. Every label here is a category of appropriation --
+# a "colour of money" -- not an organisation.
+APPROP_CATS = [
+  ("Military personnel", r"^military personnel|^reserve personnel|^national guard personnel"),
+  ("Retirement and health accrual", r"retirement fund|medicare-eligible retiree"),
+  ("Defense Health Program", r"^defense health program"),
+  ("Family housing", r"^family housing|^homeowners assistance"),
+  ("Military construction", r"^military construction|^base realignment|base closure account|^north atlantic treaty organization|relocation to guam|^military unaccompanied housing"),
+  ("Operation and maintenance",
+   r"^operation and maintenance|^afghanistan security|^ukraine security|^counter-islamic|"
+   r"^drug interdiction|^office of the inspector general|^cooperative threat|^support for "
+   r"international sporting|^overseas humanitarian|^burden sharing|^counter-isis|^afghanistan freedom|^ukraine assistance"),
+  ("RDT&E", r"^research, development, test|rapid prototyping fund|rapid innovation"),
+  ("Procurement",
+   r"^aircraft procurement|^missile procurement|^weapons procurement|^shipbuilding|"
+   r"^procurement|^other procurement|^national guard and reserve equipment|^chemical agents|"
+   r"^joint urgent|^defense production act|sea-based deterrence|^golden dome|maritime industrial base"),
+  ("Revolving and management funds",
+   r"working capital|revolving|^pentagon reservation|^buildings maintenance|^defense "
+   r"modernization account"),
+  ("Trust and receipt accounts",
+   r"trust fund|^gifts|receipt|^concessions|cadet fund|^midshipmen|^wildlife conservation"),
+]
+APPROP_ORDER = [c for c, _ in APPROP_CATS] + ["Other"]
+
+def _approp_cat(name):
+    n = (name or "").strip().lower()
+    for lab, pat in APPROP_CATS:
+        if re.search(pat, n): return lab
+    return "Other"
+
+
+# A Treasury account symbol, with the optional allocation-transfer agency in
+# front of it: 069-057-2021/2025-3300-005, or 097-X-4930-005. The years are the
+# period of availability, and the first of them is the PROGRAMME YEAR.
+_TAS_RE = re.compile(r"^(?:(\d{3})-)?(\d{3})-(?:(X)|(\d{4})(?:/(\d{4}))?)-(\d{4})-(\d{3})$")
+
+def _parse_tas(s):
+    """(agency, bpoa, epoa, main_account) or None. bpoa is None on no-year."""
+    m = _TAS_RE.match((s or "").strip())
+    if not m: return None
+    _at, aid, x, b, e, main, _sub = m.groups()
+    if x: return (aid, None, None, main)
+    return (aid, int(b), int(e or b), main)
+
+
+# The fund holders the page names. FPDS spells them out in full; these are the
+# short forms a reader uses, and the mapping is one-way and explicit so a
+# renamed sub-agency shows up as unmapped rather than silently vanishing.
+HOLDER_SHORT = {
+  "Department of the Army": "Army", "Department of the Navy": "Navy",
+  "Department of the Air Force": "Air Force",
+  "Defense Logistics Agency": "DLA", "Defense Health Agency": "DHA",
+  "Missile Defense Agency": "MDA", "U.S. Special Operations Command": "SOCOM",
+  "Washington Headquarters Services": "WHS",
+  "Defense Information Systems Agency": "DISA",
+  "Defense Advanced Research Projects Agency": "DARPA",
+  "Defense Threat Reduction Agency": "DTRA",
+  "Defense Counterintelligence and Security Agency": "DCSA",
+  "Immediate Office of the Secretary of Defense": "OSD",
+  "Defense Commissary Agency": "DeCA", "U.S. Cyber Command": "CYBERCOM",
+  "Department of Defense Education Activity": "DoDEA",
+  "Defense Finance and Accounting Service": "DFAS",
+  "Defense Security Cooperation Agency": "DSCA",
+  "Defense Human Resources Activity": "DHRA",
+  "Defense Contract Management Agency": "DCMA",
+  "Defense Microelectronics Activity": "DMEA",
+  "National Geospatial-Intelligence Agency": "NGA",
+  "U.S. Army Corps of Engineers - Civil Program Financing Only": "USACE (civil)",
+  "Defense Media Activity": "DMA", "Defense Technical Information Center": "DTIC",
+}
+# Fund holders that appear in the contract file but are NOT funded by the
+# Department of Defense Appropriations Act. Their money arrives on a different
+# bill with a different calendar -- the Corps of Engineers civil program is in
+# Energy and Water, Veterans Affairs in Military Construction and Veterans
+# Affairs, and the exchange services are nonappropriated entirely -- so indexing
+# their obligation against the DEFENSE enactment date measures nothing. They are
+# carried with their obligations, because the money is real and a reader looking
+# for it should find it, and their pace index is withheld rather than computed.
+NON_DEFENSE_HOLDERS = {
+  "USACE (civil)", "Department of Veterans Affairs", "Army/Air Force Exchange Service",
+  "Federal Emergency Management Agency", "Environmental Protection Agency",
+  "Department of Transportation", "Department of Homeland Security",
+  "Department of Energy", "Department of State", "Department of Health and Human Services",
+  "Navy Exchange Service Command", "Marine Corps Exchange",
+}
+
+# Which service's contract shape a Defense-wide appropriation should borrow:
+# none of them. 097 money is spread across every agency above, so it borrows the
+# Department shape and the model says so.
+SERVICE_OF_AGENCY = {"021": "Army", "017": "Navy", "057": "Air Force"}
+
+TIMELINE_HOLDERS = 20     # fund holders carried per year, by contract obligation
+MODEL_TOL = 0.005         # a modelled year must foot to its annual total within 0.5%
+
+
+def _cal_events(path):
+    """The appropriation calendar seed, as (fiscal_year -> events)."""
+    with open(path) as fh:
+        rows = json.load(fh)["rows"]["dm_approp_event"]
+    by_fy = collections.defaultdict(list)
+    for r in rows: by_fy[r["fiscal_year"]].append(r)
+    return rows, by_fy
+
+
+def _enacted_day(fy, events):
+    """Day of fiscal year the full-year appropriation took effect, or None where
+    the year never received one. Day 1 is 1 October."""
+    for e in events:
+        if e["event_kind"] == "enactment":
+            d = dt.date.fromisoformat(e["start_date"])
+            return (d - dt.date(fy - 1, 10, 1)).days + 1
+    return None
+
+
+def _lapse_days(fy, events):
+    return sum((dt.date.fromisoformat(e["end_date"]) - dt.date.fromisoformat(e["start_date"])).days
+               for e in events if e["event_kind"] == "shutdown")
+
+
+def step_timeline(out, only_fy=None):
+    import pyarrow.dataset as ds
+    cal_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "database/seed_approp_calendar.json")
+    cal_rows, cal_by_fy = _cal_events(cal_path)
+
+    # ---- the annual layer, taken from the extracts that are already controlled.
+    # Re-scanning File B here would mean a second implementation of its grain
+    # rule -- the replicated-row collapse in step_execution -- and a second
+    # implementation is exactly what a control cannot check.
+    sbr_p = os.path.join(out, "sbr.json")
+    exe_p = os.path.join(out, "execution.json")
+    if not (os.path.exists(sbr_p) and os.path.exists(exe_p)):
+        print("  sbr.json / execution.json not staged yet; run --step sbr and --step execution first")
+        return
+    with open(sbr_p) as fh: sbr = json.load(fh)
+    with open(exe_p) as fh: exe = json.load(fh)
+    resources = sbr["rows"].get("dm_exec_resource", [])
+    detail = exe["rows"].get("dm_exec_detail", [])
+    acct_dim = {(r["fiscal_year"], r["treasury_account"]): r
+                for r in exe["rows"].get("dm_exec_account", [])}
+    if not resources:
+        print("  sbr.json carries no dm_exec_resource (pre program-year extract); skipping")
+        return
+
+    annual, unmapped = {}, collections.Counter()
+    for r in resources:
+        if r.get("scope") != "DOW": continue
+        fy = r["fiscal_year"]; cat = _approp_cat(r.get("federal_account_name"))
+        if cat == "Other": unmapped[r.get("federal_account_name")] += r.get("obligations_incurred") or 0.0
+        py = r.get("bpoa")
+        k = (fy, py, cat, r.get("agency_code") or "")
+        a = annual.setdefault(k, {"fiscal_year": fy, "program_year": py, "appropriation": cat,
+                                  "agency_code": r.get("agency_code") or "",
+                                  "agency_name": AGENCY_NAME.get(r.get("agency_code") or "", ""),
+                                  "is_current_year": (py == fy),
+                                  "accounts": 0, "resources": 0.0, "obligations": 0.0,
+                                  "unobligated": 0.0, "outlays": 0.0})
+        a["accounts"] += 1
+        a["resources"] += r.get("total_budgetary_resources") or 0.0
+        a["obligations"] += r.get("obligations_incurred") or 0.0
+        a["unobligated"] += r.get("unobligated_balance") or 0.0
+        a["outlays"] += r.get("gross_outlays") or 0.0
+    annual_rows = [{**v, "resources": round(v["resources"], 2),
+                    "obligations": round(v["obligations"], 2),
+                    "unobligated": round(v["unobligated"], 2),
+                    "outlays": round(v["outlays"], 2)} for v in annual.values()]
+
+    # ---- the personnel share per appropriation, which is what the model needs.
+    # Compensation is paid on a payroll schedule and has no year-end timing
+    # question in it; contract-like spending is what the contract shape
+    # describes. The share comes from File B detail, which exists for the three
+    # most recent years, and a year without detail takes that appropriation's
+    # median across the years that have it -- stated on the row.
+    pers_by = collections.defaultdict(lambda: collections.defaultdict(float))
+    tot_by = collections.defaultdict(lambda: collections.defaultdict(float))
+    for r in detail:
+        if r.get("scope") != "DOW" or r.get("funding_source") not in (None, "D"): continue
+        d = acct_dim.get((r["fiscal_year"], r["treasury_account"]))
+        cat = _approp_cat(d.get("federal_account_name") if d else None)
+        o = r.get("obligations") or 0.0
+        tot_by[cat][r["fiscal_year"]] += o
+        if (r.get("object_class_code") or "")[:2] in ("10", "11", "12", "13"):
+            pers_by[cat][r["fiscal_year"]] += o
+    pers_share = {}
+    for cat, years in tot_by.items():
+        per_fy = {fy: (pers_by[cat][fy] / t if t else 0.0) for fy, t in years.items() if t}
+        if not per_fy: continue
+        med = sorted(per_fy.values())[len(per_fy) // 2]
+        pers_share[cat] = {"by_fy": per_fy, "median": med}
+
+    # ---- the dated layer. Cached per fiscal year: each device call is capped
+    # near three minutes and a six-year scan does not reliably fit in one.
+    cache_dir = os.path.join(out, ".timeline_cache"); os.makedirs(cache_dir, exist_ok=True)
+    base = os.path.join(WAREHOUSE, "contracts")
+    vs = vintages(); current = vs[-1]
+    years = sorted(int(d.split("=", 1)[1])
+                   for d in os.listdir(os.path.join(base, f"vintage={current}"))
+                   if d.startswith("fy="))
+    if only_fy: years = [y for y in years if y == only_fy]
+
+    scanned = {}
+    for fy in years:
+        cp = os.path.join(cache_dir, f"fy{fy}-{current}.json")
+        if os.path.exists(cp):
+            with open(cp) as fh: scanned[fy] = json.load(fh)
+            print(f"  FY{fy}: cached"); continue
+        p = os.path.join(base, f"vintage={current}/fy={fy}")
+        if not os.path.isdir(p): continue
+        d = ds.dataset(p, format="parquet")
+        mon = collections.Counter(); act = collections.Counter()
+        hold = collections.defaultdict(collections.Counter)
+        hold_act = collections.Counter(); hold_name = {}
+        cy_mon = collections.defaultdict(collections.Counter)   # approp -> month -> $
+        cov = {"total": 0.0, "dated": 0.0, "single_tas": 0.0, "dow_tas": 0.0, "current_year": 0.0}
+        for b in d.to_batches(columns=["action_date", "federal_action_obligation",
+                                       "funding_sub_agency_name",
+                                       "treasury_accounts_funding_this_award"],
+                              batch_size=300_000):
+            ad = b["action_date"].to_pylist()
+            ob = b["federal_action_obligation"].to_pylist()
+            fs = b["funding_sub_agency_name"].to_pylist()
+            ta = b["treasury_accounts_funding_this_award"].to_pylist()
+            for i, day in enumerate(ad):
+                a = ob[i] or 0.0
+                cov["total"] += a
+                if day is None: continue
+                m = ((day.year * 12 + day.month - 1) - ((fy - 1) * 12 + 9)) + 1
+                if m < 1 or m > 12: continue
+                cov["dated"] += a
+                mon[m] += a; act[m] += 1
+                nm = fs[i]
+                if nm:
+                    k = HOLDER_SHORT.get(nm, nm)
+                    hold[k][m] += a; hold_act[k] += 1; hold_name[k] = nm
+                s = ta[i]
+                if not s or ";" in s: continue
+                cov["single_tas"] += a
+                pt = _parse_tas(s)
+                if not pt: continue
+                aid, bp, _ep, _main = pt
+                if aid not in DOW_CODES: continue
+                cov["dow_tas"] += a
+                if bp == fy:
+                    cov["current_year"] += a
+                    # The account name is not on the contract row; the appropriation
+                    # comes from the account dimension the File B extract already built.
+                    ad_ = acct_dim.get((fy, s)) or {}
+                    cy_mon[_approp_cat(ad_.get("federal_account_name"))][m] += a
+        rec = {"months": {str(m): round(mon[m], 2) for m in range(1, 13)},
+               "actions": {str(m): act[m] for m in range(1, 13)},
+               "holders": {k: {str(m): round(v[m], 2) for m in range(1, 13)}
+                           for k, v in hold.items()},
+               "holder_actions": dict(hold_act), "holder_names": hold_name,
+               "current_year_months": {c: {str(m): round(v[m], 2) for m in range(1, 13)}
+                                       for c, v in cy_mon.items()},
+               "coverage": {k: round(v, 2) for k, v in cov.items()}}
+        with open(cp, "w") as fh: json.dump(rec, fh)
+        scanned[fy] = rec
+        print(f"  FY{fy}: ${cov['dated']/1e9:,.1f}B dated, {len(hold)} fund holders, "
+              f"current-year sample ${cov['current_year']/1e9:,.1f}B")
+
+    # ---- the reporting frontier, the same rule the contract timing step uses.
+    # A month is observed when it carries at least half the median month's
+    # action count, and the frontier is the last observed month counting
+    # consecutively from October. Reading the maximum dated month instead is the
+    # bug this rule exists to prevent; see TIME-04.
+    month_rows, holder_rows, cy_rows, cov_rows, model_rows, trend_rows = [], [], [], [], [], []
+    for fy, rec in sorted(scanned.items()):
+        acts = {int(k): v for k, v in rec["actions"].items()}
+        full, _fd, _dte = _reporting_frontier(fy, acts)
+        complete = full >= 12
+        obs_months = list(range(1, full + 1)) or [1]
+        mon = {int(k): v for k, v in rec["months"].items()}
+        tot = sum(mon[m] for m in obs_months)
+        ev = cal_by_fy.get(fy, [])
+        enacted = _enacted_day(fy, ev); lapse = _lapse_days(fy, ev)
+        # The enactment expressed as a fiscal MONTH boundary, because the dated
+        # layer is monthly: the month the act was signed in, and everything
+        # before it.
+        enacted_month = None
+        if enacted:
+            d0 = dt.date(fy - 1, 10, 1) + dt.timedelta(days=enacted - 1)
+            enacted_month = (d0.month - 10) % 12 + 1
+
+        cum = 0.0
+        for m in range(1, 13):
+            observed = m <= full
+            cum += mon.get(m, 0.0) if observed else 0.0
+            month_rows.append({"fiscal_year": fy, "fy_month": m, "month_label": FY_MONTH_LABEL[m - 1],
+                               "dimension": "total", "dim_key": "DOW", "dim_label": "Department",
+                               "obligation": round(mon.get(m, 0.0), 2) if observed else 0.0,
+                               "action_count": acts.get(m, 0) if observed else 0,
+                               "cum_obligation": round(cum, 2),
+                               "share_pct": round(100.0 * mon.get(m, 0.0) / tot, 4) if (observed and tot) else 0.0,
+                               "is_observed": observed})
+
+        ranked = sorted(rec["holders"].items(),
+                        key=lambda kv: -sum(kv[1].values()))[:TIMELINE_HOLDERS]
+        for k, mm in ranked:
+            mv = {int(a): b for a, b in mm.items()}
+            htot = sum(mv.get(m, 0.0) for m in obs_months)
+            if htot <= 0: continue
+            c = 0.0
+            for m in range(1, 13):
+                observed = m <= full
+                c += mv.get(m, 0.0) if observed else 0.0
+                month_rows.append({"fiscal_year": fy, "fy_month": m, "month_label": FY_MONTH_LABEL[m - 1],
+                                   "dimension": "fund_holder", "dim_key": k,
+                                   "dim_label": rec["holder_names"].get(k, k),
+                                   "obligation": round(mv.get(m, 0.0), 2) if observed else 0.0,
+                                   "action_count": 0, "cum_obligation": round(c, 2),
+                                   "share_pct": round(100.0 * mv.get(m, 0.0) / htot, 4) if (observed and htot) else 0.0,
+                                   "is_observed": observed})
+            in_bill = k not in NON_DEFENSE_HOLDERS
+            pre_n = (enacted_month - 1) if (enacted_month and in_bill) else 0
+            pre = sum(mv.get(m, 0.0) for m in range(1, enacted_month)) if pre_n else None
+            avg = htot / len(obs_months)
+            pace = (round((pre / pre_n) / avg, 4)
+                    if (pre is not None and pre_n and avg and pre_n <= full) else None)
+            holder_rows.append({
+              "fiscal_year": fy, "dim_key": k, "dim_label": rec["holder_names"].get(k, k),
+              "fy_obligation": round(htot, 2), "actions": rec["holder_actions"].get(k, 0),
+              "months_observed": full, "is_complete_year": complete,
+              "q1_share_pct": round(100.0 * sum(mv.get(m, 0.0) for m in (1, 2, 3)) / htot, 4),
+              "sep_share_pct": round(100.0 * mv.get(12, 0.0) / htot, 4) if complete else None,
+              "pre_enactment_share_pct": round(100.0 * pre / htot, 4) if pre is not None else None,
+              "pre_enactment_months": pre_n or None,
+              "pre_enactment_pace_index": pace,
+              "in_defense_bill": in_bill,
+              "enacted_month": enacted_month, "lapse_days": lapse,
+              "cr_days": (enacted - 1) if enacted else (365 if not enacted else None)})
+
+        # -- the current-year dated SAMPLE, published with its own coverage on
+        # every row. It is an indicator of shape, never a measurement of level,
+        # and the coverage moves from 8.5% to 23.0% across these years, so the
+        # page compares shapes within a year and never levels across years.
+        cyc = rec["coverage"]
+        cy_cov = (100.0 * cyc["current_year"] / cyc["dated"]) if cyc["dated"] else 0.0
+        for cat, mm in rec["current_year_months"].items():
+            mv = {int(a): b for a, b in mm.items()}
+            ctot = sum(mv.get(m, 0.0) for m in obs_months)
+            if ctot <= 0: continue
+            for m in obs_months:
+                cy_rows.append({"fiscal_year": fy, "fy_month": m,
+                                "month_label": FY_MONTH_LABEL[m - 1], "appropriation": cat,
+                                "obligation": round(mv.get(m, 0.0), 2),
+                                "share_pct": round(100.0 * mv.get(m, 0.0) / ctot, 4),
+                                "sample_obligation": round(ctot, 2),
+                                "coverage_pct": round(cy_cov, 4)})
+
+        for key, lab, num, den, note in [
+          ("dated", "Contract actions carrying a usable action date", cyc["dated"], cyc["total"],
+           "Actions dated outside their own fiscal year are excluded; they are a handful."),
+          ("single_tas", "Contract dollars naming exactly one Treasury account",
+           cyc["single_tas"], cyc["dated"],
+           "An action naming several accounts cannot be attributed to one of them: the obligation "
+           "is never split across the accounts on the row. Those dollars are excluded rather than "
+           "apportioned."),
+          ("dow_tas", "…and that account is a Department account", cyc["dow_tas"], cyc["dated"], None),
+          ("current_year", "…and its programme year is this fiscal year",
+           cyc["current_year"], cyc["dated"],
+           "This is the whole dated population that can be cut by colour of money and programme "
+           "year at once. It is a sample whose size moves with the year, so it carries shape and "
+           "never level.")]:
+            cov_rows.append({"fiscal_year": fy, "measure_key": key, "measure_label": lab,
+                             "numerator": round(num, 2), "denominator": round(den, 2),
+                             "pct": round(100.0 * num / den, 4) if den else 0.0, "note": note})
+
+        # -- the MODEL. Each appropriation's complete annual obligation for the
+        # year's own money, spread across the months as
+        #     personnel share  x  a flat twelfth      (paid on a schedule)
+        #   + the remainder    x  the observed contract shape
+        # Where the appropriation belongs to one service, that service's own
+        # contract shape is used; Defense-wide money is spread across every
+        # agency in the Department and borrows the Department shape instead.
+        dept_shape = {m: (mon.get(m, 0.0) / tot if tot else 0.0) for m in obs_months}
+        svc_shape = {}
+        for k, mm in rec["holders"].items():
+            mv = {int(a): b for a, b in mm.items()}
+            s = sum(mv.get(m, 0.0) for m in obs_months)
+            if s > 0: svc_shape[k] = {m: mv.get(m, 0.0) / s for m in obs_months}
+        cy_annual = collections.defaultdict(float)
+        for a in annual_rows:
+            if a["fiscal_year"] == fy and a["is_current_year"]:
+                cy_annual[(a["appropriation"], a["agency_code"])] += a["obligations"]
+        for (cat, agency), amt in (sorted(cy_annual.items()) if complete else []):
+            if amt <= 0: continue
+            ps = pers_share.get(cat)
+            p = (ps["by_fy"].get(fy, ps["median"]) if ps else 0.0)
+            basis = "detail" if (ps and fy in ps["by_fy"]) else ("median" if ps else "none")
+            svc = SERVICE_OF_AGENCY.get(agency)
+            shape, shape_src = ((svc_shape[svc], svc) if svc and svc in svc_shape
+                                else (dept_shape, "Department"))
+            for m in obs_months:
+                v = amt * p / 12.0 + amt * (1 - p) * shape.get(m, 0.0)
+                model_rows.append({
+                  "fiscal_year": fy, "fy_month": m, "month_label": FY_MONTH_LABEL[m - 1],
+                  "appropriation": cat, "agency_code": agency,
+                  "agency_name": AGENCY_NAME.get(agency, ""),
+                  "modelled_obligation": round(v, 2),
+                  "annual_obligation": round(amt, 2),
+                  "personnel_share_pct": round(100.0 * p, 4),
+                  "personnel_share_basis": basis,
+                  "shape_source": shape_src,
+                  "method": "schedule_flat x personnel share + contract shape x remainder"})
+
+        trend_rows += [
+          {"fiscal_year": fy, "metric_key": k, "metric_label": lab, "value": v, "unit": u,
+           "cr_days": (enacted - 1) if enacted else 365, "lapse_days": lapse,
+           "enacted_day_of_fy": enacted, "months_observed": full, "is_complete_year": complete}
+          for k, lab, v, u in [
+            ("contract_obligation", "Contract obligations observed", round(tot, 2), "usd"),
+            ("q1_share", "Share obligated in the first quarter",
+             round(100.0 * sum(mon.get(m, 0.0) for m in (1, 2, 3)) / tot, 4) if tot else 0.0, "pct"),
+            ("sep_share", "Share obligated in September",
+             round(100.0 * mon.get(12, 0.0) / tot, 4) if (tot and complete) else None, "pct"),
+            ("pre_enactment_share", "Share obligated before the full-year act",
+             (round(100.0 * sum(mon.get(m, 0.0) for m in range(1, enacted_month)) / tot, 4)
+              if (enacted_month and tot) else None), "pct"),
+            # The comparable one. 1.00 means the months before the act ran at the
+            # year's own average monthly pace; 0.70 means they ran 30% below it.
+            # Both windows are divided by their own length, so a short continuing
+            # resolution and a long one are read on the same scale, and so is a
+            # year observed only to its reporting frontier.
+            ("pre_enactment_pace_index", "Pace before the full-year act, against the year's own average month",
+             (round((sum(mon.get(m, 0.0) for m in range(1, enacted_month)) / (enacted_month - 1))
+                    / (tot / len(obs_months)), 4)
+              if (enacted_month and enacted_month > 1 and tot and enacted_month - 1 <= full) else None), "index"),
+            ("post_enactment_pace_index", "Pace after the full-year act, against the year's own average month",
+             (round((sum(mon.get(m, 0.0) for m in range(enacted_month, full + 1)) / (full - enacted_month + 1))
+                    / (tot / len(obs_months)), 4)
+              if (enacted_month and tot and full >= enacted_month) else None), "index"),
+            ("current_year_coverage", "Dated dollars cuttable by programme year",
+             round(cy_cov, 4), "pct"),
+          ]]
+
+    unmapped_total = sum(unmapped.values())
+    print(f"  annual: {len(annual_rows):,} rows; unmapped account names ${unmapped_total/1e9:,.1f}B "
+          f"({', '.join(n for n, _ in unmapped.most_common(3)) or 'none'})")
+    print(f"  dated: {len(month_rows):,} month rows, {len(holder_rows):,} holder-years")
+    modelled_years = {r["fiscal_year"] for r in model_rows}
+    withheld = sorted(set(scanned) - modelled_years)
+    print(f"  modelled: {len(model_rows):,} rows over {len(modelled_years)} complete years"
+          + (f"; withheld for {withheld} (year in progress)" if withheld else ""))
+
+    write(out, "timeline.json", payload("execution_timeline", current, {
+        "dm_approp_event": cal_rows,
+        "dm_timeline_month": month_rows,
+        "dm_timeline_holder": holder_rows,
+        "dm_timeline_annual": annual_rows,
+        "dm_timeline_cy_month": cy_rows,
+        "dm_timeline_coverage": cov_rows,
+        "dm_timeline_model": model_rows,
+        "dm_timeline_trend": trend_rows,
+    }, source_path="contracts + accounts/file_a + accounts/file_b + database/seed_approp_calendar.json",
+       calendar_vintage=json.load(open(cal_path))["vintage"],
+       unmapped_account_obligations=round(unmapped_total, 2)))
+
+
 # ------------------------------------------------------------------- main ---
-STEPS = {"exhibits": step_exhibits, "pb_display": step_pb_display, "execution": step_execution, "timing": step_timing, "currency": step_currency, "sbr": step_sbr, "obligations": step_obligations, "awards": step_awards,
+STEPS = {"exhibits": step_exhibits, "pb_display": step_pb_display, "execution": step_execution, "timing": step_timing, "currency": step_currency, "sbr": step_sbr, "timeline": step_timeline,
+         "obligations": step_obligations, "awards": step_awards,
          "filec": step_filec, "assistance": step_assistance, "program": step_program,
          "knowledge": step_knowledge,
          "crosswalk": step_crosswalk, "catalog": step_catalog,
@@ -4912,7 +5404,7 @@ def main():
     for nm in names:
         print(f"[{nm}]")
         fn = STEPS[nm]
-        fn(a.out, a.fy) if nm in ("awards", "assistance", "program", "timing") else fn(a.out)
+        fn(a.out, a.fy) if nm in ("awards", "assistance", "program", "timing", "timeline") else fn(a.out)
     print("done.")
 
 if __name__ == "__main__":
