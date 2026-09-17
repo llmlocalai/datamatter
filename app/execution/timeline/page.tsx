@@ -266,7 +266,7 @@ export default async function TimelinePage() {
           Affairs, and the exchange services are not appropriated at all. Indexing them against the
           Defense enactment date would produce a number with nothing behind it.
         </p>
-        <div className="grid sm:grid-cols-2 gap-6 mt-8">
+        <div className="grid sm:grid-cols-2 gap-6 mt-8 [&>*]:min-w-0">
           <Finding title={`${worst.key} is the clearest case in the data`} tone="critical">
             Its index is {worst.byYear[2021]?.toFixed(2)}, {worst.byYear[2022]?.toFixed(2)},{' '}
             {worst.byYear[2023]?.toFixed(2)}, {worst.byYear[2024]?.toFixed(2)} and{' '}
@@ -518,7 +518,7 @@ export default async function TimelinePage() {
               what would have to exist in the published record before any of it could be measured
               properly.">
         <div className="grid lg:grid-cols-2 gap-6">
-          <div>
+          <div className="min-w-0">
             <h3 className="text-base font-semibold text-navy-100 mb-3">On the execution side</h3>
             <ol className="space-y-3 text-sm text-navy-300 leading-relaxed list-decimal pl-5">
               <li>
@@ -580,6 +580,15 @@ export default async function TimelinePage() {
             </ol>
           </div>
         </div>
+        <p className="mt-8 text-sm text-navy-400 leading-relaxed max-w-3xl">
+          The companion page,{' '}
+          <Link href="/execution/chain" className="text-accent-400 hover:underline">
+            funds distribution and the execution lag
+          </Link>, takes the same calendar down to one component and one colour of money at a time:
+          when the authority arrived, when each type of spending moved against it, and what a
+          continuing resolution costs in execution days. It trades this page&rsquo;s coverage for
+          that page&rsquo;s depth.
+        </p>
       </Section>
     </Shell>
   );

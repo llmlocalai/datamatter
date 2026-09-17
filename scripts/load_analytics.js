@@ -74,6 +74,121 @@ async function openLoad(client, datasetKey, p, script) {
 // ------------------------------------------------------------- the controls --
 // Each returns [{fiscal_year, status, observed, expected, tolerance, message}]
 const CONTROLS = {
+  // ---- the funds-distribution chain. The two that matter most are CHN-01,
+  // which ties the whole unit table back to File A, and CHN-05, which re-derives
+  // the continuing-resolution sensitivity in SQL from the points it was taken
+  // over rather than reading the published slope back.
+  'CHN-01': async (c) => (await c.query(`
+    WITH a AS (
+      SELECT r.fiscal_year, r.agency_code, sum(r.obligations_incurred) AS filea
+        FROM dm_exec_resource r JOIN dm_load l ON l.id = r.load_id AND l.is_current
+       WHERE r.scope = 'DOW' AND r.bpoa = r.fiscal_year
+       GROUP BY r.fiscal_year, r.agency_code),
+      u AS (
+      SELECT n.fiscal_year, n.agency_code, sum(n.obligations) AS chain
+        FROM dm_chain_unit n JOIN dm_load l2 ON l2.id = n.load_id AND l2.is_current
+       GROUP BY n.fiscal_year, n.agency_code)
+    SELECT u.fiscal_year, sum(u.chain) AS observed, sum(a.filea) AS expected
+      FROM u JOIN a ON a.fiscal_year = u.fiscal_year AND a.agency_code = u.agency_code
+     GROUP BY u.fiscal_year ORDER BY u.fiscal_year`)).rows.map((r) => {
+    const v = Math.abs(r.observed - r.expected) / Math.max(1, Math.abs(r.expected)) * 100;
+    return { fiscal_year: r.fiscal_year, observed: r.observed, expected: r.expected,
+      tolerance: 0.01, variance_pct: v, status: v <= 0.01 ? 'pass' : 'fail',
+      message: `FY${r.fiscal_year}: the chain's own-year obligations tie to File A within ${v.toFixed(5)}%.` };
+  }),
+
+  'CHN-02': async (c) => (await c.query(`
+    WITH s AS (
+      SELECT a.fiscal_year, a.agency_code, a.appropriation,
+             min(a.day_of_fy) AS first_day,
+             count(*) FILTER (WHERE a.state = 'enacted')::int AS enacted_steps,
+             max(a.authority_available) FILTER (WHERE a.state = 'enacted') AS enacted_amt,
+             count(*) FILTER (WHERE a.state = 'lapse' AND a.authority_available <> 0)::int AS bad_lapse
+        FROM dm_chain_authority a JOIN dm_load l ON l.id = a.load_id AND l.is_current
+       GROUP BY a.fiscal_year, a.agency_code, a.appropriation)
+    SELECT s.fiscal_year,
+           count(*)::int AS units,
+           count(*) FILTER (WHERE s.first_day <> 1)::int AS bad_start,
+           count(*) FILTER (WHERE s.bad_lapse > 0)::int AS lapse_with_money,
+           count(*) FILTER (WHERE s.enacted_steps > 0
+                              AND abs(s.enacted_amt - u.ba_appropriated)
+                                  > greatest(1, abs(u.ba_appropriated) * 0.0001))::int AS bad_amount
+      FROM s JOIN dm_chain_unit u ON u.fiscal_year = s.fiscal_year
+         AND u.agency_code = s.agency_code AND u.appropriation = s.appropriation
+      JOIN dm_load l2 ON l2.id = u.load_id AND l2.is_current
+     GROUP BY s.fiscal_year ORDER BY s.fiscal_year`)).rows.map((r) => {
+    const bad = r.bad_start + r.lapse_with_money + r.bad_amount;
+    return { fiscal_year: r.fiscal_year, observed: bad, expected: 0, tolerance: 0,
+      variance_pct: r.units ? 100 * bad / r.units : 0, status: bad ? 'fail' : 'pass',
+      message: bad
+        ? `FY${r.fiscal_year}: of ${r.units} units, ${r.bad_start} do not open on 1 October, ${r.lapse_with_money} carry authority during a lapse, ${r.bad_amount} end on an amount that is not File A's enacted figure.`
+        : `FY${r.fiscal_year}: all ${r.units} authority curves open on 1 October, carry nothing through a lapse, and end on File A's own enacted amount.` };
+  }),
+
+  'CHN-03': async (c) => (await c.query(`
+    WITH g AS (
+      SELECT x.fiscal_year, x.agency_code, x.appropriation,
+             max(x.residual_days) AS residual,
+             bool_and(x.applicable) AS applicable,
+             sum(x.days) FILTER (WHERE x.basis = 'assumption') AS assumed,
+             sum(x.days) FILTER (WHERE x.basis = 'measured') AS measured_days
+        FROM dm_chain_lag x JOIN dm_load l ON l.id = x.load_id AND l.is_current
+       GROUP BY x.fiscal_year, x.agency_code, x.appropriation)
+    SELECT g.fiscal_year, count(*)::int AS units,
+           count(*) FILTER (WHERE NOT g.applicable AND g.assumed > 0.01)::int AS ghost_days,
+           count(*) FILTER (WHERE g.applicable
+                              AND abs(g.assumed - g.residual) > 0.6)::int AS unfooted,
+           count(*) FILTER (WHERE g.measured_days <> 0)::int AS measured_nonzero
+      FROM g GROUP BY g.fiscal_year ORDER BY g.fiscal_year`)).rows.map((r) => {
+    const bad = r.ghost_days + r.unfooted + r.measured_nonzero;
+    return { fiscal_year: r.fiscal_year, observed: bad, expected: 0, tolerance: 0,
+      variance_pct: r.units ? 100 * bad / r.units : 0, status: bad ? 'fail' : 'pass',
+      message: bad
+        ? `FY${r.fiscal_year}: ${r.ghost_days} units assign days to an unobserved step where no residual exists, ${r.unfooted} assumed splits do not sum to their own residual, ${r.measured_nonzero} measured endpoints carry a day count they should not.`
+        : `FY${r.fiscal_year}: every assumed split sums to its own measured residual, and no unit assigns days to a step where execution preceded the authority.` };
+  }),
+
+  'CHN-04': async (c) => (await c.query(`
+    SELECT f.fiscal_year, count(*)::int AS cells,
+           count(*) FILTER (WHERE f.d10_day > f.d50_day OR f.d50_day > f.d90_day)::int AS unordered,
+           count(*) FILTER (WHERE f.d90_day > f.observed_to_day)::int AS beyond,
+           count(*) FILTER (WHERE f.cmp_day > f.observed_to_day)::int AS window_too_long,
+           count(*) FILTER (WHERE f.basis <> 'observed_upper_bound')::int AS unlabelled
+      FROM dm_chain_first f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+     GROUP BY f.fiscal_year ORDER BY f.fiscal_year`)).rows.map((r) => {
+    const bad = r.unordered + r.beyond + r.window_too_long + r.unlabelled;
+    return { fiscal_year: r.fiscal_year, observed: bad, expected: 0, tolerance: 0,
+      variance_pct: r.cells ? 100 * bad / r.cells : 0, status: bad ? 'fail' : 'pass',
+      message: bad
+        ? `FY${r.fiscal_year}: of ${r.cells} cells, ${r.unordered} have quantiles out of order, ${r.beyond} put a quantile past the last day observed, ${r.window_too_long} compare over a window longer than the year was observed for, ${r.unlabelled} are not labelled as an upper bound.`
+        : `FY${r.fiscal_year}: all ${r.cells} cells have ordered quantiles inside their own observation, compare over a window no year exceeds, and are labelled as upper bounds.` };
+  }),
+
+  'CHN-05': async (c) => (await c.query(`
+    -- Re-derive the Theil-Sen slope from the points it was taken over: expand the
+    -- stored observations, take every pairwise slope, and read the median. Shares
+    -- no code with the extract that published it.
+    WITH o AS (
+      SELECT s.agency_code, s.appropriation, s.metric, s.days_per_30_cr_days AS published,
+             (j->>'cr_days')::numeric AS x,
+             (j->>(CASE WHEN s.metric = 'd10' THEN 'd10' ELSE 'd50' END))::numeric AS y
+        FROM dm_chain_sensitivity s
+        JOIN dm_load l ON l.id = s.load_id AND l.is_current,
+             LATERAL jsonb_array_elements(s.observations::jsonb) AS j),
+      p AS (
+      SELECT a.agency_code, a.appropriation, a.metric, a.published,
+             (b.y - a.y) / (b.x - a.x) AS slope
+        FROM o a JOIN o b ON b.agency_code = a.agency_code
+         AND b.appropriation = a.appropriation AND b.metric = a.metric AND b.x > a.x)
+    SELECT p.agency_code, p.appropriation, p.metric, max(p.published) AS published,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY p.slope) * 30 AS recomputed
+      FROM p GROUP BY p.agency_code, p.appropriation, p.metric`)).rows.map((r) => {
+    const v = Math.abs(r.recomputed - r.published);
+    return { fiscal_year: null, observed: r.recomputed, expected: r.published,
+      tolerance: 0.15, variance_pct: v, status: v <= 0.15 ? 'pass' : 'fail',
+      message: `${r.agency_code} ${r.appropriation} (${r.metric}): re-derived ${Number(r.recomputed).toFixed(2)} days per 30 CR days against a published ${Number(r.published).toFixed(2)}.` };
+  }),
+
   // ---- the execution timeline. Each of these recomputes; none reads back a
   // figure the extract already wrote. See CLAUDE.md on why that distinction is
   // the difference between a control and a restatement with a pass printed on it.
@@ -1757,6 +1872,7 @@ const CONTROLS = {
       ['catalog.json',    'source_catalog',        'scripts/etl_analytics.py --step catalog'],
       ['jbook.json',      'jbook_corpus',          'scripts/etl_analytics.py --step jbook'],
       ['timeline.json',   'execution_timeline',    'scripts/etl_analytics.py --step timeline'],
+      ['chain.json',      'execution_chain',       'scripts/etl_analytics.py --step chain'],
       ['raw.json',        'raw_samples',           'scripts/etl_analytics.py --step raw'],
     ];
     const COLS = {
@@ -1928,6 +2044,25 @@ const CONTROLS = {
         'personnel_share_basis','shape_source','method'],
       dm_timeline_trend: ['fiscal_year','metric_key','metric_label','value','unit','cr_days',
         'lapse_days','enacted_day_of_fy','months_observed','is_complete_year'],
+      dm_chain_unit: ['fiscal_year','agency_code','agency_name','appropriation','fund_life',
+        'accounts','ba_appropriated','resources','obligations','outlays','unobligated'],
+      dm_chain_authority: ['fiscal_year','agency_code','appropriation','seq','event_date',
+        'day_of_fy','state','authority_available','basis','public_law','note'],
+      dm_chain_first: ['fiscal_year','agency_code','appropriation','oc_group','oc_label',
+        'first_date','day_of_fy','d10_day','d50_day','d90_day','observed_to_day','cmp_day',
+        'd10_cmp','d50_cmp','cmp_amount','cmp_years','d50_from_enactment','days_from_enactment',
+        'actions','sample_amount','positive_amount','oc_from_file_pct','basis'],
+      dm_chain_oc: ['fiscal_year','agency_code','appropriation','oc_group','oc_label',
+        'funding_source','rows','obligations','outlays','undelivered'],
+      dm_chain_lag: ['fiscal_year','agency_code','appropriation','step_key','step_label',
+        'step_detail','authority','days','basis','profile','profile_label','profile_note',
+        'share_pct','applicable','residual_days','total_days','authority_day_of_fy',
+        'gap_to_authority','d10_day','d50_day','d90_day','sample_amount','sample_actions',
+        'first_action_day','enacted_day_of_fy','first_obligation_date','first_oc_group',
+        'first_oc_label'],
+      dm_chain_sensitivity: ['agency_code','agency_name','appropriation','metric','profile',
+        'comparison_window_days','years','slope_days_per_cr_day','days_per_30_cr_days',
+        'observations'],
       dm_source_row: ['source_key','source_label','row_label','why','record'],
       dm_trace_row: ['step','source_key','source_label','key_field','key_value','note',
         'is_present','record'],

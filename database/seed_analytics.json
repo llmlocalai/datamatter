@@ -209,6 +209,17 @@
       "refresh_cadence": "With the warehouse; the calendar is curated and changes when a law is enacted",
       "limitations": "A contract action names exactly one Treasury account on 8.5% to 23.0% of its dollars depending on the year, so the dated cut by colour of money and programme year is a SAMPLE whose size moves with the year: it carries shape, never level, and is never a denominator. File A and File B hold one submission per fiscal year and contain no within-year series at all. The model is withheld for a year in progress, because File B's figure is then period-to-date and the contract shape stops at the reporting frontier.",
       "sort_order": 102
+    },
+    {
+      "key": "execution_chain",
+      "label": "Funds-distribution chain and execution lag",
+      "source_system": "File A + File B + FPDS action dates + the curated appropriation calendar",
+      "source_path": "accounts/file_a, accounts/file_b, contracts/, database/seed_approp_calendar.json",
+      "grain": "Fiscal year x component x colour of money x object class major group",
+      "description": "For the year's OWN appropriation: when authority arrived and at what rate, when execution actually started and on what type of spending, how long each observable link took, and what a continuing resolution costs in execution days measured from this Department's own six years. Four bases, never mixed: File A and File B measured and complete but carrying no within-year timing; the appropriation calendar measured and dated; the execution ramp measured but censored, an upper bound taken from the fraction of contract dollars that name their Treasury account; and the interior of the distribution chain assumed, because apportionment, allocation, allotment and sub-allotment appear in no published file.",
+      "refresh_cadence": "With the warehouse; the calendar changes when a law is enacted",
+      "limitations": "Apportionment, allocation, allotment and sub-allotment are published nowhere here, so only the endpoints of the chain are observed and the interior is an assumption with its authority printed beside it. The ramp is censored: only 1-6% of current-year dollars name their Treasury account, the attribution is award-level rather than action-level, and an earlier obligation that named no account is invisible. File A and File B hold one submission per fiscal year and contain no within-year series at all.",
+      "sort_order": 103
     }
   ],
   "controls": [
@@ -794,6 +805,51 @@
       "sort_order": 456,
       "assertion": "Each fiscal year carries all five coverage measures, no numerator exceeds its denominator, and the current-year sample coverage is published for every year the sample is drawn on.",
       "rationale": "The dated cut by colour of money and programme year is a sample whose size moves from 8.5% to 23.0% across these years. Published without its coverage it reads as a measurement of the Department, which it is not. This control is what stops the coverage silently going missing from a row the page then draws anyway.",
+      "authority": null,
+      "severity": "high"
+    },
+    {
+      "code": "CHN-01",
+      "name": "The chain's own-year obligations tie to File A",
+      "sort_order": 460,
+      "assertion": "For every fiscal year and component, the obligations on the chain's analytic units equal File A's obligations on accounts whose programme year is that fiscal year.",
+      "rationale": "Every lag, ramp and recommendation on the page is read against these units. If the unit table has drifted onto a different population -- all programme years instead of the year's own money is the easy way to do it -- then every figure downstream is describing something other than what it is labelled.",
+      "authority": "OMB Circular A-136 (Statement of Budgetary Resources)",
+      "severity": "critical"
+    },
+    {
+      "code": "CHN-02",
+      "name": "The authority curve opens on 1 October and ends on the enacted amount",
+      "sort_order": 461,
+      "assertion": "Every unit's authority steps begin on the first day of the fiscal year, carry no authority through a lapse in appropriations, and where a full-year act exists end on File A's own budget authority appropriated for that unit.",
+      "rationale": "The authority curve is derived, not published, so both of its endpoints have to be pinned to File A figures and the rule only allowed to shape what runs between them. A curve carrying money through a lapse would assert the Department had authority it did not have.",
+      "authority": "31 U.S.C. 1341; public laws cited on the calendar",
+      "severity": "critical"
+    },
+    {
+      "code": "CHN-03",
+      "name": "No day is assigned to a step that was never waited on",
+      "sort_order": 462,
+      "assertion": "The assumed steps of each chain sum to that unit's own measured residual, the measured endpoints carry no day count, and a unit whose execution preceded its authority is assigned no assumed days at all.",
+      "rationale": "The interior of the distribution chain is published in no file, so the only discipline available is that the assumption divides a measured quantity and never invents one. Where execution ran ahead of the authority -- on the continuing resolution, or on carried-in balances -- there is no wait to divide, and filling the steps in anyway would manufacture a delay that did not happen.",
+      "authority": "DoD FMR Volume 3",
+      "severity": "high"
+    },
+    {
+      "code": "CHN-04",
+      "name": "Execution quantiles stay inside what was observed",
+      "sort_order": 463,
+      "assertion": "Every timing cell has d10 <= d50 <= d90, no quantile falls past the last day that cell was observed for, the same-point comparison window is no longer than any year's own observation, and every row is labelled as an upper bound.",
+      "rationale": "The ramp is measured on the fraction of contract dollars that name their Treasury account, so it is censored by construction and the label is not decoration. The window check is the one that matters: a live year's median is taken over fewer days, and comparing it against a closed year's full-year median reads as the live year running early when all it is doing is stopping sooner.",
+      "authority": null,
+      "severity": "high"
+    },
+    {
+      "code": "CHN-05",
+      "name": "The continuing-resolution sensitivity re-derives from its own points",
+      "sort_order": 464,
+      "assertion": "Expanding each published slope's stored observations and taking the median of every pairwise slope in SQL reproduces the published days-per-30-continuing-resolution-days.",
+      "rationale": "This slope is the figure a senior decision rests on -- what another month of continuing resolution does to execution -- so it gets an implementation that shares no code with the one that produced it. It is also the figure most easily got wrong: with five or six observations a least-squares slope is set by whichever year is furthest out, and two of these six years are unusual ones.",
       "authority": null,
       "severity": "high"
     }

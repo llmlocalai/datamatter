@@ -2309,3 +2309,185 @@ CREATE TABLE IF NOT EXISTS dm_timeline_trend (
 -- withheld, because that date does not govern it. Nullable and defaulted: the
 -- table is not empty when this column arrives.
 ALTER TABLE dm_timeline_holder ADD COLUMN IF NOT EXISTS in_defense_bill boolean NOT NULL DEFAULT true;
+
+-- ===========================================================================
+-- The funds-distribution chain and the execution lag (/execution/chain).
+--
+-- The unit of analysis is (fiscal year x component x colour of money) for the
+-- year's OWN appropriation -- programme year equal to fiscal year -- because a
+-- fiscal year's File A holds every programme year still executing in it and a
+-- lag measured across that mixture answers nothing.
+--
+-- What is measured and what is not, because the whole integrity of the page is
+-- this distinction:
+--   MEASURED, COMPLETE  File A and File B. Budget authority, resources,
+--                       obligations, outlays, by object class. Every dollar, and
+--                       one submission a fiscal year, so no within-year timing.
+--   MEASURED, DATED     the enactment, continuing-resolution and lapse dates.
+--   MEASURED, CENSORED  the execution ramp, from contract action dates against
+--                       accounts. An UPPER BOUND on how early money moved: only
+--                       1-6% of current-year dollars name their account.
+--   DERIVED             the authority step function. Both endpoints are File A
+--                       figures; only the shape between them is the CR rule.
+--   ASSUMED             the interior of the distribution chain. Apportionment,
+--                       allocation, allotment and sub-allotment appear in NO
+--                       public file. Only the endpoints are observed.
+-- Nothing assumed is ever added to anything measured.
+-- ===========================================================================
+
+CREATE TABLE IF NOT EXISTS dm_chain_unit (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year    int  NOT NULL,
+  agency_code    text NOT NULL,
+  agency_name    text,
+  appropriation  text NOT NULL,
+  fund_life      text,
+  accounts       int  NOT NULL DEFAULT 0,
+  ba_appropriated numeric(20,2) NOT NULL DEFAULT 0,
+  resources      numeric(20,2) NOT NULL DEFAULT 0,
+  obligations    numeric(20,2) NOT NULL DEFAULT 0,
+  outlays        numeric(20,2) NOT NULL DEFAULT 0,
+  unobligated    numeric(20,2) NOT NULL DEFAULT 0,
+  UNIQUE (load_id, fiscal_year, agency_code, appropriation)
+);
+
+-- The authority step function: when the unit had money, and how much.
+-- `state` is lapse | cr | enacted and they are not interchangeable. Under a
+-- lapse there is no authority at all; under a continuing resolution there is
+-- authority at the PRIOR year's annualised rate; at enactment the account
+-- carries its own enacted amount for the first time.
+CREATE TABLE IF NOT EXISTS dm_chain_authority (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year    int  NOT NULL,
+  agency_code    text NOT NULL,
+  appropriation  text NOT NULL,
+  seq            int  NOT NULL,
+  event_date     date NOT NULL,
+  day_of_fy      int  NOT NULL,
+  state          text NOT NULL,
+  authority_available numeric(20,2) NOT NULL DEFAULT 0,
+  basis          text NOT NULL,      -- measured | derived
+  public_law     text,
+  note           text
+);
+CREATE INDEX IF NOT EXISTS dm_chain_authority_idx
+  ON dm_chain_authority (load_id, fiscal_year, agency_code, appropriation, seq);
+
+-- Execution timing by TYPE OF EXECUTION (object class major group).
+-- d10/d50/d90 are the day of fiscal year by which that share of the cell's own
+-- observed obligation had been made. The FIRST action is carried too, but it is
+-- not the measure: at appropriation scale something obligates on 1 October every
+-- year, so the first action is identical in a year enacted in December and a
+-- year that opened with a 43-day lapse. The centre of mass moves.
+-- *_cmp are the same quantiles over `cmp_day`, the shortest window any year of
+-- that cell reaches, so the years compare like with like.
+CREATE TABLE IF NOT EXISTS dm_chain_first (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year    int  NOT NULL,
+  agency_code    text NOT NULL,
+  appropriation  text NOT NULL,
+  oc_group       text NOT NULL,
+  oc_label       text NOT NULL,
+  first_date     date,
+  day_of_fy      int,
+  d10_day        int,
+  d50_day        int,
+  d90_day        int,
+  observed_to_day int,
+  cmp_day        int,
+  d10_cmp        int,
+  d50_cmp        int,
+  cmp_amount     numeric(20,2) NOT NULL DEFAULT 0,
+  cmp_years      int NOT NULL DEFAULT 0,
+  d50_from_enactment int,
+  days_from_enactment int,
+  actions        int NOT NULL DEFAULT 0,
+  sample_amount  numeric(20,2) NOT NULL DEFAULT 0,
+  positive_amount numeric(20,2) NOT NULL DEFAULT 0,
+  oc_from_file_pct numeric(12,4),
+  basis          text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dm_chain_first_idx
+  ON dm_chain_first (load_id, fiscal_year, agency_code, appropriation, oc_group);
+
+-- The complete dimensional table: object class within component and colour of
+-- money, from File B. This is every dollar, and it carries no timing.
+CREATE TABLE IF NOT EXISTS dm_chain_oc (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year    int  NOT NULL,
+  agency_code    text NOT NULL,
+  appropriation  text NOT NULL,
+  oc_group       text NOT NULL,
+  oc_label       text NOT NULL,
+  funding_source text,
+  rows           int NOT NULL DEFAULT 0,
+  obligations    numeric(20,2) NOT NULL DEFAULT 0,
+  outlays        numeric(20,2) NOT NULL DEFAULT 0,
+  undelivered    numeric(20,2) NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS dm_chain_oc_idx
+  ON dm_chain_oc (load_id, fiscal_year, agency_code, appropriation, oc_group);
+
+-- The chain, one row per step. `basis` is measured on the two endpoints and
+-- assumption on every step between them, and `applicable` is false where the
+-- residual is zero or negative -- which happens whenever execution was already
+-- running before that authority arrived, on the continuing resolution or on
+-- carried-in balances. That is a finding, not a number to floor and forget.
+CREATE TABLE IF NOT EXISTS dm_chain_lag (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year    int  NOT NULL,
+  agency_code    text NOT NULL,
+  appropriation  text NOT NULL,
+  step_key       text NOT NULL,
+  step_label     text NOT NULL,
+  step_detail    text,
+  authority      text,
+  days           numeric(12,2) NOT NULL DEFAULT 0,
+  basis          text NOT NULL,      -- measured | assumption
+  profile        text,               -- operating | investment
+  profile_label  text,
+  profile_note   text,
+  share_pct      numeric(12,2),
+  applicable     boolean NOT NULL DEFAULT true,
+  residual_days  int,
+  total_days     int,
+  authority_day_of_fy int,
+  gap_to_authority int,
+  d10_day        int,
+  d50_day        int,
+  d90_day        int,
+  sample_amount  numeric(20,2) NOT NULL DEFAULT 0,
+  sample_actions int NOT NULL DEFAULT 0,
+  first_action_day int,
+  enacted_day_of_fy int,
+  first_obligation_date date,
+  first_oc_group text,
+  first_oc_label text
+);
+CREATE INDEX IF NOT EXISTS dm_chain_lag_idx
+  ON dm_chain_lag (load_id, fiscal_year, agency_code, appropriation, step_key);
+
+-- What a continuing resolution actually costs in execution time, measured from
+-- this Department's own six years rather than asserted. Theil-Sen rather than
+-- least squares: with five or six observations one unusual year sets an OLS
+-- slope, and FY2025 (a full-year CR) and FY2026 (two lapses) are both unusual.
+CREATE TABLE IF NOT EXISTS dm_chain_sensitivity (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  agency_code    text NOT NULL,
+  agency_name    text,
+  appropriation  text NOT NULL,
+  metric         text NOT NULL,      -- d10 | d50
+  profile        text,
+  comparison_window_days int NOT NULL DEFAULT 0,
+  years          int NOT NULL DEFAULT 0,
+  slope_days_per_cr_day numeric(14,4),
+  days_per_30_cr_days   numeric(14,2),
+  observations   text,               -- json: the points the slope was taken over
+  UNIQUE (load_id, agency_code, appropriation, metric)
+);
