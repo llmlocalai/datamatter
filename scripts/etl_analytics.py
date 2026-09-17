@@ -5421,7 +5421,12 @@ def step_timeline(out, only_fy=None):
 
 # Object class major groups -- "type of execution" in the terms a comptroller
 # uses. The two-digit prefix is the published OMB Circular A-11 major class.
-OC_GROUPS = [
+# NOTE the name. `OC_GROUPS` is already taken at the top of this file by the
+# four-way major-class map that `major_class()` unpacks as (codes, label) pairs.
+# Defining a second OC_GROUPS down here shadowed it at import time and broke
+# step_execution with "too many values to unpack" -- in a step that had run fine
+# for months and shares no code with this one.
+CHAIN_OC_GROUPS = [
   ("10", "Pay and benefits",        "Personnel compensation and benefits"),
   ("20", "Travel and transport",    "Travel and transportation of persons and things"),
   ("23", "Rent, comms and utilities", "Rental payments, communications, utilities"),

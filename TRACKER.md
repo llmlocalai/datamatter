@@ -1,20 +1,161 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-17 (fund distribution and the execution timeline)
+- **Last updated:** 2026-09-17 (the funds-distribution chain and execution lag)
 - **Live site:** https://datamatter.vercel.app
-- **Build status (2026-09-17):** `tsc --noEmit` clean and `next build` green, 34 routes,
-  1,559 static paths. Verified against a local Postgres replica in the cloud
-  container: every page and every endpoint requested on a running server,
-  screenshots at 1440px and 400px with no horizontal overflow and nothing under
-  the 12px type floor. The release-order guard was tested in both directions —
-  with the eight new tables DROPPED the build stays green, every page answers
-  200, `/execution/timeline` shows the migrate/refresh notice and
-  `/api/exec/timeline` answers 503 rather than an empty array.
+- **Build status (2026-09-17):** `tsc --noEmit` clean, `next build` green, 24 pages
+  and 1,560 static paths, every page and endpoint requested against a running
+  server, 400px and 1440px screenshots with no horizontal overflow and nothing
+  under the 12px type floor. The release-order guard was tested both directions.
   **Not yet loaded to Neon** — `npm run migrate` → `npm run refresh` → push.
-  The schema adds eight tables and one column, so the migrate is not optional.
-- **Control status (2026-09-17):** 65 load controls (58 + 7 new), plus the 14-test
-  SBR assurance suite. All seven new controls were made to fail on a corrupted
+  The schema adds fourteen tables and one column across the two passes below,
+  so the migrate is not optional.
+- **Control status (2026-09-17):** 70 load controls (58 + 7 + 5), plus the 14-test
+  SBR assurance suite. All twelve new controls were made to fail on a corrupted
   staged extract and then restored.
+
+---
+
+## Done — 2026-09-17 (twenty-first pass) — the funds-distribution chain and execution lag
+
+Asked for: *an execution timeline built from File A and File B, which have full
+coverage; infer the funding position increases, when established, when first
+executed, how much; multiple layers and dimensions — agency down to MDA and
+SOCOM, colour of money, type of execution; explain the assumptions; end with
+real actions and COAs for senior management.*
+
+### The premise had to be checked first, and it did not hold
+
+The ask rests on File A/File B carrying within-year timing. They do not, and the
+filename is what misleads.
+
+- `FY2025P01-P12_All_TAS_AccountBalances...csv` — **every row carries
+  `submission_period = FY2025P12`**. P01-P12 is the USASpending download REQUEST
+  RANGE; the account download returns the position as of the latest period in it.
+- Scanned **all 41 account CSVs** on the Mac, including the Consolidated store at
+  `knowledge-bank/.../Budget-Execution-Account-Data/Consolidated/` and the
+  `Manual-TAS-FullYear` downloads. Max distinct periods in any single-year file: **1**.
+  The Consolidated File A carries 6 — one per fiscal year.
+- `account_refresh_state.json` lists **24 zips, one period per fiscal year**, which
+  is the pipeline's own record of the same fact.
+- Consolidated File C contracts is **12,043,952 lines**, identical to the warehouse;
+  the 15.5M in `ACCOUNT-DATA-HANDOFF.md` was the pre-dedup source count.
+- File C carries 11 period labels but only **P03/P06/P09/P12** hold content, and
+  FY2025 totals **$13.0B against $491.7B** of contract obligation.
+- Neither sandbox can reach api.usaspending.gov (verified, connection refused).
+
+So `/execution/chain` is an inference page and its integrity is the four-bases
+split it prints at the top.
+
+### Built: `/execution/chain`
+
+- [x] **Analytic unit = (FY x component x colour of money), own-year money only.**
+  187 units. `CHN-01` (critical) ties them to File A's own obligations for
+  accounts whose programme year equals the fiscal year.
+- [x] **The authority step function.** Both endpoints are File A figures; only the
+  shape between them is the CR rule (prior year's annualised rate). Army O&M
+  FY2026 reads: day 1 lapse $0 → day 43 (12 Nov) CR $8.89B accrued → day 123
+  second lapse → day 126 (3 Feb) enacted **$70.12B**. `CHN-02` (critical) blocks a
+  curve that opens off 1 October, carries money through a lapse, or ends on an
+  amount that is not File A's.
+- [x] **First action is NOT the measure, and finding that out cost a rebuild.** At
+  appropriation scale something obligates on 1 October in almost every year, so
+  the first action is identical in a year enacted in December and a year that
+  opened with a 43-day lapse. Replaced with d10/d50/d90 of the cell's own
+  cumulative curve, pooled and dollar-weighted at unit level.
+- [x] **Same-point quantiles.** A year observed to day 168 has its median taken
+  over 168 days; comparing that against a closed year's 365 reads as the live
+  year running early. Every cell is ALSO measured over the shortest window any
+  year of that cell reaches. `CHN-04` blocks a window longer than an observation.
+- [x] **The chain anchors on AUTHORITY, not enactment.** Anchoring on enactment
+  gave Army O&M FY2026 a residual of zero — it was executing 112 days before the
+  act, on the CR. Nine units executed before their authority arrived and are
+  reported as such rather than floored.
+- [x] **Assumed interior, appropriation-aware.** Apportionment → allocation →
+  allotment → sub-allotment → commitment are published in no file here. The split
+  divides a MEASURED residual, uses an operating or investment profile (charging
+  a construction wait to allotment would be wrong), and `CHN-03` blocks a unit
+  that assigns days to a step it never waited on.
+- [x] **`CHN-05`: the CR sensitivity re-derives in SQL.** Theil-Sen slope of
+  execution timing against days-without-an-act, recomputed by expanding the
+  stored observations and taking the median pairwise slope. 44/44 pass.
+
+### The finding, after the first version of it was wrong
+
+The first cut led on median slopes by profile and claimed investment accounts
+slip while operating accounts do not. **Both medians are within two days of
+zero** (operating −1.6, investment −0.2) and the claim was false. The effect is
+in the tail, not the centre:
+
+- **3 of 22** component/colour pairs slip more than 5 days per 30 days of CR:
+  Navy family housing **+27.1**, Navy military construction **+13.6**, Army family
+  housing **+12.5**. All construction or housing; all on four observations.
+- Everything else, investment included, shows no detectable effect. Army O&M is
+  **−2.9**, Navy O&M **−3.9**.
+- So a Department-wide CR mitigation spends most of its effort on accounts that
+  do not respond to it. That is COA 1.
+
+### Two defects caught in review
+
+- **The object-class parser swept $1.1T into "Other"** — the largest bucket on the
+  page. File B writes `25.2`, FPDS writes `252`; stripping a trailing `.0` and
+  zero-filling turned `26.0` into `026` and read its major class as `02`. Now
+  splits on the decimal point and both spellings land together. Pay and benefits
+  $1,283.4B, contractual services $872.4B, equipment $357.6B, supplies $162.9B.
+- **A two-column grid pushed the page to 514px on a phone.** Grid children default
+  to `min-width: auto`, so a wide table refuses to shrink. It was not the SVGs,
+  which were already in scroll containers.
+
+### Shipped alongside
+
+`scripts/fetch_account_periods.py` — requests File A and File B one submission
+period at a time, which is the only way to get the monthly series. Resumable,
+polls the async generator, needs network the sandboxes do not have. Run it on the
+Mac and the censored and assumed layers of this page can be replaced with a
+measured monthly series at 100% coverage.
+
+### Fixed after the first hand-off: a shadowed module-level constant
+
+`--step all` crashed in **step_execution** — a step untouched by this work and
+working for months — with `too many values to unpack` inside `major_class()`.
+
+The chain block defined `OC_GROUPS` at the foot of `etl_analytics.py`. That name
+was already taken at line 219 by the four-way major-class map `major_class()`
+unpacks as `(codes, label)` pairs. Python binds module-level names in file order,
+so the later definition silently replaced the earlier one at import time and the
+break surfaced a thousand lines away from its cause. The duplicate was never even
+read — `_oc_group()` uses its own if-chain — so it was pure collateral.
+
+Renamed to `CHAIN_OC_GROUPS`, and an AST scan for module-level names defined more
+than once now comes back clean across the whole file.
+
+**The process lesson, which is the reusable part:** the timeline and chain steps
+were each verified by running `--step <name>` alone. Neither run imports the
+module in the state `--step all` does, so a shadowing bug is invisible to the
+targeted run that introduced it. **Run `--step all` before hand-off**, even when
+the change is confined to one step — it is the only run that exercises
+module-level binding order. Verified after the fix: exhibits and pb_display skip
+(no exhibit archive in the sandbox), execution, timing, sbr, timeline, chain,
+obligations, awards, filec, assistance and program all write; currency warns on
+no network as designed; `knowledge` stops only on a knowledge-bank path that does
+not resolve in the sandbox. Reloaded and rebuilt afterwards: 70 controls pass, 24
+pages 200, `major_class` back to its four groups ($3,399.2B contractual services
+and supplies, $2,919.1B personnel, $1,189.3B acquisition of assets).
+
+### Files
+`app/execution/chain/page.tsx` · `app/api/exec/chain/route.ts` ·
+`components/execution/ChainExplorer.tsx` · `lib/chain.ts` ·
+`step_chain` in `scripts/etl_analytics.py` · 6 tables in
+`database/schema.analytics.sql` · CHN-01..05 in `scripts/load_analytics.js` ·
+5 controls + 1 dataset in `database/seed_analytics.json` ·
+`scripts/fetch_account_periods.py` · nav and cross-links.
+
+### Open
+- The FPDS scan caches per fiscal year in `.staging/.chain_cache/first-v3-fy<N>-<vintage>.json`.
+  The key carries the extract version as well as the vintage, because a change to
+  what the scan records has to invalidate it and a stale cache is
+  indistinguishable from a working one until a figure is wrong.
+- `/execution` overflows a phone viewport by 1px. Pre-existing, cosmetic.
+- `.staging/_xfer/` holds this session's transfer tarballs and can be deleted.
 
 ---
 
