@@ -7,9 +7,9 @@ import { fmtB, fmtPct, fmtInt } from '@/components/format';
 import ChainExplorer from '@/components/execution/ChainExplorer';
 import { getProvenance } from '@/lib/analytics';
 import {
-  chainReady, getChainAuthority, getChainFirst, getChainLag, getChainOc,
-  getChainSensitivity, getChainUnits, AGENCY_LABEL,
-  type ChainLag, type ChainSensitivity,
+  chainReady, getChainAnomalies, getChainArchetypes, getChainAuthority, getChainFirst,
+  getChainLag, getChainOc, getChainSensitivity, getChainUnits, getLegislativeGates,
+  AGENCY_LABEL, type ChainSensitivity,
 } from '@/lib/chain';
 
 export const metadata: Metadata = {
@@ -24,10 +24,12 @@ export const revalidate = 900;
 export default async function ChainPage() {
   if (!(await chainReady())) return <Shell><NotLoaded /></Shell>;
 
-  const [prov, units, authority, first, lag, oc, sens] = await Promise.all([
-    getProvenance('execution_chain'), getChainUnits(), getChainAuthority(),
-    getChainFirst(), getChainLag(), getChainOc(), getChainSensitivity('d50'),
-  ]);
+  const [prov, units, authority, first, lag, oc, sens, arche, anomalies, gates] =
+    await Promise.all([
+      getProvenance('execution_chain'), getChainUnits(), getChainAuthority(),
+      getChainFirst(), getChainLag(), getChainOc(), getChainSensitivity('d50'),
+      getChainArchetypes(), getChainAnomalies(30), getLegislativeGates(),
+    ]);
 
   const years = Array.from(new Set(units.map((u) => u.fiscalYear))).sort();
   const live = Math.max(...years);
@@ -35,7 +37,12 @@ export default async function ChainPage() {
   // Operating against investment, computed here rather than asserted. The split
   // is the finding: a continuing resolution barely touches an account whose
   // requirements already exist and pushes back the ones that need a new start.
-  const byProfile = (p: string) => sens.filter((s) => s.profile === p && s.daysPer30CrDays !== null);
+  // Cells only for the rankings and the medians; the rollups are a different
+  // population and get their own small table.
+  const cells = sens.filter((s) => s.level === 'cell' && s.daysPer30CrDays !== null);
+  const rollups = sens.filter((s) => s.level !== 'cell' && s.daysPer30CrDays !== null)
+    .sort((a, b) => (a.level === 'department' ? -1 : b.level === 'department' ? 1 : 0));
+  const byProfile = (p: string) => cells.filter((s) => s.profile === p);
   const medOf = (rows: ChainSensitivity[]) => {
     const v = rows.map((r) => r.daysPer30CrDays as number).sort((a, b) => a - b);
     if (!v.length) return null;
@@ -43,7 +50,7 @@ export default async function ChainPage() {
   };
   const invMed = medOf(byProfile('investment'));
   const opsMed = medOf(byProfile('operating'));
-  const scored = sens.filter((s) => s.daysPer30CrDays !== null);
+  const scored = cells;
   const worst = scored[0];
   // The finding is in the TAIL, not the centre. The first cut of this page led on
   // the two medians and they are both near zero -- the honest reading is that a
@@ -52,17 +59,29 @@ export default async function ChainPage() {
   const SLIP = 5;
   const slippers = scored.filter((s) => (s.daysPer30CrDays as number) > SLIP);
 
-  // The measured wait, one row per unit-year, taken off the chain's head step.
+  // One row per unit-year per chain, taken off each chain's head step. Cells
+  // only for the rankings: a component rollup and its own colours of money would
+  // otherwise appear as separate entries in the same league table.
   const heads = lag.filter((l) => l.stepKey === 'enactment');
-  const waits = heads.filter((h) => h.applicable && h.residualDays !== null)
+  const crHeads = heads.filter((h) => h.mode === 'cr' && h.level === 'cell');
+  const enHeads = heads.filter((h) => h.mode === 'enacted');
+  const waits = crHeads.filter((h) => h.applicable && h.residualDays !== null)
     .sort((a, b) => (b.residualDays as number) - (a.residualDays as number));
-  const ahead = heads.filter((h) => !h.applicable)
+  const ahead = crHeads.filter((h) => !h.applicable)
     .sort((a, b) => (a.gapToAuthority ?? 0) - (b.gapToAuthority ?? 0));
+  // The enacted chain at component level: how long after the act each component
+  // placed the first tenth of the obligation that could only follow it.
+  const afterAct = enHeads.filter((h) => h.level === 'component' && h.observedGap !== null)
+    .sort((a, b) => (b.observedGap as number) - (a.observedGap as number));
+  const beyond = enHeads.filter((h) => h.verdict === 'beyond_model');
+  const modelLikely = enHeads[0]?.modelLikely ?? null;
 
-  const totalObl = units.filter((u) => u.fiscalYear === live)
+  const totalObl = units.filter((u) => u.fiscalYear === live && u.level === 'department')
     .reduce((n, u) => n + u.obligations, 0);
-  const sampleObl = heads.filter((h) => h.fiscalYear === live)
+  const sampleObl = crHeads.filter((h) => h.fiscalYear === live)
     .reduce((n, h) => n + h.sampleAmount, 0);
+  const barGates = gates.filter((g) => g.barsObligation);
+  const goldenDome = gates.find((g) => g.gateKey === 'golden_dome_spend_plan');
 
   return (
     <Shell>
@@ -138,11 +157,34 @@ export default async function ChainPage() {
             })()}
             sub="The three exposed pairs rest on four observations each, which is the minimum this page will publish a slope on. Treat the direction as established and the magnitude as provisional." />
         </div>
+        <div className="mb-8">
+          <h3 className="text-sm font-semibold text-navy-100 mb-3">
+            The Department and its components, all colours of money together
+          </h3>
+          <DataTable
+            align={[1]}
+            head={['Scope', 'Window', 'Years', 'Days later per 30 days of CR']}
+            rows={rollups.map((s) => [
+              <span key="a" className="text-navy-100 font-medium">
+                {s.level === 'department' ? 'Department of War (all components)'
+                  : `${s.agencyName || s.agencyCode} — all colours of money`}
+              </span>,
+              `${s.comparisonWindowDays} d`, s.years,
+              <Slope key="d" n={s.daysPer30CrDays as number} />,
+            ])}
+            caption="Rolled up, the effect disappears entirely: the Department as a whole and every
+                     component sit within a few days of zero. That is not the same as saying nothing
+                     is affected — it is the arithmetic of a small number of exposed accounts inside
+                     a very large total, which is exactly why the table below is the one to act on." />
+        </div>
+        <h3 className="text-sm font-semibold text-navy-100 mb-3">
+          Component by colour of money
+        </h3>
         <DataTable
           align={[1, 2]}
           head={['Component', 'Colour of money', 'Profile', 'Window', 'Years',
                  'Days later per 30 days of CR']}
-          rows={sens.filter((s) => s.daysPer30CrDays !== null).map((s) => [
+          rows={cells.map((s) => [
             <span key="a" className="text-navy-100">{s.agencyName || s.agencyCode}</span>,
             <span key="b" className="text-navy-300">{s.appropriation}</span>,
             <span key="c" className="text-navy-500">{s.profile}</span>,
@@ -227,8 +269,183 @@ export default async function ChainPage() {
       </Section>
 
       <Section
+        id="after-act"
+        title="4 · After the act: how long until the money that had to wait actually moved"
+        note="The new-start chain. Obligation that could only follow the full-year act, measured
+              from the day it was signed, against the process model built from statute, regulation
+              and the steps nobody publishes a clock for.">
+        <DataTable
+          align={[1]}
+          head={['FY', 'Component', 'Act signed', 'First tenth placed', 'Days after the act',
+                 'Against the model']}
+          rows={afterAct.map((h) => [
+            h.fiscalYear,
+            <span key="c" className="text-navy-300">
+              {h.agencyCode === 'DOW' ? 'Department' : (AGENCY_LABEL[h.agencyCode] ?? h.agencyCode)}
+            </span>,
+            `day ${h.enactedDayOfFy}`,
+            `day ${h.postEnactmentD10 ?? '\u2014'}`,
+            <span key="d" className="tnum font-medium text-navy-50">{h.observedGap} d</span>,
+            <span key="v" className="text-[12px]"
+                  style={{ color: h.verdict === 'beyond_model' ? 'var(--status-critical)'
+                    : h.verdict === 'ahead_of_chain' ? 'var(--series-1)' : 'var(--status-good)' }}>
+              {h.verdict === 'beyond_model' ? `beyond by ${h.excessDays} d`
+                : h.verdict === 'ahead_of_chain' ? `ahead by ${h.excessDays} d`
+                  : 'within the model'}
+            </span>,
+          ])}
+          caption={`The model's likely path \u2014 every step at its typical duration \u2014 totals `
+            + `${modelLikely} days. Most components beat it, and that is the finding: the work was `
+            + `staged and waiting on authority rather than starting when the authority arrived. `
+            + `${beyond.length === 0 ? 'No chain anywhere in the six years runs beyond what the process explains.' : `${beyond.length} chains run beyond it.`}`} />
+        <p className="mt-6 text-sm text-navy-300 leading-relaxed max-w-3xl">
+          Read the spread rather than the level. Both components are inside a model that runs from{' '}
+          {enHeads[0]?.modelMin} to {enHeads[0]?.modelMax} days, which is wide enough that
+          &ldquo;within the model&rdquo; is a weak statement on its own. The useful comparison is
+          between components running the same statute in the same year, and there the difference is
+          real and consistent.
+        </p>
+      </Section>
+
+      <Section
+        id="gates"
+        title="5 · What the law puts between an appropriation and an obligation"
+        note="Conditions in appropriations law and the joint explanatory statements. Two kinds, and
+              conflating them is the commonest error in this area: a BAR prevents obligation until
+              the condition is met; a reporting direction burdens the Department without, on its
+              own words, withholding the money.">
+        <div className="grid sm:grid-cols-3 gap-4 mb-6">
+          <StatTile label="Gates that bar obligation" value={`${barGates.length} of ${gates.length}`}
+            tone="critical"
+            sub="The rest direct a report or a spend plan. A reporting direction is a real burden and it is not the same thing as money that cannot be touched." />
+          <StatTile label="The one that governs everything" value="No new starts" tone="warning"
+            sub="A continuing resolution funds the prior year's activities at the prior year's rate and bars new starts, multi-year procurements and production-rate increases. It is the mechanism behind section 3." />
+          <StatTile label="Statutory ceiling to allotment" value="60 days" tone="accent"
+            sub="Thirty days for OMB to apportion after enactment (31 U.S.C. 1513(b)(1)) plus thirty for the component to allot after that signature (DoD FMR Volume 3). The only end-to-end figure on this page that comes from law alone." />
+        </div>
+        {goldenDome && goldenDome.scopeBa !== null && (
+          <div className="alert-warning rounded-lg p-5 mb-6">
+            <h3 className="text-sm font-semibold text-navy-50 mb-2">
+              What a gated account looks like in the execution data
+            </h3>
+            <p className="text-sm text-navy-300 leading-relaxed">
+              The FY2026 agreement attaches a 60-day spend plan to Golden Dome. File A can isolate
+              that account, so the scope is measured rather than asserted: it received{' '}
+              <strong className="text-navy-100">{fmtB(goldenDome.scopeBa)}</strong> of budget
+              authority and obligated <strong className="text-navy-100">$0.02B, 0.2%</strong>, in
+              its year of appropriation, then <strong className="text-navy-100">$19.18B of $21.12B,
+              90.8%</strong>, in the year after. That is the shape a gated new fund makes.{' '}
+              <span className="text-navy-400">
+                The direction and the slow year are not the same event \u2014 the money was
+                appropriated before this act, and a first-year investment fund executes slowly for
+                many reasons. What this shows is the pattern, not a cause.
+              </span>
+            </p>
+          </div>
+        )}
+        <div className="space-y-3">
+          {gates.map((g) => (
+            <div key={g.gateKey}
+                 className={`rounded-lg p-5 ${g.barsObligation ? 'alert-critical' : 'glass-card'}`}>
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
+                <span className="text-[12px] font-semibold uppercase tracking-wider"
+                      style={{ color: g.barsObligation ? 'var(--status-critical)' : 'var(--status-warning)' }}>
+                  {g.barsObligation ? 'bars obligation' : 'reporting direction'}
+                </span>
+                <span className="text-sm font-semibold text-navy-50">{g.scopeLabel}</span>
+                {g.fiscalYear && <span className="text-[12px] text-navy-500">FY{g.fiscalYear}</span>}
+                {g.days !== null && (
+                  <span className="text-[12px] text-navy-400 tnum">{g.days} days</span>
+                )}
+                <span className="text-[12px] text-navy-500">
+                  {g.isVerbatim ? 'quoted' : 'described'}
+                </span>
+              </div>
+              <p className={`text-sm leading-relaxed ${g.isVerbatim ? 'text-navy-200 italic' : 'text-navy-300'}`}>
+                {g.isVerbatim ? `\u201c${g.requirement}\u201d` : g.requirement}
+              </p>
+              {g.scopeBa !== null && (
+                <p className="mt-2 text-[12px] text-navy-400 tnum">
+                  Measured scope: {fmtB(g.scopeBa)} budget authority, {fmtB(g.scopeResources ?? 0)}{' '}
+                  resources, {fmtB(g.scopeObligations ?? 0)} obligated across FY
+                  {g.scopeYears.join(', FY')} \u2014 account {g.treasuryAccount}.
+                </p>
+              )}
+              {g.note && <p className="mt-2 text-[12px] text-navy-400 leading-relaxed">{g.note}</p>}
+              <p className="mt-2 text-[12px] text-navy-500">
+                {g.authority}
+                {g.citation && (
+                  <> \u00b7 <a href={g.citation} target="_blank" rel="noopener noreferrer"
+                          className="text-accent-400 hover:underline">source</a></>
+                )}
+              </p>
+            </div>
+          ))}
+        </div>
+        <Caveat>
+          This is a selection read out of the acts and statements, not a mechanical extraction of
+          every congressional direction, and it says so. Reprogramming thresholds by appropriation
+          type are not published in any source this site could reach, so no figure is given for
+          them. Where a gate sits inside a component&rsquo;s accounts rather than in one of its own,
+          File A cannot isolate it and the scope is left empty rather than estimated \u2014{' '}
+          <strong className="text-navy-100">GATE-01</strong> fails a load that claims a measured
+          scope without naming the account it was measured on.
+        </Caveat>
+      </Section>
+
+      <Section
+        id="patterns"
+        title="6 · What the shapes themselves say"
+        note="Execution ramps clustered by their own shape rather than by a category assigned in
+              advance, and each unit-year scored against its own history. Deterministic: the same
+              load gives the same archetypes, and the centroid rides on every row so a reader can
+              see what the cluster actually is.">
+        <h3 className="text-base font-semibold text-navy-100 mb-4">Execution archetypes</h3>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 [&>*]:min-w-0">
+          {archetypeSummary(arche).map((a) => (
+            <div key={a.key} className="glass-card rounded-lg p-4">
+              <p className="text-[12px] uppercase tracking-wider text-accent-400 font-semibold">
+                {a.label}
+              </p>
+              <p className="text-2xl font-bold text-navy-50 mt-1.5 tnum">{a.n}</p>
+              <p className="text-[12px] text-navy-500">unit-years</p>
+              <Spark centroid={a.centroid} />
+              <p className="text-[12px] text-navy-400 mt-2 leading-relaxed">
+                Half the year&rsquo;s obligation placed by fiscal month{' '}
+                <strong className="text-navy-200">{a.half}</strong>.
+              </p>
+            </div>
+          ))}
+        </div>
+        <h3 className="text-base font-semibold text-navy-100 mb-4">
+          Unit-years furthest from their own history
+        </h3>
+        <DataTable
+          align={[1]}
+          head={['Deviation', 'What moved', 'Sample', 'Prior median sample', 'Years']}
+          rows={anomalies.slice(0, 12).map((a) => [
+            <span key="z" className="tnum font-medium"
+                  style={{ color: Math.abs(a.deviation ?? 0) > 6 ? 'var(--status-critical)'
+                    : Math.abs(a.deviation ?? 0) > 3 ? 'var(--status-warning)' : 'var(--status-good)' }}>
+              {(a.deviation ?? 0) > 0 ? '+' : ''}{(a.deviation ?? 0).toFixed(1)}
+            </span>,
+            <span key="h" className="text-navy-300">{a.headline}</span>,
+            fmtB(a.sampleAmount ?? 0),
+            fmtB(a.priorMedianAmount ?? 0),
+            a.baselineYears,
+          ])}
+          caption="Median and scaled median absolute deviation against the unit's own prior years,
+                   scale floored at 5% of the median and the result capped at 99 \u2014 never against
+                   a Department average, because these categories differ by three orders of
+                   magnitude. The two sample columns are the point: a cell whose dated sample
+                   collapsed shifts its own median for reasons that have nothing to do with
+                   execution, and several rows here are exactly that. CHN-09 re-derives every
+                   baseline in SQL." />
+      </Section>
+
+      <Section
         id="cause"
-        title="4 · Root cause"
+        title="7 · Root cause"
         note="Why the pattern looks the way it does, and what each explanation would predict that
               this data can check.">
         <div className="space-y-4">
@@ -253,7 +470,7 @@ export default async function ChainPage() {
 
       <Section
         id="coa"
-        title="5 · Courses of action"
+        title="8 · Courses of action"
         note="Four, ordered by the ratio of what they would change to what they would cost. Each
               names the evidence it rests on and how you would know it worked.">
         <div className="space-y-4">
@@ -265,14 +482,19 @@ export default async function ChainPage() {
           <Coa n={2} title="Instrument the distribution chain so the argument can be settled"
             tone="critical"
             doThis="Capture and publish four dates per funds-distribution action — apportionment, allocation, allotment, sub-allotment — from the systems that already create them, into the same reporting stream that carries obligations."
-            because="The interior of every chain on this page is an assumption. The Department cannot currently demonstrate whether the wait between authority and execution is distribution or acquisition, which means it cannot tell whether any remediation worked. This is the single highest-value data change on the page."
-            measure={`Today the assumed interior of an average applicable unit covers ${waits.length ? Math.round(waits.reduce((n, w) => n + (w.residualDays ?? 0), 0) / waits.length) : 0} days of measured residual. Instrumented, that becomes measurement and the assumption disappears.`} />
+            because={`Six of the nine steps in section 1 have no published clock at all. Statute gives OMB 30 days to apportion and the regulation gives the component 30 more to allot \u2014 ${enHeads[0]?.regCeilingDays ?? 60} days end to end \u2014 and nothing records whether either was met, for any component, in any year. The Department cannot currently demonstrate whether the wait between authority and execution is distribution or acquisition, which means it cannot tell whether any remediation worked.`}
+            measure={`The model in section 1 spans ${enHeads[0]?.modelMin}\u2013${enHeads[0]?.modelMax} days for the enacted chain because six of its steps are estimates. Four recorded dates per distribution action would collapse that range to a measurement, and the estimate rows would disappear from this page.`} />
           <Coa n={3} title="Separate the acquisition-lead-time problem from the appropriation problem"
             tone="warning"
             doThis="For construction and family housing, move design and solicitation ahead of appropriation where authority permits, so the award is ready when the money is. Track design-complete-to-award separately from authority-to-award."
             because="These accounts carry 200-350 day waits from authority to first tenth even in years enacted in December. That level is not a funding delay and will not respond to funding remedies."
             measure="Authority-to-first-tenth for those units should fall toward the solicitation cycle rather than track the calendar." />
-          <Coa n={4} title="Fix account attribution on contract actions"
+          <Coa n={4} title="Triage the legislative gates by whether they actually bar obligation"
+            tone="warning"
+            doThis={`Maintain a single register of the conditions that gate obligation, separating the ${barGates.length} that bar it from the reporting directions that do not, and put a named owner and a due date against each bar. Section 5 is the starting inventory.`}
+            because="A direction to submit a spend plan and a clause reading 'none of these funds may be obligated or expended until' are managed today as one category of congressional homework. Only the second stops money moving, and the USAFRICOM clause carries no deadline at all, so its wait is as long as the staffing takes."
+            measure="Days from enactment to the condition being met, per bar. It is not currently measured anywhere." />
+          <Coa n={5} title="Fix account attribution on contract actions"
             tone="warning"
             doThis="Require the funding Treasury account on the action, not only on the award, in contract writing systems feeding the public files."
             because={`Execution timing is currently measurable on ${fmtPct(100 * sampleObl / Math.max(1, totalObl), 1)} of own-year obligations. Every timing figure on this page is an upper bound because of it, and no amount of analysis fixes a coverage problem.`}
@@ -289,7 +511,7 @@ export default async function ChainPage() {
 
       <Section
         id="gaps"
-        title="6 · What this page cannot do, stated plainly"
+        title="9 · What this page cannot do, stated plainly"
         note="So that the next person does not rediscover it.">
         <ul className="space-y-3 text-sm text-navy-300 leading-relaxed max-w-3xl list-disc pl-5">
           <li>
@@ -330,6 +552,37 @@ export default async function ChainPage() {
 }
 
 /* --------------------------------------------------------------- helpers -- */
+
+function archetypeSummary(rows: { archetypeKey: string; archetypeLabel: string;
+                                  centroid: number[]; halfByMonth: number | null }[]) {
+  const m = new Map<string, { key: string; label: string; n: number;
+                              centroid: number[]; half: number }>();
+  for (const r of rows) {
+    const hit = m.get(r.archetypeKey);
+    if (hit) hit.n += 1;
+    else m.set(r.archetypeKey, { key: r.archetypeKey, label: r.archetypeLabel, n: 1,
+                                 centroid: r.centroid,
+                                 half: (r.centroid.findIndex((v) => v >= 0.5) + 1) || 12 });
+  }
+  return Array.from(m.values()).sort((a, b) => b.n - a.n);
+}
+
+/** The cluster's own centroid, drawn. An archetype whose shape cannot be seen is
+ *  a label rather than a finding. */
+function Spark({ centroid }: { centroid: number[] }) {
+  if (!centroid.length) return null;
+  const W = 180; const H = 40;
+  const d = centroid.map((v, i) =>
+    `${i ? 'L' : 'M'}${(i / (centroid.length - 1)) * W},${H - v * H}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full mt-3" role="img"
+         aria-label="Cumulative share of the year by fiscal month">
+      <line x1={0} y1={H} x2={W} y2={H} stroke="#16304f" strokeWidth={1} />
+      <path d={d} fill="none" stroke="var(--series-1)" strokeWidth={2}
+            strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function Slope({ n }: { n: number }) {
   const tone = n > 8 ? 'var(--status-critical)' : n > 2 ? 'var(--status-warning)'

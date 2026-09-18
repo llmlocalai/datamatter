@@ -1,17 +1,123 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-17 (the funds-distribution chain and execution lag)
+- **Last updated:** 2026-09-18 (chain enhancement: rollups, process model, gates, patterns)
 - **Live site:** https://datamatter.vercel.app
-- **Build status (2026-09-17):** `tsc --noEmit` clean, `next build` green, 24 pages
-  and 1,560 static paths, every page and endpoint requested against a running
-  server, 400px and 1440px screenshots with no horizontal overflow and nothing
-  under the 12px type floor. The release-order guard was tested both directions.
+- **Build status (2026-09-18):** `tsc --noEmit` clean, `next build` green, 24 pages,
+  every page and endpoint requested against a running server, 400px and 1440px
+  screenshots with no horizontal overflow and nothing under the 12px type floor.
+  `--step all` verified end to end.
   **Not yet loaded to Neon** — `npm run migrate` → `npm run refresh` → push.
-  The schema adds fourteen tables and one column across the two passes below,
-  so the migrate is not optional.
-- **Control status (2026-09-17):** 70 load controls (58 + 7 + 5), plus the 14-test
-  SBR assurance suite. All twelve new controls were made to fail on a corrupted
-  staged extract and then restored.
+  The schema now adds seventeen tables and several columns across the three
+  passes below, so the migrate is not optional.
+- **Control status (2026-09-18):** 75 load controls, plus the 14-test SBR
+  assurance suite. All seventeen controls added across these passes were made to
+  fail on a corrupted staged extract and then restored.
+
+---
+
+## Done — 2026-09-18 (twenty-second pass) — chain enhancement
+
+Asked for: *totals as well as the breakdown — Department, Army, Air Force; a
+realistic funds-distribution model instead of one-day assumptions, using the real
+steps (component to OUSD(C), OMB, FAD and SES signature, allotment); the JES
+requirements that gate fund release; and pattern discovery, anomaly detection and
+recommendations.*
+
+### Rollups
+`dm_chain_unit.level` is now `department` | `component` | `cell`, and authority
+curves, ramps, object-class tables and sensitivity slopes exist at all three.
+FY2026 Department: **$1,047.2B enacted, $864.4B obligated**. `CHN-06` (critical)
+checks every component equals the sum of its own colours of money and the
+Department equals the sum of its components.
+
+### The process model replaces the flat share-split
+The old version divided a measured residual by a fixed percentage and produced
+"1 day for allotment", which describes nothing. Now nine named steps with who
+does each and what governs the clock:
+
+- **statutory** — component submits within 15 days of enactment and OMB notifies
+  of its apportionment action within 30 days (31 U.S.C. 1513(b)(1); A-11 §120.23).
+- **regulatory** — "Allotments shall be made no later than 30 days after OMB
+  signs the apportionment or the start of the subsequent calendar month,
+  whichever is later" (DoD FMR Vol 3 Ch 2). The only interior step with a
+  published clock, and its clock runs from OMB's signature so it OVERLAPS the
+  recording and FAD steps rather than following them.
+- **practitioner estimate** — OUSD(C) review, recording, FAD generation and SES
+  signature, sub-allotment, commitment. Six of the nine. Labelled as estimates
+  everywhere they appear.
+
+**Statute plus regulation allow 60 days from enactment to allotment.** That is the
+one end-to-end figure on the page from law alone.
+
+**The model is never re-fitted to the observation.** It produces a range from its
+own inputs; the observation is measured independently; the page reports how they
+compare. `CHN-07` (critical) checks each chain's published total is the sum of
+its own applicable steps.
+
+### Two chains, not one
+The first cut collapsed every unit to "CR mode" because authority always exists
+on 1 October. Wrong framing. Two chains run in every year and which governs a
+dollar depends on what the dollar is for: a **continuing requirement** has
+authority from day 1 with OMB having apportioned automatically by bulletin
+(A-11 §123), so only distribution and contracting remain; a **new start** is
+barred until the act, then the whole chain runs. The enacted chain is measured on
+the POST-ENACTMENT part of the ramp — measuring it against the whole year's d10
+would credit the act for money the CR had already moved.
+
+Result: after the act, components place the first tenth of post-act obligation
+**5 to 84 days** later against a model whose likely path is **89 days**. Most beat
+the nominal chain, which says the work was staged and waiting on authority.
+
+### Legislative gates
+`database/seed_legislative_gates.json`, nine rows, six quoted verbatim. The
+distinction that matters and that the page refuses to blur: **four BAR obligation;
+the rest are reporting directions.** The clearest bar is FY2026 USAFRICOM —
+"none of these funds may be obligated or expended until … presents an execution
+plan" — which carries no deadline at all.
+
+Scope is **measured** where a Treasury account carries the gate. Golden Dome
+(`097-2025/2029-3007-000`): **$8.15B budget authority, $0.02B obligated — 0.2% —
+in its year of appropriation, then $19.18B of $21.12B, 90.8%, the year after.**
+The page states plainly that the direction and the slow year are not the same
+event. `GATE-01` fails a load claiming a measured scope without naming the
+account it was measured on.
+
+### Pattern discovery
+Pure Python, no new dependencies, deterministic seeding so the same load gives the
+same archetypes. Three shapes discovered over 161 unit-years, each carrying its
+own centroid so the cluster can be inspected rather than trusted. Anomalies use
+median and scaled MAD against each unit's **own** prior years, and carry the
+sample and the prior-median sample beside the deviation — several large
+deviations are thin-sample artefacts and the page shows them as such.
+`CHN-08` checks every clustered shape is a real cumulative curve; `CHN-09`
+re-derives every baseline in SQL.
+
+### Three defects the controls caught
+- **CHN-01 failed 6/6** after the rollups landed: it summed every level as if
+  they were cells, triple-counting. Fixed with `level = 'cell'`.
+- **CHN-09 failed 2/3**: it medianed the SCORED anomaly rows, but a unit's
+  earliest years have too little history to score and never appear as rows,
+  though they are part of the baseline. Fixed by carrying `prior_values` on the
+  row and expanding it in SQL — the same shape as CHN-05.
+- **The sensitivity table mixed rollups with cells**, putting "Army, all colours"
+  in the same ranking as "Army, O&M" — a set against one of its own members.
+  Split into two tables with `dm_chain_sensitivity.level`.
+
+### Files
+`scripts/etl_analytics.py` (CHAIN_PROCESS, rollups, two-chain model, k-means and
+robust-z helpers, gates) · `database/seed_legislative_gates.json` ·
+`dm_chain_archetype`, `dm_chain_anomaly`, `dm_legislative_gate` +
+ALTERs in `database/schema.analytics.sql` · CHN-06..09 and GATE-01 in
+`scripts/load_analytics.js` · 5 controls + 1 dataset in `database/seed_analytics.json` ·
+`lib/chain.ts` · `app/execution/chain/page.tsx` (sections 4, 5 and 6 new) ·
+`components/execution/ChainExplorer.tsx`.
+
+### Open
+- The archetype namer can map two clusters to the same name, so k=4 can present
+  as three shapes. Harmless, but the count on the page is distinct names rather
+  than clusters.
+- Reprogramming thresholds by appropriation type are not published in any source
+  reachable from here, so no figure is given for them.
 
 ---
 

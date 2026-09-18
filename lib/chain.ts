@@ -32,9 +32,12 @@
 import { query } from './db';
 import { missingColumns } from './schema';
 
+export type UnitLevel = 'department' | 'component' | 'cell';
+
 export type ChainUnit = {
   fiscalYear: number; agencyCode: string; agencyName: string | null;
-  appropriation: string; fundLife: string | null; accounts: number;
+  appropriation: string; level: UnitLevel;
+  fundLife: string | null; accounts: number;
   baAppropriated: number; resources: number; obligations: number;
   outlays: number; unobligated: number;
 };
@@ -62,23 +65,58 @@ export type ChainOc = {
   obligations: number; outlays: number; undelivered: number;
 };
 
+/** One step of one chain. `mode` says which chain: 'cr' is the one that runs
+ *  while a continuing resolution is in force, where OMB has already apportioned
+ *  automatically; 'enacted' is the full chain that runs from a full-year act. */
 export type ChainLag = {
-  fiscalYear: number; agencyCode: string; appropriation: string;
-  stepKey: string; stepLabel: string; stepDetail: string | null;
-  authority: string | null; days: number; basis: 'measured' | 'assumption';
-  profile: string | null; profileLabel: string | null; profileNote: string | null;
-  sharePct: number | null; applicable: boolean;
+  fiscalYear: number; agencyCode: string; appropriation: string; level: UnitLevel;
+  stepKey: string; stepLabel: string; actor: string | null; stepDetail: string | null;
+  authority: string | null;
+  basis: 'measured' | 'statutory' | 'regulatory' | 'practitioner';
+  applies: boolean;
+  minDays: number | null; likelyDays: number | null; maxDays: number | null;
+  mode: 'cr' | 'enacted'; anchorDay: number | null; anchorLabel: string | null;
+  modelMin: number | null; modelLikely: number | null; modelMax: number | null;
+  regCeilingDays: number | null;
+  observedGap: number | null;
+  verdict: 'ahead_of_chain' | 'within_model' | 'beyond_model' | 'not_observed' | null;
+  excessDays: number | null;
+  applicable: boolean;
   residualDays: number | null; totalDays: number | null;
   authorityDayOfFy: number | null; gapToAuthority: number | null;
   d10Day: number | null; d50Day: number | null; d90Day: number | null;
+  postEnactmentD10: number | null;
   sampleAmount: number; sampleActions: number;
   firstActionDay: number | null; enactedDayOfFy: number | null;
   firstObligationDate: string | null; firstOcLabel: string | null;
 };
 
+export type ChainArchetype = {
+  fiscalYear: number; agencyCode: string; appropriation: string;
+  archetypeKey: string; archetypeLabel: string; cluster: number; clusterSize: number;
+  shape: number[]; centroid: number[]; halfByMonth: number | null; windowDays: number | null;
+};
+
+export type ChainAnomaly = {
+  fiscalYear: number; agencyCode: string; appropriation: string; metric: string;
+  value: number | null; baseline: number | null; deviation: number | null;
+  baselineYears: number; direction: string | null; windowDays: number | null;
+  sampleAmount: number | null; priorMedianAmount: number | null;
+  headline: string; method: string;
+};
+
+export type LegislativeGate = {
+  fiscalYear: number | null; gateKey: string; gateType: string; scopeLabel: string;
+  treasuryAccount: string | null; days: number | null;
+  barsObligation: boolean; isVerbatim: boolean;
+  requirement: string; citation: string | null; authority: string | null; note: string | null;
+  scopeBa: number | null; scopeResources: number | null; scopeObligations: number | null;
+  scopeYears: number[]; scopeBasis: string | null;
+};
+
 export type ChainSensitivity = {
   agencyCode: string; agencyName: string | null; appropriation: string;
-  metric: 'd10' | 'd50'; profile: string | null;
+  metric: 'd10' | 'd50'; level: UnitLevel; profile: string | null;
   comparisonWindowDays: number; years: number;
   slopeDaysPerCrDay: number | null; daysPer30CrDays: number | null;
   observations: { fy: number; crDays: number; lapseDays: number;
@@ -96,7 +134,10 @@ export async function chainReady(): Promise<boolean> {
     const missing = await Promise.all([
       missingColumns('dm_chain_unit', ['ba_appropriated', 'appropriation']),
       missingColumns('dm_chain_authority', ['state', 'authority_available']),
-      missingColumns('dm_chain_lag', ['gap_to_authority', 'applicable', 'profile']),
+      missingColumns('dm_chain_lag', ['gap_to_authority', 'applicable', 'mode',
+                                      'model_min', 'verdict', 'level']),
+      missingColumns('dm_chain_archetype', ['archetype_key', 'centroid_json']),
+      missingColumns('dm_legislative_gate', ['bars_obligation', 'is_verbatim']),
       missingColumns('dm_chain_sensitivity', ['days_per_30_cr_days', 'observations']),
     ]);
     if (missing.some((m) => m.length)) return false;
@@ -117,12 +158,14 @@ export async function getChainUnits(fiscalYear?: number): Promise<ChainUnit[]> {
   if (fiscalYear) { p.push(fiscalYear); w = 'WHERE u.fiscal_year = $1'; }
   const rows = await query<any>(
     `SELECT u.fiscal_year, u.agency_code, u.agency_name, u.appropriation, u.fund_life,
-            u.accounts, u.ba_appropriated, u.resources, u.obligations, u.outlays, u.unobligated
+            u.level, u.accounts, u.ba_appropriated, u.resources, u.obligations,
+            u.outlays, u.unobligated
        FROM dm_chain_unit u ${CUR('u')} ${w}
       ORDER BY u.fiscal_year, u.obligations DESC`, p);
   return rows.map((r) => ({
     fiscalYear: r.fiscal_year, agencyCode: r.agency_code, agencyName: r.agency_name,
-    appropriation: r.appropriation, fundLife: r.fund_life, accounts: r.accounts,
+    appropriation: r.appropriation, level: r.level, fundLife: r.fund_life,
+    accounts: r.accounts,
     baAppropriated: r.ba_appropriated, resources: r.resources, obligations: r.obligations,
     outlays: r.outlays, unobligated: r.unobligated,
   }));
@@ -207,23 +250,31 @@ export async function getChainLag(
   if (agencyCode) { p.push(agencyCode); w.push(`x.agency_code = $${p.length}`); }
   if (appropriation) { p.push(appropriation); w.push(`x.appropriation = $${p.length}`); }
   const rows = await query<any>(
-    `SELECT x.fiscal_year, x.agency_code, x.appropriation, x.step_key, x.step_label,
-            x.step_detail, x.authority, x.days, x.basis, x.profile, x.profile_label,
-            x.profile_note, x.share_pct, x.applicable, x.residual_days, x.total_days,
+    `SELECT x.fiscal_year, x.agency_code, x.appropriation, x.level, x.step_key, x.step_label,
+            x.actor, x.step_detail, x.authority, x.basis, x.applies,
+            x.min_days, x.likely_days, x.max_days, x.mode, x.anchor_day, x.anchor_label,
+            x.model_min, x.model_likely, x.model_max, x.reg_ceiling_days,
+            x.observed_gap, x.verdict, x.excess_days,
+            x.applicable, x.residual_days, x.total_days,
             x.authority_day_of_fy, x.gap_to_authority, x.d10_day, x.d50_day, x.d90_day,
-            x.sample_amount, x.sample_actions, x.first_action_day, x.enacted_day_of_fy,
-            x.first_obligation_date, x.first_oc_label
+            x.post_enactment_d10, x.sample_amount, x.sample_actions, x.first_action_day,
+            x.enacted_day_of_fy, x.first_obligation_date, x.first_oc_label
        FROM dm_chain_lag x ${CUR('x')}
       ${w.length ? `WHERE ${w.join(' AND ')}` : ''}
-      ORDER BY x.fiscal_year, x.agency_code, x.appropriation, x.id`, p);
+      ORDER BY x.fiscal_year, x.agency_code, x.appropriation, x.mode, x.id`, p);
   return rows.map((r) => ({
     fiscalYear: r.fiscal_year, agencyCode: r.agency_code, appropriation: r.appropriation,
-    stepKey: r.step_key, stepLabel: r.step_label, stepDetail: r.step_detail,
-    authority: r.authority, days: r.days, basis: r.basis, profile: r.profile,
-    profileLabel: r.profile_label, profileNote: r.profile_note, sharePct: r.share_pct,
+    level: r.level, stepKey: r.step_key, stepLabel: r.step_label, actor: r.actor,
+    stepDetail: r.step_detail, authority: r.authority, basis: r.basis, applies: r.applies,
+    minDays: r.min_days, likelyDays: r.likely_days, maxDays: r.max_days,
+    mode: r.mode, anchorDay: r.anchor_day, anchorLabel: r.anchor_label,
+    modelMin: r.model_min, modelLikely: r.model_likely, modelMax: r.model_max,
+    regCeilingDays: r.reg_ceiling_days, observedGap: r.observed_gap,
+    verdict: r.verdict, excessDays: r.excess_days,
     applicable: r.applicable, residualDays: r.residual_days, totalDays: r.total_days,
     authorityDayOfFy: r.authority_day_of_fy, gapToAuthority: r.gap_to_authority,
     d10Day: r.d10_day, d50Day: r.d50_day, d90Day: r.d90_day,
+    postEnactmentD10: r.post_enactment_d10,
     sampleAmount: r.sample_amount, sampleActions: r.sample_actions,
     firstActionDay: r.first_action_day, enactedDayOfFy: r.enacted_day_of_fy,
     firstObligationDate: iso(r.first_obligation_date), firstOcLabel: r.first_oc_label,
@@ -232,7 +283,7 @@ export async function getChainLag(
 
 export async function getChainSensitivity(metric: 'd10' | 'd50' = 'd50'): Promise<ChainSensitivity[]> {
   const rows = await query<any>(
-    `SELECT s.agency_code, s.agency_name, s.appropriation, s.metric, s.profile,
+    `SELECT s.agency_code, s.agency_name, s.appropriation, s.metric, s.level, s.profile,
             s.comparison_window_days, s.years, s.slope_days_per_cr_day,
             s.days_per_30_cr_days, s.observations
        FROM dm_chain_sensitivity s ${CUR('s')}
@@ -240,7 +291,8 @@ export async function getChainSensitivity(metric: 'd10' | 'd50' = 'd50'): Promis
       ORDER BY s.days_per_30_cr_days DESC NULLS LAST`, [metric]);
   return rows.map((r) => ({
     agencyCode: r.agency_code, agencyName: r.agency_name, appropriation: r.appropriation,
-    metric: r.metric, profile: r.profile, comparisonWindowDays: r.comparison_window_days,
+    metric: r.metric, level: r.level, profile: r.profile,
+    comparisonWindowDays: r.comparison_window_days,
     years: r.years, slopeDaysPerCrDay: r.slope_days_per_cr_day,
     daysPer30CrDays: r.days_per_30_cr_days,
     observations: safeJson(r.observations),
@@ -266,3 +318,57 @@ export function dayLabel(fy: number, day: number | null): string {
 export const AGENCY_LABEL: Record<string, string> = {
   '097': 'Defense-wide', '021': 'Army', '017': 'Navy', '057': 'Air Force',
 };
+
+
+export async function getChainArchetypes(fiscalYear?: number): Promise<ChainArchetype[]> {
+  const p: any[] = []; let w = '';
+  if (fiscalYear) { p.push(fiscalYear); w = 'WHERE a.fiscal_year = $1'; }
+  const rows = await query<any>(
+    `SELECT a.fiscal_year, a.agency_code, a.appropriation, a.archetype_key, a.archetype_label,
+            a.cluster, a.cluster_size, a.shape_json, a.centroid_json, a.half_by_month,
+            a.window_days
+       FROM dm_chain_archetype a ${CUR('a')} ${w}
+      ORDER BY a.fiscal_year, a.agency_code, a.appropriation`, p);
+  return rows.map((r) => ({
+    fiscalYear: r.fiscal_year, agencyCode: r.agency_code, appropriation: r.appropriation,
+    archetypeKey: r.archetype_key, archetypeLabel: r.archetype_label,
+    cluster: r.cluster, clusterSize: r.cluster_size,
+    shape: safeJson(r.shape_json), centroid: safeJson(r.centroid_json),
+    halfByMonth: r.half_by_month, windowDays: r.window_days,
+  }));
+}
+
+export async function getChainAnomalies(limit = 40): Promise<ChainAnomaly[]> {
+  const rows = await query<any>(
+    `SELECT a.fiscal_year, a.agency_code, a.appropriation, a.metric, a.value, a.baseline,
+            a.deviation, a.baseline_years, a.direction, a.window_days, a.sample_amount,
+            a.prior_median_amount, a.headline, a.method
+       FROM dm_chain_anomaly a ${CUR('a')}
+      ORDER BY abs(a.deviation) DESC NULLS LAST LIMIT $1`, [limit]);
+  return rows.map((r) => ({
+    fiscalYear: r.fiscal_year, agencyCode: r.agency_code, appropriation: r.appropriation,
+    metric: r.metric, value: r.value, baseline: r.baseline, deviation: r.deviation,
+    baselineYears: r.baseline_years, direction: r.direction, windowDays: r.window_days,
+    sampleAmount: r.sample_amount, priorMedianAmount: r.prior_median_amount,
+    headline: r.headline, method: r.method,
+  }));
+}
+
+export async function getLegislativeGates(): Promise<LegislativeGate[]> {
+  const rows = await query<any>(
+    `SELECT g.fiscal_year, g.gate_key, g.gate_type, g.scope_label, g.treasury_account,
+            g.days, g.bars_obligation, g.is_verbatim, g.requirement, g.citation,
+            g.authority, g.note, g.scope_ba, g.scope_resources, g.scope_obligations,
+            g.scope_years, g.scope_basis
+       FROM dm_legislative_gate g ${CUR('g')}
+      ORDER BY g.bars_obligation DESC, g.fiscal_year NULLS FIRST, g.gate_key`);
+  return rows.map((r) => ({
+    fiscalYear: r.fiscal_year, gateKey: r.gate_key, gateType: r.gate_type,
+    scopeLabel: r.scope_label, treasuryAccount: r.treasury_account, days: r.days,
+    barsObligation: r.bars_obligation, isVerbatim: r.is_verbatim,
+    requirement: r.requirement, citation: r.citation, authority: r.authority, note: r.note,
+    scopeBa: r.scope_ba, scopeResources: r.scope_resources,
+    scopeObligations: r.scope_obligations, scopeYears: safeJson(r.scope_years),
+    scopeBasis: r.scope_basis,
+  }));
+}

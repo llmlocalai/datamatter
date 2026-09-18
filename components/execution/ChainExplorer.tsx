@@ -27,13 +27,20 @@ export default function ChainExplorer({ units, authority, first, lag, oc }: {
     () => Array.from(new Set(units.map((u) => u.fiscalYear))).sort((a, b) => b - a), [units]);
   const [fy, setFy] = useState(years[0]);
   const inYear = useMemo(() => units.filter((u) => u.fiscalYear === fy), [units, fy]);
-  const agencies = useMemo(
-    () => Array.from(new Set(inYear.map((u) => u.agencyCode))).sort(), [inYear]);
-  const [agency, setAgency] = useState(agencies.includes('021') ? '021' : agencies[0]);
-  const approps = useMemo(() => inYear.filter((u) => u.agencyCode === agency)
-    .sort((a, b) => b.obligations - a.obligations).map((u) => u.appropriation), [inYear, agency]);
-  const [approp, setApprop] = useState(
-    approps.includes('Operation and maintenance') ? 'Operation and maintenance' : approps[0]);
+  // 'DOW' is the Department rollup and 'All colours' is a component across all of
+  // its money. They are rows in the same table rather than sums taken in the
+  // browser, so a figure here is the same figure a control checked.
+  const agencies = useMemo(() => {
+    const a = Array.from(new Set(inYear.map((u) => u.agencyCode)));
+    return ['DOW', ...a.filter((x) => x !== 'DOW').sort()];
+  }, [inYear]);
+  const [agency, setAgency] = useState('DOW');
+  const approps = useMemo(() => {
+    const own = inYear.filter((u) => u.agencyCode === agency)
+      .sort((a, b) => b.obligations - a.obligations).map((u) => u.appropriation);
+    return ['All colours', ...own.filter((x) => x !== 'All colours')];
+  }, [inYear, agency]);
+  const [approp, setApprop] = useState('All colours');
 
   // A change of year or component can leave a colour of money that unit does not
   // have. Fall back to its largest rather than rendering an empty figure.
@@ -47,9 +54,15 @@ export default function ChainExplorer({ units, authority, first, lag, oc }: {
   const auth = sel(authority).sort((a, b) => a.seq - b.seq);
   const cells = sel(first).filter((f) => f.d10Day && f.d90Day)
     .sort((a, b) => (a.d50Day ?? 999) - (b.d50Day ?? 999));
-  const steps = sel(lag);
+  const allSteps = sel(lag);
+  const chains = (['cr', 'enacted'] as const)
+    .map((mode) => {
+      const st = allSteps.filter((x) => x.mode === mode);
+      return st.length ? { mode, steps: st, head: st[0] } : null;
+    })
+    .filter((x): x is { mode: 'cr' | 'enacted'; steps: typeof allSteps; head: typeof allSteps[0] } => x !== null);
   const ocRows = sel(oc).sort((a, b) => b.obligations - a.obligations);
-  const head = steps[0];
+  const head = chains[0]?.head;
 
   const W = 960; const L = 132; const R = 16;
   const x = (d: number) => L + ((Math.max(1, Math.min(365, d)) - 1) / 364) * (W - L - R);
@@ -211,54 +224,74 @@ export default function ChainExplorer({ units, authority, first, lag, oc }: {
 
       {/* -------------------------------------------------------- the chain -- */}
       <h3 className="text-sm font-semibold text-navy-100 mt-10 mb-1">
-        3 · The chain, and the part of it nobody publishes
+        3 · The chain, against the process that is supposed to run it
       </h3>
-      {head ? (
-        <>
-          <p className="text-[12px] text-navy-400 mb-4 max-w-3xl leading-relaxed">
-            Authority was available on <strong className="text-navy-200">day {head.authorityDayOfFy}</strong>;
-            a tenth of the observed year had been obligated by{' '}
-            <strong className="text-navy-200">day {head.d10Day}</strong>
-            {head.applicable
-              ? <> — a measured gap of <strong className="text-navy-200">{head.residualDays} days</strong>.
-                  Only the two ends of that gap are observed. The split below divides it by the
-                  profile named beneath, and every interior row is an assumption, not a measurement.</>
-              : <> — execution was <strong className="text-navy-200">already running {Math.abs(head.gapToAuthority ?? 0)} days
-                  before</strong> that authority arrived, on the continuing resolution or on
-                  carried-in balances. There is no wait to divide, so no days are assigned to the
-                  interior steps.</>}
-          </p>
-          <ol className="space-y-2">
-            {steps.map((s) => (
-              <li key={s.stepKey}
-                  className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded px-3 py-2 min-w-0 ${
-                    s.basis === 'measured' ? 'bg-navy-900/70' : 'bg-navy-900/30'}`}>
-                <span className={`text-[12px] font-semibold shrink-0 w-14 ${
-                  s.basis === 'measured' ? 'text-[color:var(--status-good)]' : 'text-navy-500'}`}>
-                  {s.basis === 'measured' ? 'measured' : 'assumed'}
-                </span>
-                <span className="text-sm text-navy-100 shrink-0 w-full sm:w-64">{s.stepLabel}</span>
-                <span className="tnum text-sm shrink-0 w-16 text-right text-navy-50">
-                  {s.basis === 'measured' ? '—'
-                    : (s.applicable ? `${Number(s.days).toFixed(0)} d` : 'n/a')}
-                </span>
-                <span className="text-[12px] text-navy-400 basis-full sm:basis-auto sm:flex-1 min-w-0">
-                  {s.stepDetail} <span className="text-navy-500">{s.authority}</span>
-                </span>
-              </li>
-            ))}
-          </ol>
-          {head.profileNote && (
-            <p className="mt-3 text-[12px] text-navy-500 max-w-3xl leading-relaxed">
-              Profile: <span className="text-navy-300">{head.profileLabel}</span>. {head.profileNote}
-            </p>
-          )}
-        </>
-      ) : (
+      <p className="text-[12px] text-navy-400 mb-4 max-w-3xl leading-relaxed">
+        Two chains run in every one of these years, and which one governs a dollar depends on what
+        the dollar is for. A <strong className="text-navy-200">continuing requirement</strong> has
+        authority from 1 October at the prior year&rsquo;s rate, OMB having apportioned
+        automatically by bulletin, so only distribution and contracting remain. A{' '}
+        <strong className="text-navy-200">new start</strong> is barred outright until the full-year
+        act, and then the whole chain runs from the enactment date. The model below is built from
+        the documented process and is <em>never</em> re-fitted to the observation; the verdict is
+        how the two compare.
+      </p>
+      {chains.length === 0 ? (
         <p className="text-sm text-navy-400">
           This unit has no dated sample large enough to anchor a chain.
         </p>
-      )}
+      ) : chains.map((ch) => (
+        <div key={ch.mode} className="mb-8">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-3">
+            <span className="text-sm font-semibold text-navy-50">
+              {ch.mode === 'cr' ? 'Continuing requirement' : 'New start, after the act'}
+            </span>
+            <span className="text-[12px] text-navy-500">
+              measured from {ch.head.anchorLabel} (day {ch.head.anchorDay})
+            </span>
+            <Verdict v={ch.head.verdict} observed={ch.head.observedGap}
+                     lo={ch.head.modelMin} mid={ch.head.modelLikely} hi={ch.head.modelMax}
+                     excess={ch.head.excessDays} />
+          </div>
+          <ol className="space-y-1.5">
+            {ch.steps.filter((x) => x.applies || x.basis === 'measured').map((x) => (
+              <li key={x.stepKey}
+                  className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded px-3 py-2 min-w-0 ${
+                    x.basis === 'measured' ? 'bg-navy-900/70' : 'bg-navy-900/30'}`}>
+                <span className="text-[12px] font-semibold shrink-0 w-24"
+                      style={{ color: BASIS_TONE[x.basis] ?? '#829ab1' }}>
+                  {BASIS_LABEL[x.basis] ?? x.basis}
+                </span>
+                <span className="text-sm text-navy-100 shrink-0 w-full sm:w-72">{x.stepLabel}</span>
+                <span className="tnum text-sm shrink-0 w-24 text-right text-navy-50">
+                  {x.basis === 'measured' ? '—'
+                    : `${x.minDays}–${x.maxDays} d`}
+                </span>
+                <span className="text-[12px] text-navy-500 shrink-0 w-full sm:w-56">{x.actor}</span>
+                <span className="text-[12px] text-navy-400 basis-full sm:basis-auto sm:flex-1 min-w-0">
+                  {x.stepDetail} <span className="text-navy-500">{x.authority}</span>
+                </span>
+              </li>
+            ))}
+            {ch.mode === 'cr' && (
+              <li className="text-[12px] text-navy-500 px-3 pt-1 leading-relaxed">
+                The component request, OUSD(C) review, OMB apportionment and recording steps are
+                not shown for this chain: under a continuing resolution OMB apportions
+                automatically by bulletin, so they do not run at all.
+              </li>
+            )}
+          </ol>
+          {ch.head.regCeilingDays ? (
+            <p className="mt-3 text-[12px] text-navy-500 max-w-3xl leading-relaxed">
+              Statute allows OMB {ch.head.regCeilingDays === 60 ? '30' : ''} days from enactment to
+              apportion and the regulation allows 30 more to allot, so{' '}
+              <strong className="text-navy-300">{ch.head.regCeilingDays} days from enactment to
+              allotment</strong> is the ceiling law and regulation together permit. It is the one
+              figure in this section that comes from neither estimate nor observation.
+            </p>
+          ) : null}
+        </div>
+      ))}
 
       {/* ------------------------------------------- the complete dimensions -- */}
       <h3 className="text-sm font-semibold text-navy-100 mt-10 mb-1">
@@ -303,9 +336,41 @@ export default function ChainExplorer({ units, authority, first, lag, oc }: {
 }
 
 const AGENCY: Record<string, string> = {
-  '097': 'Defense-wide', '021': 'Army', '017': 'Navy', '057': 'Air Force',
+  DOW: 'Department of War (all)', '097': 'Defense-wide', '021': 'Army',
+  '017': 'Navy', '057': 'Air Force',
 };
 const STATE_LABEL = { lapse: 'lapse', cr: 'CR', enacted: 'enacted' } as const;
+
+const BASIS_LABEL: Record<string, string> = {
+  measured: 'measured', statutory: 'statute', regulatory: 'regulation',
+  practitioner: 'estimate',
+};
+const BASIS_TONE: Record<string, string> = {
+  measured: 'var(--status-good)', statutory: 'var(--series-1)',
+  regulatory: 'var(--series-3)', practitioner: '#829ab1',
+};
+
+function Verdict({ v, observed, lo, mid, hi, excess }: {
+  v: string | null; observed: number | null;
+  lo: number | null; mid: number | null; hi: number | null; excess: number | null;
+}) {
+  if (v === 'not_observed' || observed === null) {
+    return <span className="text-[12px] text-navy-500">no dated obligation after this anchor</span>;
+  }
+  const tone = v === 'beyond_model' ? 'var(--status-critical)'
+    : v === 'ahead_of_chain' ? 'var(--series-1)' : 'var(--status-good)';
+  const words = v === 'beyond_model'
+    ? `${excess} days beyond what the process explains`
+    : v === 'ahead_of_chain'
+      ? `${excess} days ahead of the fastest the chain could run`
+      : 'inside what the documented process would take';
+  return (
+    <span className="text-[12px]">
+      <strong className="tnum" style={{ color: tone }}>{observed} d observed</strong>
+      <span className="text-navy-500"> against a model of {lo}–{hi} d (likely {mid}) — {words}</span>
+    </span>
+  );
+}
 
 const money = (n: number) => (Math.abs(n) >= 1e9 ? `$${(n / 1e9).toFixed(2)}B`
   : Math.abs(n) >= 1e6 ? `$${(n / 1e6).toFixed(0)}M` : `$${(n / 1e3).toFixed(0)}K`);

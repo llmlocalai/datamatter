@@ -5473,34 +5473,131 @@ def _oc_group(code):
 # files. The share column apportions the OBSERVED residual across the steps and
 # is an assumption in every row -- it is printed on the page as one, and it is
 # never added to a measured figure.
-CHAIN_STEPS = [
-  ("enactment", "Appropriation in force",
-   "The full-year act is signed, or a continuing resolution is in force.",
-   "Public law", 0.00, "measured"),
-  ("apportionment", "OMB apportionment (SF 132)",
-   "OMB apportions the appropriation to the agency by quarter or by activity. "
-   "Automatic apportionment applies while a continuing resolution is in force, so "
-   "this step is near-zero in a CR year and is the first real wait after enactment.",
-   "OMB Circular A-11 §120", 0.25, "assumption"),
-  ("allocation", "Treasury warrant and allocation to the component",
-   "The appropriation is warranted and allocated to the Military Department or "
-   "Defense Agency that will execute it.",
-   "DoD FMR Volume 3, Chapter 2", 0.15, "assumption"),
+# ===========================================================================
+# The funds-distribution chain, as the process actually runs.
+#
+# The first version of this split a measured residual by a flat percentage and
+# produced day counts like "1 day for allotment", which is not a description of
+# anything. This is the documented process instead, step by step, with who does
+# it and what governs the clock. Three of the steps have a real legal or
+# regulatory deadline; the rest do not, and are marked as practitioner estimates
+# rather than dressed up as findings.
+#
+# The chain is NOT re-fitted to the observation. The model produces a range from
+# its own inputs, the observation is measured independently, and the page reports
+# how they compare. That comparison is the product: a unit inside the range is
+# running the documented process, a unit beyond it has delay the process does not
+# explain, and a unit ahead of it was executing before the chain could have
+# completed -- on continuing-resolution authority or carried-in balances.
+#
+# min / likely / max are CALENDAR days for that step alone.
+#   statutory     a day count set by law
+#   regulatory    a day count set by the DoD FMR
+#   practitioner  no published deadline governs it; the range is an estimate and
+#                 is labelled as one everywhere it appears
+# ===========================================================================
+CHAIN_PROCESS = [
+  ("enactment", "Appropriation in force", "Congress", 0, 0, 0,
+   "Public law", "measured",
+   "The full-year act is signed. Under a continuing resolution the account already "
+   "holds authority at the prior year's annualised rate, so this step has already "
+   "happened and the chain below starts from 1 October instead."),
+
+  ("request", "Component submits its apportionment request",
+   "Military Department or Defense Agency \u2192 OUSD(C)", 3, 7, 15,
+   "31 U.S.C. 1513(b)(1); OMB Circular A-11 \u00a7120.23", "statutory",
+   "The component builds and submits its SF 132. Statute allows the agency until 15 "
+   "days after enactment and A-11 asks for 10 calendar days; the component's own "
+   "internal staffing sits inside that window."),
+
+  ("ousdc_review", "OUSD(C) reviews and forwards to OMB",
+   "OUSD(C)/P&FC \u2192 OMB", 2, 5, 12,
+   "DoD FMR Volume 3, Chapter 2", "practitioner",
+   "OUSD(C) consolidates the Department's requests, reconciles them against the "
+   "enacted act and forwards the SF 132 to OMB. No published deadline governs this "
+   "step, and it is one of the two places a Department-side delay would sit."),
+
+  ("omb", "OMB apportions \u2014 SF 132 signed", "OMB", 5, 14, 30,
+   "31 U.S.C. 1513(b)(1)", "statutory",
+   "OMB must notify the agency of its apportionment action within 30 days of "
+   "enactment. It is a manual, document-by-document action. Under a continuing "
+   "resolution OMB apportions automatically by bulletin (A-11 \u00a7123), which is "
+   "why operating accounts obligate from the first day of a CR year."),
+
+  ("record", "OUSD(C) records the approved apportionment",
+   "OUSD(C)/P&FC", 1, 3, 7,
+   "DoD FMR Volume 3, Chapter 2", "practitioner",
+   "The approved position is recorded in the Department's funds control system. "
+   "Nothing can be distributed against an apportionment that has not been posted."),
+
+  ("fad", "Funding authorization document generated, staffed and signed",
+   "OUSD(C) appropriation manager, SES approval", 3, 10, 21,
+   "DoD FMR Volume 3, Chapter 2", "practitioner",
+   "The FAD is drafted, staffed and signed, then issued to the Military Service or "
+   "Defense Agency. This is the step that turns an apportionment into authority a "
+   "component can actually distribute, and it has no published clock."),
+
   ("allotment", "Allotment to the major command",
-   "The component allots funds to its major commands. This is the step most often "
-   "described as the bottleneck, and it is the one no public file records.",
-   "DoD FMR Volume 3, Chapter 2", 0.30, "assumption"),
-  ("suballotment", "Sub-allotment / funding authorization to the fund centre",
-   "The command sub-allots to the installation or fund centre that holds the "
-   "requirement.",
-   "DoD FMR Volume 3, Chapter 2", 0.20, "assumption"),
+   "Component comptroller \u2192 major command", 5, 20, 30,
+   "DoD FMR Volume 3, Chapter 2", "regulatory",
+   "The regulation is explicit here and nowhere else in the interior: allotments "
+   "shall be made no later than 30 days after OMB signs the apportionment, or the "
+   "start of the subsequent calendar month, whichever is later. Note the clock runs "
+   "from OMB's signature, so it OVERLAPS the recording and FAD steps above rather "
+   "than following them."),
+
+  ("suballotment", "Sub-allotment to the installation or fund centre",
+   "Major command \u2192 fund centre", 3, 10, 25,
+   "DoD FMR Volume 3, Chapter 2", "practitioner",
+   "The command sub-allots to the organisation that holds the requirement. Nothing "
+   "published records when this happens, for any component, in any year."),
+
   ("commitment", "Commitment and solicitation",
-   "The fund centre commits the funds and the contracting activity solicits.",
-   "DoD FMR Volume 3, Chapter 15", 0.10, "assumption"),
-  ("obligation", "First obligation recorded",
-   "A contract action is signed and the obligation is recorded.",
-   "FPDS action date", 0.00, "measured"),
+   "Fund centre \u2192 contracting activity", 5, 20, 60,
+   "DoD FMR Volume 3, Chapter 15; FAR Part 6", "practitioner",
+   "The fund centre commits the funds and the contracting activity solicits. On an "
+   "existing vehicle this is short; where competition is required it is the longest "
+   "step in the chain and it is acquisition lead time rather than funds distribution."),
+
+  ("obligation", "First obligation recorded", "Contracting activity", 0, 0, 0,
+   "FPDS action date", "measured",
+   "A contract action is signed and the obligation is recorded. The second measured "
+   "endpoint."),
 ]
+
+# Under a continuing resolution OMB apportions automatically by bulletin, so the
+# four steps from the component's request to OUSD(C) recording the position do not
+# run at all: the authority is already apportioned pro rata on 1 October. This is
+# the mechanism behind the finding on the page -- operating accounts execute from
+# day one of a CR year, and investment accounts still cannot, because the CR bars
+# new starts rather than because the money has not arrived.
+CR_AUTOMATIC_STEPS = {"request", "ousdc_review", "omb", "record"}
+
+# Statute allows OMB 30 days from enactment to apportion; the FMR allows 30 days
+# from that signature to allot. Together they are the citable ceiling on the
+# distribution half of the chain, and the one number on this page that comes
+# entirely from law and regulation rather than from estimate.
+REG_CEILING_TO_ALLOTMENT = 60
+
+
+def _process_model(mode):
+    """(rows, min, likely, max) for the applicable steps.
+
+    `mode` is 'enacted' for the chain that runs after a full-year act, or
+    'cr' where a continuing resolution has already apportioned automatically."""
+    rows, lo, mid, hi = [], 0, 0, 0
+    for key, label, actor, a, b, c, auth, basis, detail in CHAIN_PROCESS:
+        skipped = (mode == "cr" and key in CR_AUTOMATIC_STEPS)
+        rows.append({"step_key": key, "step_label": label, "actor": actor,
+                     "min_days": 0 if skipped else a,
+                     "likely_days": 0 if skipped else b,
+                     "max_days": 0 if skipped else c,
+                     "authority": auth, "basis": basis, "detail": detail,
+                     "applies": not skipped})
+        if not skipped:
+            lo += a; mid += b; hi += c
+    return rows, lo, mid, hi
+
 
 CHAIN_FY_MIN = 2021
 
@@ -5510,21 +5607,20 @@ CHAIN_FY_MIN = 2021
 # an investment account's is dominated by acquisition lead time -- design,
 # solicitation, source selection -- which is not a distribution delay at all and
 # must not be charged to one. Both profiles are assumptions and the page says so.
+# Operating or investment. This no longer drives a day-count split -- the process
+# model does that -- but it still classifies a unit for the continuing-resolution
+# sensitivity, where the distinction is the finding: an account whose requirement
+# already exists obligates at the prior year's rate under a CR, and an account
+# that needs a new start cannot, because the CR bars one.
 CHAIN_PROFILES = {
   "operating": {"label": "Operating account",
-    "note": "Operation and maintenance, military personnel and health: the "
-            "requirement exists before the money does, so the wait is dominated by "
-            "getting funds down to the fund centre.",
-    "shares": {"apportionment": 0.25, "allocation": 0.15, "allotment": 0.30,
-               "suballotment": 0.20, "commitment": 0.10}},
+    "note": "Operation and maintenance, military personnel and health. The "
+            "requirement exists before the money does, so execution continues at "
+            "the prior year's rate through a continuing resolution."},
   "investment": {"label": "Investment account",
-    "note": "Procurement, RDT&E and military construction: the money is distributed "
-            "well before it can be obligated, because design, solicitation and "
-            "source selection have to run first. Most of this residual is "
-            "acquisition lead time, NOT a distribution delay, and charging it to "
-            "allotment would be wrong.",
-    "shares": {"apportionment": 0.10, "allocation": 0.07, "allotment": 0.10,
-               "suballotment": 0.08, "commitment": 0.65}},
+    "note": "Procurement, RDT&E, military construction and family housing. These "
+            "need a new start, and a continuing resolution bars new starts, "
+            "multi-year procurements and production-rate increases."},
 }
 INVESTMENT_APPROPS = {"Procurement", "RDT&E", "Military construction",
                       "Family housing", "Revolving and management funds"}
@@ -5546,6 +5642,91 @@ def _theil_sen(xs, ys):
 def _fy_day(d, fy):
     """Day of fiscal year for a date. 1 = 1 October of fy-1."""
     return (d - dt.date(fy - 1, 10, 1)).days + 1
+
+
+
+# ---------------------------------------------------------------------------
+# Pattern discovery over the execution ramps.
+#
+# Deliberately small, deterministic and written out in full rather than pulled
+# from a library: this has to run inside the same ETL on a machine that carries
+# pyarrow and openpyxl and nothing else, and a clustering whose result moves
+# between runs cannot be controlled. Fixed seeding, sorted inputs, a fixed
+# iteration count -- the same input gives the same archetypes every time.
+#
+# The statistics follow the discipline the signal engine already uses: median and
+# scaled median absolute deviation, a floor on the scale, a cap on the result.
+# A mean and a standard deviation over five observations is set by whichever year
+# is furthest out, and two of these six years are unusual ones.
+# ---------------------------------------------------------------------------
+ARCHETYPE_K = 4
+ARCHETYPE_ITERS = 40
+
+
+def _month_shape(days, window):
+    """A unit-year's cumulative share of its own observed obligation, by fiscal
+    month, truncated to `window` days. Twelve numbers rising to 1.0."""
+    if not days or not window: return None
+    tot = sum(v for k, v in days.items() if k <= window)
+    if tot <= 0: return None
+    edges = [31, 61, 92, 123, 151, 182, 212, 243, 273, 304, 335, 366]
+    out, cum, i = [], 0.0, 0
+    for e in edges:
+        cum = sum(v for k, v in days.items() if k <= min(e, window))
+        out.append(cum / tot)
+    return out
+
+
+def _kmeans(points, k, iters=ARCHETYPE_ITERS):
+    """(labels, centroids). k-means++ seeding from a fixed, deterministic start."""
+    n = len(points)
+    if n == 0: return [], []
+    k = min(k, n)
+    dim = len(points[0])
+    # Deterministic seeding: the first centre is the point closest to the mean,
+    # then repeatedly the point furthest from every centre chosen so far. No
+    # randomness, so no run-to-run drift.
+    mean = [sum(p[j] for p in points) / n for j in range(dim)]
+    d2 = lambda a, b: sum((a[j] - b[j]) ** 2 for j in range(dim))
+    cents = [min(points, key=lambda p: (d2(p, mean), p))]
+    while len(cents) < k:
+        cents.append(max(points, key=lambda p: (min(d2(p, c) for c in cents), p)))
+    labels = [0] * n
+    for _ in range(iters):
+        moved = False
+        for i, p in enumerate(points):
+            best = min(range(len(cents)), key=lambda c: d2(p, cents[c]))
+            if best != labels[i]: labels[i] = best; moved = True
+        for c in range(len(cents)):
+            mem = [points[i] for i in range(n) if labels[i] == c]
+            if mem: cents[c] = [sum(p[j] for p in mem) / len(mem) for j in range(dim)]
+        if not moved: break
+    return labels, cents
+
+
+def _shape_name(cent):
+    """A name read off the centroid rather than assigned to it: the fiscal month
+    by which half the year's obligation had been made, and how much of it landed
+    in the final quarter."""
+    half = next((i + 1 for i, v in enumerate(cent) if v >= 0.5), 12)
+    q4 = 1.0 - (cent[8] if len(cent) > 8 else 0.0)
+    if half <= 4: return ("front_loaded", "Front-loaded")
+    if half <= 6: return ("even", "Even through the year")
+    if q4 >= 0.45: return ("year_end", "Concentrated at the year end")
+    return ("back_loaded", "Back-loaded")
+
+
+def _robust_z(value, prior):
+    """Deviation of a value from its own history, on the median/scaled-MAD scale
+    the signal engine uses. None where there is too little history to summarise."""
+    if len(prior) < 3 or value is None: return None, None
+    sp = sorted(prior); n = len(sp)
+    med = sp[n // 2] if n % 2 else (sp[n // 2 - 1] + sp[n // 2]) / 2.0
+    dev = sorted(abs(x - med) for x in sp)
+    mad = (dev[n // 2] if n % 2 else (dev[n // 2 - 1] + dev[n // 2]) / 2.0) * 1.4826
+    scale = max(mad, abs(med) * 0.05 if med else 1.0)
+    if scale <= 0: return None, med
+    return max(-99.0, min(99.0, (value - med) / scale)), med
 
 
 def _ramp_quantiles(days):
@@ -5620,6 +5801,28 @@ def step_chain(out, only_fy=None):
         u["outlays"] += r.get("gross_outlays") or 0.0
         u["unobligated"] += r.get("unobligated_balance") or 0.0
         tas_unit[(fy, r["treasury_account"])] = k
+
+    # ---- the rollups. A cell is one component's one colour of money; a reader
+    # also asks "how is the Army doing" and "how is the Department doing", and
+    # those are different questions rather than the same one summed in the head.
+    # Every measure here is additive across File A accounts, so the rollup is a
+    # sum and not an average of ratios.
+    for u in units.values(): u["level"] = "cell"
+    roll = {}
+    for (fy, ag, cat), u in list(units.items()):
+        for key, lvl, a_, c_ in (((fy, ag, "All colours"), "component", ag, "All colours"),
+                                 ((fy, "DOW", "All colours"), "department", "DOW", "All colours")):
+            r = roll.setdefault(key, {
+                "fiscal_year": fy, "agency_code": a_,
+                "agency_name": ("Department of War" if a_ == "DOW"
+                                else AGENCY_NAME.get(a_, "")),
+                "appropriation": c_, "level": lvl, "accounts": 0,
+                "ba_appropriated": 0.0, "resources": 0.0, "obligations": 0.0,
+                "outlays": 0.0, "unobligated": 0.0, "fund_life": None})
+            for m in ("accounts", "ba_appropriated", "resources", "obligations",
+                      "outlays", "unobligated"):
+                r[m] += u[m]
+    units.update(roll)
 
     # ---- the authority step function.
     # Under a continuing resolution an account carries authority at the PRIOR
@@ -5784,6 +5987,47 @@ def step_chain(out, only_fy=None):
               "oc_from_file_pct": round(100.0 * r["oc_from_file"] / r["actions"], 2),
               "basis": "observed_upper_bound"})
 
+    # ---- the same rollups on the dated side. A component's ramp for a given type
+    # of execution is its colours of money pooled and weighted by dollars, not the
+    # earliest or the average of them.
+    roll_days = collections.defaultdict(collections.Counter)
+    for (fy, ag, cat, g), d in cell_days.items():
+        for k, v in d.items():
+            roll_days[(fy, ag, "All colours", g)][k] += v
+            roll_days[(fy, "DOW", "All colours", g)][k] += v
+    roll_meta = collections.defaultdict(lambda: {"actions": 0, "amount": 0.0,
+                                                 "first": None, "label": None,
+                                                 "oc_from_file": 0})
+    for r in first_rows:
+        for ag in (r["agency_code"], "DOW"):
+            m = roll_meta[(r["fiscal_year"], ag, "All colours", r["oc_group"])]
+            m["actions"] += r["actions"]; m["amount"] += r["sample_amount"]
+            m["label"] = r["oc_label"]
+            m["oc_from_file"] += round(r["actions"] * (r["oc_from_file_pct"] or 0) / 100.0)
+            if m["first"] is None or (r["first_date"] and r["first_date"] < m["first"]):
+                m["first"] = r["first_date"]
+    for (fy, ag, cat, g), d in roll_days.items():
+        cell_days[(fy, ag, cat, g)] = dict(d)
+        m = roll_meta[(fy, ag, cat, g)]
+        if not m["first"] or not m["actions"]: continue
+        d0 = dt.date.fromisoformat(m["first"])
+        ev = cal_by_fy.get(fy, [])
+        en = next((e for e in ev if e["event_kind"] == "enactment"), None)
+        en_day = (_fy_day(dt.date.fromisoformat(en["start_date"]), fy) if en else None)
+        q = _ramp_quantiles({str(k): v for k, v in d.items()})
+        first_rows.append({
+          "fiscal_year": fy, "agency_code": ag, "appropriation": cat,
+          "oc_group": g, "oc_label": m["label"], "first_date": m["first"],
+          "day_of_fy": _fy_day(d0, fy),
+          "d10_day": q[0], "d50_day": q[1], "d90_day": q[2], "observed_to_day": q[3],
+          "d50_from_enactment": (q[1] - en_day if (q[1] and en_day) else None),
+          "days_from_enactment": ((d0 - dt.date.fromisoformat(en["start_date"])).days
+                                  if en else None),
+          "actions": m["actions"], "sample_amount": round(m["amount"], 2),
+          "positive_amount": round(sum(d.values()), 2),
+          "oc_from_file_pct": round(100.0 * m["oc_from_file"] / m["actions"], 2),
+          "basis": "observed_upper_bound"})
+
     # Same-point quantiles: for each cell, the window is the shortest observation
     # any year of that cell reaches, and every year is cut to it.
     fam = collections.defaultdict(list)
@@ -5825,6 +6069,17 @@ def step_chain(out, only_fy=None):
         o["outlays"] += r.get("gross_outlays") or 0.0
         o["undelivered"] += r.get("undelivered_unpaid") or 0.0
         o["rows"] += 1
+    for v in list(oc_agg.values()):
+        for ag in (v["agency_code"], "DOW"):
+            k = (v["fiscal_year"], ag, "All colours", v["oc_group"], v["funding_source"])
+            r = oc_agg.setdefault(k, {"fiscal_year": v["fiscal_year"], "agency_code": ag,
+                                      "appropriation": "All colours", "oc_group": v["oc_group"],
+                                      "oc_label": v["oc_label"],
+                                      "funding_source": v["funding_source"],
+                                      "obligations": 0.0, "outlays": 0.0,
+                                      "undelivered": 0.0, "rows": 0})
+            if r is v: continue
+            for m in ("obligations", "outlays", "undelivered", "rows"): r[m] += v[m]
     for v in oc_agg.values():
         oc_rows.append({**v, "obligations": round(v["obligations"], 2),
                         "outlays": round(v["outlays"], 2),
@@ -5870,27 +6125,73 @@ def step_chain(out, only_fy=None):
         # balances -- and that is a finding, not a number to floor and forget.
         gap = d10 - auth_day
         resid = max(0, gap)
-        prof = _chain_profile(cat)
-        shares = CHAIN_PROFILES[prof]["shares"]
-        for key, label, desc, auth, _share, kind in CHAIN_STEPS:
-            share = shares.get(key, 0.0)
-            days = (0 if kind == "measured" else round(resid * share, 1))
-            lag_rows.append({
-              "fiscal_year": fy, "agency_code": ag, "appropriation": cat,
-              "step_key": key, "step_label": label, "step_detail": desc,
-              "authority": auth, "days": days, "basis": kind,
-              "profile": prof, "profile_label": CHAIN_PROFILES[prof]["label"],
-              "profile_note": CHAIN_PROFILES[prof]["note"], "share_pct": round(100 * share, 1),
-              "residual_days": resid, "total_days": total,
-              "authority_day_of_fy": auth_day, "gap_to_authority": gap,
-              "applicable": bool(resid > 0),
-              "d10_day": d10, "d50_day": d50, "d90_day": d90,
-              "sample_amount": round(sum(pooled.values()), 2),
-              "sample_actions": sum(c["actions"] for c in cands),
-              "first_action_day": first["day_of_fy"],
-              "enacted_day_of_fy": en_day,
-              "first_obligation_date": first["first_date"],
-              "first_oc_group": first["oc_group"], "first_oc_label": first["oc_label"]})
+        # ---- the process model, run against the observation rather than fitted
+        # to it.
+        #
+        # TWO chains run in every one of these years, and which one governs a
+        # given dollar depends on what the dollar is for:
+        #
+        #   continuing requirement  authority exists from 1 October at the prior
+        #                           year's rate, OMB has apportioned automatically
+        #                           by bulletin, and only the distribution and
+        #                           contracting steps remain.
+        #   new start               barred outright until the full-year act, then
+        #                           the whole chain runs from the enactment date --
+        #                           component request, OUSD(C) review, OMB
+        #                           apportionment, recording, FAD, allotment.
+        #
+        # Reporting only the first says the Department never waits. Reporting only
+        # the second says it never executes until February. Both are published,
+        # each against the observation that belongs to it.
+        def emit(mode, observed, anchor_day, anchor_label):
+            steps, m_lo, m_mid, m_hi = _process_model(mode)
+            if observed is None:
+                verdict, excess = "not_observed", None
+            elif observed < m_lo:
+                verdict, excess = "ahead_of_chain", m_lo - observed
+            elif observed > m_hi:
+                verdict, excess = "beyond_model", observed - m_hi
+            else:
+                verdict, excess = "within_model", 0
+            for st in steps:
+                lag_rows.append({
+                  "fiscal_year": fy, "agency_code": ag, "appropriation": cat,
+                  "level": u.get("level", "cell"),
+                  "step_key": st["step_key"], "step_label": st["step_label"],
+                  "actor": st["actor"], "step_detail": st["detail"],
+                  "authority": st["authority"], "basis": st["basis"],
+                  "applies": st["applies"],
+                  "min_days": st["min_days"], "likely_days": st["likely_days"],
+                  "max_days": st["max_days"],
+                  "mode": mode, "anchor_day": anchor_day, "anchor_label": anchor_label,
+                  "model_min": m_lo, "model_likely": m_mid, "model_max": m_hi,
+                  "reg_ceiling_days": REG_CEILING_TO_ALLOTMENT,
+                  "observed_gap": observed, "verdict": verdict, "excess_days": excess,
+                  "residual_days": resid, "total_days": total,
+                  "authority_day_of_fy": auth_day, "gap_to_authority": gap,
+                  "applicable": bool(resid > 0),
+                  "d10_day": d10, "d50_day": d50, "d90_day": d90,
+                  "post_enactment_d10": post_d10,
+                  "sample_amount": round(sum(pooled.values()), 2),
+                  "sample_actions": sum(c["actions"] for c in cands),
+                  "first_action_day": first["day_of_fy"],
+                  "enacted_day_of_fy": en_day,
+                  "first_obligation_date": first["first_date"],
+                  "first_oc_group": first["oc_group"], "first_oc_label": first["oc_label"]})
+
+        # The enacted chain is measured against obligation that could only have
+        # happened after the act, so its ramp is re-quantiled on the post-enactment
+        # part of the curve alone. Measuring it against the whole year's d10 would
+        # credit the act for money the continuing resolution had already moved.
+        post_d10 = None
+        if en_day:
+            post = {k: v for k, v in pooled.items() if k >= en_day}
+            if sum(post.values()) > 0:
+                post_d10 = _ramp_quantiles({str(k): v for k, v in post.items()})[0]
+        emit("cr", gap, auth_day, "authority available")
+        if en_day:
+            emit("enacted", (post_d10 - en_day) if post_d10 else None,
+                 en_day, "full-year act signed")
 
     # ---- how much a continuing resolution actually costs in execution time.
     #
@@ -5917,6 +6218,13 @@ def step_chain(out, only_fy=None):
 
     ufam = collections.defaultdict(list)
     for (fy, ag, cat) in unit_pooled: ufam[(ag, cat)].append(fy)
+    # One comparison window per unit: the shortest observation any of its years
+    # reaches. Every shape, quantile and slope below is cut to it.
+    cmp_unit = {}
+    for (ag, cat), fys in ufam.items():
+        ends = [max(unit_pooled[(fy, ag, cat)].keys()) for fy in fys
+                if unit_pooled[(fy, ag, cat)]]
+        cmp_unit[(ag, cat)] = min(ends) if ends else None
     sens_rows = []
     for (ag, cat), fys in sorted(ufam.items()):
         ends = [max(unit_pooled[(fy, ag, cat)].keys()) for fy in fys
@@ -5936,8 +6244,16 @@ def step_chain(out, only_fy=None):
             slope, n = _theil_sen(xs, ys)
             if slope is None: continue
             sens_rows.append({
-              "agency_code": ag, "agency_name": AGENCY_NAME.get(ag, ""),
+              "agency_code": ag,
+              "agency_name": ("Department of War" if ag == "DOW"
+                              else AGENCY_NAME.get(ag, "")),
               "appropriation": cat, "metric": metric,
+              # The rollups are slopes over a different population from the cells
+              # and must not share a league table with them: a reader comparing
+              # "Army, all colours" against "Army, O&M" would be comparing a set
+              # against one of its own members.
+              "level": ("department" if ag == "DOW" else
+                        "component" if cat == "All colours" else "cell"),
               "profile": _chain_profile(cat),
               "comparison_window_days": win, "years": n,
               "slope_days_per_cr_day": round(slope, 4),
@@ -5946,12 +6262,127 @@ def step_chain(out, only_fy=None):
                                            "d10": p[3], "d50": p[4], "amount": p[5]}
                                           for p in pts])})
 
+    # ---- pattern discovery over the ramps.
+    #
+    # Three questions a reader actually has, answered from the shapes themselves
+    # rather than from a category someone assigned in advance:
+    #   what shapes does execution come in, and which units have which
+    #   which unit-years departed from their OWN history
+    #   how much of a unit's timing is explained by the appropriation calendar
+    #
+    # Everything is computed on the same-point window, so a live year observed to
+    # fewer days does not cluster as "front-loaded" merely for stopping sooner.
+    shapes, keys = [], []
+    for (fy, ag, cat), d in sorted(unit_pooled.items()):
+        win = cmp_unit.get((ag, cat))
+        sh = _month_shape(d, win)
+        if sh is None: continue
+        shapes.append(sh); keys.append((fy, ag, cat))
+    arche_rows = []
+    if shapes:
+        labels, cents = _kmeans(shapes, ARCHETYPE_K)
+        names = [_shape_name(c) for c in cents]
+        size = collections.Counter(labels)
+        for i, (fy, ag, cat) in enumerate(keys):
+            c = labels[i]
+            arche_rows.append({
+              "fiscal_year": fy, "agency_code": ag, "appropriation": cat,
+              "archetype_key": names[c][0], "archetype_label": names[c][1],
+              "cluster": c, "cluster_size": size[c],
+              "shape_json": json.dumps([round(v, 4) for v in shapes[i]]),
+              "centroid_json": json.dumps([round(v, 4) for v in cents[c]]),
+              "half_by_month": next((j + 1 for j, v in enumerate(shapes[i]) if v >= 0.5), 12),
+              "window_days": cmp_unit.get((ag, cat))})
+
+    # ---- anomalies: a unit-year against its OWN prior years, never against a
+    # Department average. These categories differ by three orders of magnitude and
+    # a shared threshold only ever selects the largest of them.
+    anom_rows = []
+    hist = collections.defaultdict(dict)
+    for r in arche_rows:
+        pass
+    d50_by, d50_amt = {}, {}
+    for (fy, ag, cat), d in unit_pooled.items():
+        win = cmp_unit.get((ag, cat))
+        if not win: continue
+        t = {k: v for k, v in d.items() if k <= win}
+        if sum(t.values()) <= 0: continue
+        q = _ramp_quantiles({str(k): v for k, v in t.items()})
+        d50_by[(fy, ag, cat)] = q[1]
+        d50_amt[(fy, ag, cat)] = round(sum(t.values()), 2)
+    for (fy, ag, cat), v in sorted(d50_by.items()):
+        prior = [x for (f2, a2, c2), x in d50_by.items()
+                 if a2 == ag and c2 == cat and f2 < fy and x is not None]
+        z, med = _robust_z(v, prior)
+        if z is None: continue
+        anom_rows.append({
+          "fiscal_year": fy, "agency_code": ag, "appropriation": cat,
+          "metric": "d50", "value": v, "baseline": round(med, 1),
+          # The points the baseline was taken over, carried so a control can
+          # recompute it without sharing a line of code with this extract.
+          "prior_values": json.dumps(sorted(prior)),
+          "deviation": round(z, 3), "baseline_years": len(prior),
+          "direction": "later" if v > med else "earlier",
+          "window_days": cmp_unit.get((ag, cat)),
+          "sample_amount": d50_amt.get((fy, ag, cat), 0.0),
+          # The sample this quantile was taken on, carried on the row so the page
+          # can show it. A cell whose dated sample collapsed from billions to a
+          # few hundred million shifts its own median for reasons that have
+          # nothing to do with execution, and a deviation published without its
+          # sample size invites exactly that misreading.
+          "prior_median_amount": round(sorted(
+              [d50_amt[(f2, ag, cat)] for (f2, a2_, c2) in d50_by
+               if a2_ == ag and c2 == cat and f2 < fy])[
+              max(0, len([1 for (f2, a2_, c2) in d50_by
+                          if a2_ == ag and c2 == cat and f2 < fy]) // 2 - 1)], 2)
+              if any(a2_ == ag and c2 == cat and f2 < fy
+                     for (f2, a2_, c2) in d50_by) else 0.0,
+          "headline": (f"FY{fy} {AGENCY_NAME.get(ag, ag)} {cat.lower()} placed half its observed "
+                       f"obligation on day {v} against a {len(prior)}-year median of {med:.0f}"),
+          "method": ("Median and scaled median absolute deviation over the unit's own prior "
+                     "years, scale floored at 5% of the median and the result capped at 99. "
+                     "A capped value means far outside its own history, not a measurement.")})
+
+    print(f"  archetypes: {len(arche_rows):,} unit-years over "
+          f"{len({r['archetype_key'] for r in arche_rows})} shapes; "
+          f"anomalies scored: {len(anom_rows):,}")
     print(f"  sensitivity rows: {len(sens_rows):,} over {len(ufam):,} component/colour pairs")
     print(f"  units: {len(units):,} (component x colour of money x fiscal year, own-year money)")
     print(f"  authority steps: {len(auth_rows):,} | first-execution cells: {len(first_rows):,}")
     print(f"  object-class rows: {len(oc_rows):,} | lag rows: {len(lag_rows):,}")
 
+    # ---- the legislative gates, with their scope MEASURED where an account can
+    # carry it. A statement that some money is gated is worth little; the same
+    # statement beside the account's own budget authority and what it obligated is
+    # a finding. Where the gate sits inside a component's accounts rather than in
+    # one of its own, File A cannot isolate it and this site leaves the scope null
+    # rather than estimating it.
+    gate_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "database/seed_legislative_gates.json")
+    gate_rows = []
+    if os.path.exists(gate_path):
+        with open(gate_path) as fh: gseed = json.load(fh)
+        by_tas = collections.defaultdict(list)
+        for r in resources:
+            if r.get("scope") == "DOW": by_tas[r["treasury_account"]].append(r)
+        for g in gseed["rows"]["dm_legislative_gate"]:
+            tas = g.get("treasury_account")
+            hits = by_tas.get(tas or "", [])
+            scope_ba = sum(r.get("ba_appropriated") or 0.0 for r in hits)
+            scope_res = sum(r.get("total_budgetary_resources") or 0.0 for r in hits)
+            scope_obl = sum(r.get("obligations_incurred") or 0.0 for r in hits)
+            gate_rows.append({**g,
+              "scope_ba": round(scope_ba, 2) if hits else None,
+              "scope_resources": round(scope_res, 2) if hits else None,
+              "scope_obligations": round(scope_obl, 2) if hits else None,
+              "scope_years": json.dumps(sorted({r["fiscal_year"] for r in hits})) if hits else None,
+              "scope_basis": "measured from File A" if hits else "not isolable in File A"})
+    print(f"  legislative gates: {len(gate_rows)} "
+          f"({sum(1 for g in gate_rows if g['bars_obligation'])} bar obligation, "
+          f"{sum(1 for g in gate_rows if g.get('scope_ba') is not None)} with measured scope)")
+
     write(out, "chain.json", payload("execution_chain", current, {
+        "dm_legislative_gate": gate_rows,
         "dm_chain_unit": [{**v, "ba_appropriated": round(v["ba_appropriated"], 2),
                            "resources": round(v["resources"], 2),
                            "obligations": round(v["obligations"], 2),
@@ -5963,6 +6394,8 @@ def step_chain(out, only_fy=None):
         "dm_chain_oc": oc_rows,
         "dm_chain_lag": lag_rows,
         "dm_chain_sensitivity": sens_rows,
+        "dm_chain_archetype": arche_rows,
+        "dm_chain_anomaly": anom_rows,
     }, source_path="accounts/file_a + accounts/file_b + contracts + "
                    "database/seed_approp_calendar.json"))
 

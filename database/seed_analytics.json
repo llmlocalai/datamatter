@@ -220,6 +220,17 @@
       "refresh_cadence": "With the warehouse; the calendar changes when a law is enacted",
       "limitations": "Apportionment, allocation, allotment and sub-allotment are published nowhere here, so only the endpoints of the chain are observed and the interior is an assumption with its authority printed beside it. The ramp is censored: only 1-6% of current-year dollars name their Treasury account, the attribution is award-level rather than action-level, and an earlier obligation that named no account is invisible. File A and File B hold one submission per fiscal year and contain no within-year series at all.",
       "sort_order": 103
+    },
+    {
+      "key": "curated_legislative_gates",
+      "label": "Legislative gates on obligation",
+      "source_system": "Department of Defense Appropriations Acts and their joint explanatory statements; 31 U.S.C.; OMB Circular A-11; DoD FMR",
+      "source_path": "database/seed_legislative_gates.json",
+      "grain": "One condition standing between an appropriation and an obligation",
+      "description": "Conditions in appropriations law and the accompanying joint explanatory statements that gate obligation. Two kinds, kept apart: a BAR prevents obligation until the condition is met; a reporting direction burdens the Department without, on its own words, withholding the money. Each row says whether its requirement is the published text or a description of it, and the scope is measured from File A wherever a Treasury account carries the gate.",
+      "refresh_cadence": "Annually, when a new act and statement are enacted",
+      "limitations": "Curated by reading the acts and statements, not extracted mechanically, so it is a selection rather than a complete inventory of every congressional direction. Reprogramming thresholds by appropriation type are not published in a source this site could reach and are therefore not stated. Where a gate sits inside a component's accounts rather than in one of its own, File A cannot isolate its scope and none is given.",
+      "sort_order": 104
     }
   ],
   "controls": [
@@ -851,6 +862,51 @@
       "assertion": "Expanding each published slope's stored observations and taking the median of every pairwise slope in SQL reproduces the published days-per-30-continuing-resolution-days.",
       "rationale": "This slope is the figure a senior decision rests on -- what another month of continuing resolution does to execution -- so it gets an implementation that shares no code with the one that produced it. It is also the figure most easily got wrong: with five or six observations a least-squares slope is set by whichever year is furthest out, and two of these six years are unusual ones.",
       "authority": null,
+      "severity": "high"
+    },
+    {
+      "code": "CHN-06",
+      "name": "Rollups equal the cells they are built from",
+      "sort_order": 465,
+      "assertion": "Each component total equals the sum of its own colours of money, and the Department total equals the sum of its components.",
+      "rationale": "The page now answers three different questions -- how is this account doing, how is this component doing, how is the Department doing -- from one set of rows. Every measure involved is additive across File A accounts, so a rollup that does not foot is a rollup built from the wrong population, and a reader comparing a component figure against the Department figure would be comparing two different things.",
+      "authority": null,
+      "severity": "critical"
+    },
+    {
+      "code": "CHN-07",
+      "name": "The process model is built from its own steps",
+      "sort_order": 466,
+      "assertion": "Each chain's published minimum, likely and maximum equal the sums of its applicable steps; every step has min <= likely <= max; and the two measured endpoints carry no duration.",
+      "rationale": "The model's whole claim is that it is assembled from the documented process rather than fitted to the observation it is compared against. A total that does not equal its own steps would mean it had been adjusted, which is precisely the failure the earlier flat-share version of this page had. Keeping the measured endpoints at zero duration is what stops a measurement being absorbed into an estimate.",
+      "authority": "31 U.S.C. 1513(b)(1); DoD FMR Volume 3, Chapter 2",
+      "severity": "critical"
+    },
+    {
+      "code": "CHN-08",
+      "name": "Every execution shape is a real cumulative curve",
+      "sort_order": 467,
+      "assertion": "Each archetype's stored shape runs from at or above zero to one by the twelfth fiscal month, and every shape carries the comparison window it was cut to.",
+      "rationale": "The archetypes are discovered by clustering, so the only way to know the clustering saw what it was meant to see is to check the inputs. A shape that does not reach one is a truncated year that was not normalised, and clustering those together with complete years would sort by how long the year was observed rather than by when its money moved.",
+      "authority": null,
+      "severity": "high"
+    },
+    {
+      "code": "CHN-09",
+      "name": "Anomaly baselines re-derive from the unit's own history",
+      "sort_order": 468,
+      "assertion": "Recomputing each baseline in SQL as the median of that unit's own earlier values reproduces the published baseline.",
+      "rationale": "A deviation is only meaningful against the right baseline, and the commonest way to get this wrong is to compare a category against a Department-wide average when these categories differ by three orders of magnitude. This recomputes the baseline from the values themselves rather than reading back the column the extract wrote.",
+      "authority": null,
+      "severity": "high"
+    },
+    {
+      "code": "GATE-01",
+      "name": "Every legislative gate carries its citation and an honest scope",
+      "sort_order": 469,
+      "assertion": "Every gate names a citation and an authority, a measured scope appears only where a Treasury account carries the gate, and a gate with no measured scope says why.",
+      "rationale": "These are quotations from public law and from congressional statements, and a page that characterises what Congress required had better be able to show where. The scope rule matters just as much: a gate whose money cannot be isolated in File A gets no number, because an estimated scope on a legislative requirement reads as a finding about Congress rather than about this site's data.",
+      "authority": "Annual Department of Defense Appropriations Act and its joint explanatory statement",
       "severity": "high"
     }
   ],

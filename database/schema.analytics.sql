@@ -2491,3 +2491,140 @@ CREATE TABLE IF NOT EXISTS dm_chain_sensitivity (
   observations   text,               -- json: the points the slope was taken over
   UNIQUE (load_id, agency_code, appropriation, metric)
 );
+
+-- ===========================================================================
+-- Chain enhancements: rollup levels, the process model, pattern discovery and
+-- the legislative gates.
+-- ===========================================================================
+
+-- A unit is now one of three levels. `cell` is one component's one colour of
+-- money; `component` is that component across all of them; `department` is the
+-- whole of it. Every measure is additive across File A accounts, so a rollup is
+-- a sum and never an average of ratios.
+ALTER TABLE dm_chain_unit ADD COLUMN IF NOT EXISTS level text NOT NULL DEFAULT 'cell';
+
+-- The chain rows carry a PROCESS MODEL rather than a share of a residual. The
+-- model is built from its own inputs -- who does each step and what governs the
+-- clock -- and is never re-fitted to the observation; `verdict` reports how the
+-- two compare. Two chains run in every year: `mode` says which this row belongs
+-- to. Under a continuing resolution OMB has apportioned automatically, so the
+-- four steps from the component's request to OUSD(C) recording the position do
+-- not run; after a full-year act the whole chain runs from the enactment date.
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS level text NOT NULL DEFAULT 'cell';
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS actor text;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS applies boolean NOT NULL DEFAULT true;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS min_days int;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS likely_days int;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS max_days int;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS mode text;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS anchor_day int;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS anchor_label text;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS model_min int;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS model_likely int;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS model_max int;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS reg_ceiling_days int;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS observed_gap int;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS verdict text;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS excess_days int;
+ALTER TABLE dm_chain_lag ADD COLUMN IF NOT EXISTS post_enactment_d10 int;
+
+-- What shapes execution comes in, discovered from the shapes rather than
+-- assigned in advance. Deterministic k-means over each unit-year's cumulative
+-- monthly share, cut to the same-point window so a live year observed for fewer
+-- days does not cluster as front-loaded merely for stopping sooner. The centroid
+-- rides on the row: an archetype whose centroid cannot be inspected is a label,
+-- not a finding.
+CREATE TABLE IF NOT EXISTS dm_chain_archetype (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year    int  NOT NULL,
+  agency_code    text NOT NULL,
+  appropriation  text NOT NULL,
+  archetype_key  text NOT NULL,
+  archetype_label text NOT NULL,
+  cluster        int  NOT NULL,
+  cluster_size   int  NOT NULL DEFAULT 0,
+  shape_json     text NOT NULL,
+  centroid_json  text NOT NULL,
+  half_by_month  int,
+  window_days    int,
+  UNIQUE (load_id, fiscal_year, agency_code, appropriation)
+);
+
+-- A unit-year against its OWN prior years, never against a Department average:
+-- these categories differ by three orders of magnitude and a shared threshold
+-- only ever selects the largest of them. `sample_amount` and
+-- `prior_median_amount` ride on the row because a cell whose dated sample
+-- collapsed shifts its own median for reasons that are nothing to do with
+-- execution, and a deviation published without its sample size invites exactly
+-- that misreading.
+CREATE TABLE IF NOT EXISTS dm_chain_anomaly (
+  id             bigserial PRIMARY KEY,
+  load_id        bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year    int  NOT NULL,
+  agency_code    text NOT NULL,
+  appropriation  text NOT NULL,
+  metric         text NOT NULL,
+  value          numeric(12,2),
+  baseline       numeric(12,2),
+  deviation      numeric(12,4),
+  baseline_years int  NOT NULL DEFAULT 0,
+  direction      text,
+  window_days    int,
+  sample_amount  numeric(20,2),
+  prior_median_amount numeric(20,2),
+  headline       text NOT NULL,
+  method         text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dm_chain_anomaly_idx
+  ON dm_chain_anomaly (load_id, fiscal_year, agency_code, appropriation);
+
+-- Conditions in appropriations law and the joint explanatory statements that
+-- stand between an appropriation and an obligation.
+--
+-- Two kinds, never merged. `bars_obligation` true is a BAR: the money cannot be
+-- touched until the condition is met. False is a reporting direction, which is a
+-- burden on the Department but does not on its own words withhold the funds.
+-- Reading every congressional direction as a bar overstates the constraint; it
+-- is the commonest error in this area and the column exists to prevent it.
+--
+-- `is_verbatim` says whether `requirement` is the published text or a
+-- description of it, because a paraphrase presented as a quote is a different
+-- kind of claim. Scope is MEASURED from File A where a Treasury account carries
+-- the gate, and left null where it does not.
+CREATE TABLE IF NOT EXISTS dm_legislative_gate (
+  id               bigserial PRIMARY KEY,
+  load_id          bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  fiscal_year      int,
+  gate_key         text NOT NULL,
+  gate_type        text NOT NULL,
+  scope_label      text NOT NULL,
+  treasury_account text,
+  days             int,
+  bars_obligation  boolean NOT NULL DEFAULT false,
+  is_verbatim      boolean NOT NULL DEFAULT false,
+  requirement      text NOT NULL,
+  citation         text,
+  authority        text,
+  note             text,
+  scope_ba         numeric(20,2),
+  scope_resources  numeric(20,2),
+  scope_obligations numeric(20,2),
+  scope_years      text,
+  scope_basis      text
+);
+CREATE INDEX IF NOT EXISTS dm_legislative_gate_idx
+  ON dm_legislative_gate (load_id, fiscal_year, gate_type);
+
+-- The points an anomaly's baseline was taken over, so CHN-09 can recompute the
+-- median without sharing code with the extract that published it. Medianing the
+-- SCORED rows instead would median an incomplete set: a unit's earliest years
+-- have too little history to score and never appear as rows of their own, yet
+-- they are part of the baseline every later year is measured against.
+ALTER TABLE dm_chain_anomaly ADD COLUMN IF NOT EXISTS prior_values text;
+
+-- A sensitivity row is a slope over one of three populations. The rollups must
+-- not share a ranking with the cells: a reader comparing "Army, all colours"
+-- against "Army, operation and maintenance" would be comparing a set against one
+-- of its own members.
+ALTER TABLE dm_chain_sensitivity ADD COLUMN IF NOT EXISTS level text NOT NULL DEFAULT 'cell';

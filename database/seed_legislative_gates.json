@@ -1,0 +1,82 @@
+{
+  "dataset": "curated_legislative_gates",
+  "vintage": "2026-09-18",
+  "generated_at": "2026-09-18",
+  "note": "Conditions in appropriations law and the accompanying joint explanatory statements that stand between an appropriation and an obligation. Two kinds, and the page does not merge them: a BAR actually prevents obligation until the condition is met; a REPORT is a reporting obligation on the Department that does not, on its own words, withhold the money. `is_verbatim` says whether `requirement` is the text as published or a description of it. Where a gate can be tied to a Treasury account, the scope is measured from File A rather than taken from the statement.",
+  "rows": {
+    "dm_legislative_gate": [
+      {"fiscal_year": null, "gate_key": "cr_new_start", "gate_type": "new_start_bar",
+       "scope_label": "Every account, while a continuing resolution is in force",
+       "treasury_account": null, "days": null, "bars_obligation": true, "is_verbatim": false,
+       "requirement": "A continuing resolution funds projects and activities at the prior year's rate and bars new starts, multi-year procurements and production-rate increases. An activity for which no appropriation was available in the prior year cannot be obligated against at all until the full-year act.",
+       "citation": "https://appropriations.house.gov/sites/evo-subsites/republicans-appropriations.house.gov/files/evo-media-document/continuing-appropriations-2026-section-by-section-final.pdf",
+       "authority": "Continuing Appropriations Act, 2026, §102 and §104",
+       "note": "This is the single most consequential gate on this site, and it is the mechanism behind the continuing-resolution finding in section 2: operating accounts keep obligating at the prior year's rate through a CR because their requirements already exist, and construction and family housing cannot, because a project that has not started is precisely what the CR bars."},
+
+      {"fiscal_year": null, "gate_key": "apportionment_clock", "gate_type": "apportionment_clock",
+       "scope_label": "Every appropriation, on enactment",
+       "treasury_account": null, "days": 30, "bars_obligation": true, "is_verbatim": true,
+       "requirement": "The agency submits its apportionment request by the later of 40 days before the fiscal year begins or 15 days after enactment; the President notifies the agency of the apportionment action by the later of 20 days before the fiscal year begins or 30 days after enactment.",
+       "citation": "https://www.law.cornell.edu/uscode/text/31/1513",
+       "authority": "31 U.S.C. 1513(b)(1)",
+       "note": "Funds cannot be distributed before they are apportioned. Thirty days is the statutory ceiling on OMB, not a target, and it runs from enactment rather than from receipt of the request."},
+
+      {"fiscal_year": null, "gate_key": "allotment_clock", "gate_type": "allotment_clock",
+       "scope_label": "Every appropriation, after apportionment",
+       "treasury_account": null, "days": 30, "bars_obligation": false, "is_verbatim": true,
+       "requirement": "Allotments shall be made no later than 30 days after OMB signs the apportionment or the start of the subsequent calendar month, whichever is later.",
+       "citation": "https://comptroller.war.gov/Portals/45/documents/fmr/current/03/03_02.pdf",
+       "authority": "DoD FMR Volume 3, Chapter 2",
+       "note": "The only step in the interior of the distribution chain with a published deadline. Note the clock runs from OMB's signature, so it overlaps the recording and funding-authorization-document steps rather than following them: statute and regulation together allow 60 days from enactment to allotment."},
+
+      {"fiscal_year": null, "gate_key": "cr_automatic_apportionment", "gate_type": "apportionment_clock",
+       "scope_label": "Every account, while a continuing resolution is in force",
+       "treasury_account": null, "days": 0, "bars_obligation": false, "is_verbatim": false,
+       "requirement": "OMB apportions continuing-resolution funding automatically by bulletin, at a pro-rata share of the annualised prior-year rate: rate for operations multiplied by the days the continuing resolution covers, divided by 365.",
+       "citation": "https://www.whitehouse.gov/wp-content/uploads/2025/08/s123.pdf",
+       "authority": "OMB Circular A-11 §123",
+       "note": "This is why a continuing resolution does not stop operating execution. The apportionment steps of the chain do not run at all: the authority is already apportioned on 1 October. It is also the rule this site uses to draw the authority curve under a continuing resolution."},
+
+      {"fiscal_year": 2026, "gate_key": "golden_dome_spend_plan", "gate_type": "spend_plan",
+       "scope_label": "Golden Dome for America Fund, Defense",
+       "treasury_account": "097-2025/2029-3007-000", "days": 60, "bars_obligation": false,
+       "is_verbatim": true,
+       "requirement": "To that end, the Secretary of Defense is directed, in conjunction with the Director of Golden Dome, to provide a comprehensive spend plan for Golden Dome resourcing to the congressional defense committees, not later than 60 days after enactment of this Act.",
+       "citation": "https://www.appropriations.senate.gov/imo/media/doc/fy26_def_jes.pdf",
+       "authority": "Joint Explanatory Statement, Department of Defense Appropriations Act, 2026",
+       "note": "A direction to report rather than a bar on obligation in its own words. The account it names is the one large enough to see in File A, which is why this site can measure its scope instead of asserting it."},
+
+      {"fiscal_year": 2026, "gate_key": "jiatf401_spend_plan", "gate_type": "spend_plan",
+       "scope_label": "JIATF-401 (counter-small-unmanned-aircraft-systems task force)",
+       "treasury_account": null, "days": 60, "bars_obligation": false, "is_verbatim": true,
+       "requirement": "Further, the agreement directs that not later than 60 days after the enactment of this Act, the Secretary of the Army shall submit a comprehensive spend plan for amounts made available for JIATF-401.",
+       "citation": "https://www.appropriations.senate.gov/imo/media/doc/fy26_def_jes.pdf",
+       "authority": "Joint Explanatory Statement, Department of Defense Appropriations Act, 2026",
+       "note": "Sits inside Army accounts rather than in one of its own, so File A cannot isolate its scope and this site does not guess at it."},
+
+      {"fiscal_year": 2026, "gate_key": "usafricom_execution_plan", "gate_type": "obligation_bar",
+       "scope_label": "USAFRICOM area of operations, additional $25,000,000",
+       "treasury_account": null, "days": null, "bars_obligation": true, "is_verbatim": true,
+       "requirement": "The agreement directs that none of these funds may be obligated or expended until the Under Secretary of Defense (Comptroller), in coordination with the Commander, USAFRICOM, presents an execution plan to the congressional defense committees.",
+       "citation": "https://www.appropriations.senate.gov/imo/media/doc/fy26_def_jes.pdf",
+       "authority": "Joint Explanatory Statement, Department of Defense Appropriations Act, 2026",
+       "note": "The clearest example on this page of a true bar rather than a reporting direction: the money exists and cannot be touched until a document reaches the committees. It carries no deadline, so the wait is as long as the staffing takes."},
+
+      {"fiscal_year": 2026, "gate_key": "taiwan_tsci_spend_plan", "gate_type": "spend_plan",
+       "scope_label": "Taiwan Security Cooperation Initiative",
+       "treasury_account": null, "days": 60, "bars_obligation": false, "is_verbatim": true,
+       "requirement": "The agreement directs the Secretary of Defense, in consultation with the Commander, United States Indo-Pacific Command, to provide the House and Senate Defense Appropriations Subcommittees, not later than 60 days after the enactment of this Act, with a spend plan and briefing on the Taiwan Security Cooperation Initiative.",
+       "citation": "https://www.appropriations.senate.gov/imo/media/doc/fy26_def_jes.pdf",
+       "authority": "Joint Explanatory Statement, Department of Defense Appropriations Act, 2026",
+       "note": "A reporting direction with a deadline rather than a bar."},
+
+      {"fiscal_year": null, "gate_key": "reprogramming_prior_approval", "gate_type": "reprogramming",
+       "scope_label": "Any movement of funds above the agreed thresholds",
+       "treasury_account": null, "days": null, "bars_obligation": true, "is_verbatim": false,
+       "requirement": "The Department's Financial Management Regulation requires prior congressional approval of reprogramming actions above dollar or percentage thresholds agreed with the congressional defense committees. General transfer authority is separately capped by the act: $6,000,000,000 between appropriations for military functions other than military construction in the FY2024 act.",
+       "citation": "https://www.everycrsreport.com/reports/IF11243.html",
+       "authority": "DoD FMR Volume 3, Chapter 6; annual Department of Defense Appropriations Act, §8005",
+       "note": "The specific thresholds by appropriation type are not published in the source this site could reach, so they are not stated here. The transfer ceiling is quoted for FY2024, the year the source states; it is set annually and this site has not verified the FY2026 figure."}
+    ]
+  }
+}
