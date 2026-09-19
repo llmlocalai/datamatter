@@ -2628,3 +2628,72 @@ ALTER TABLE dm_chain_anomaly ADD COLUMN IF NOT EXISTS prior_values text;
 -- against "Army, operation and maintenance" would be comparing a set against one
 -- of its own members.
 ALTER TABLE dm_chain_sensitivity ADD COLUMN IF NOT EXISTS level text NOT NULL DEFAULT 'cell';
+
+-- ---------------------------------------------------------------------------
+-- The research paper (/research)
+-- ---------------------------------------------------------------------------
+-- The paper's prose lives in database/seed_research.json and contains NO
+-- NUMBERS. Every figure in it is a {placeholder} resolved at extract time from
+-- the same staged extracts the rest of the site publishes, and RES-01 fails the
+-- load where one does not resolve. That split is the whole point of these three
+-- tables: an argument that cannot silently drift away from the evidence it
+-- rests on, because the number is never typed into the sentence.
+--
+-- `placeholders` on a finding is the JSON array of evidence keys its own prose
+-- consumes, carried on the row so the control can check the join without
+-- re-parsing the sentence.
+CREATE TABLE IF NOT EXISTS dm_research_finding (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  finding_key   text NOT NULL,
+  sort_order    int  NOT NULL DEFAULT 0,
+  title         text NOT NULL,
+  claim         text NOT NULL,
+  so_what       text NOT NULL,
+  falsifier     text NOT NULL,
+  confidence    text NOT NULL,
+  source_pages  text,
+  placeholders  text
+);
+CREATE INDEX IF NOT EXISTS dm_research_finding_idx
+  ON dm_research_finding (load_id, sort_order);
+
+-- A recommendation names exactly one finding. `because_finding` is a foreign
+-- key in intent rather than in the schema, because the load stages both tables
+-- inside one transaction; RES-01 enforces it after the insert. A recommendation
+-- that cannot name a finding is an opinion, and this site does not publish those
+-- beside measurements without saying which is which.
+CREATE TABLE IF NOT EXISTS dm_research_recommendation (
+  id              bigserial PRIMARY KEY,
+  load_id         bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  rec_key         text NOT NULL,
+  audience        text NOT NULL,
+  sort_order      int  NOT NULL DEFAULT 0,
+  title           text NOT NULL,
+  action          text NOT NULL,
+  because_finding text NOT NULL,
+  cost            text,
+  measure         text,
+  authority       text,
+  horizon         text
+);
+CREATE INDEX IF NOT EXISTS dm_research_recommendation_idx
+  ON dm_research_recommendation (load_id, audience, sort_order);
+
+-- One resolved figure. `value` is the number as extracted and `display` is how
+-- the paper prints it; both are stored because a reader who wants to check the
+-- rounding should not have to take the printed string on trust. `value` is null
+-- where the figure is a label rather than a quantity.
+CREATE TABLE IF NOT EXISTS dm_research_evidence (
+  id            bigserial PRIMARY KEY,
+  load_id       bigint NOT NULL REFERENCES dm_load(id) ON DELETE CASCADE,
+  evidence_key  text NOT NULL,
+  value         numeric(24,4),
+  display       text NOT NULL,
+  unit          text NOT NULL,
+  label         text NOT NULL,
+  source        text NOT NULL,
+  fiscal_year   int
+);
+CREATE INDEX IF NOT EXISTS dm_research_evidence_idx
+  ON dm_research_evidence (load_id, evidence_key);

@@ -546,6 +546,13 @@ export default async function ChainPage() {
           holder, where coverage is complete and the colour of money is not available. The two
           answer different halves of the same question.
         </p>
+        <p className="mt-4 text-sm text-navy-400 leading-relaxed max-w-3xl">
+          The argument these pages add up to, with what follows from it for the Department, the
+          components and the appropriations committees, is written up at{' '}
+          <Link href="/research" className="text-accent-400 hover:underline">
+            Where the time goes
+          </Link>.
+        </p>
       </Section>
     </Shell>
   );

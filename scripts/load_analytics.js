@@ -172,6 +172,75 @@ const CONTROLS = {
         : `FY${r.fiscal_year}: all ${r.n} anomaly baselines re-derive as the median of the unit's own earlier years.` };
   }),
 
+  // ---- the research paper. The paper's prose carries no numbers; every figure
+  // in it is a {placeholder} that stays a placeholder in the database and is
+  // resolved at render time against the evidence table of the same load. That is
+  // what keeps the argument honest: the sentence cannot drift away from the data
+  // because the sentence never held the number.
+  //
+  // So the check is NOT that the stored prose is free of braces -- it is supposed
+  // to be full of them. It is that every brace has an evidence row behind it, in
+  // recommendations as well as findings; that the placeholders column a finding
+  // carries is the set its own prose actually uses, since the page and this
+  // control both read that column and a stale one would make the join lie; and
+  // that every recommendation names a finding that exists. Any of the three
+  // failing publishes an argument that resolves to nothing while reading exactly
+  // like one that resolves.
+  'RES-01': async (c) => (await c.query(`
+    WITH prose AS (
+      SELECT f.finding_key AS owner, 'finding' AS kind,
+             f.title || ' ' || f.claim || ' ' || f.so_what || ' ' || f.falsifier
+             || ' ' || f.confidence AS t
+        FROM dm_research_finding f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+      UNION ALL
+      SELECT r.rec_key, 'recommendation',
+             r.title || ' ' || r.action || ' ' || coalesce(r.cost,'') || ' '
+             || coalesce(r.measure,'')
+        FROM dm_research_recommendation r JOIN dm_load l ON l.id = r.load_id AND l.is_current),
+    used AS (
+      SELECT DISTINCT prose.owner, prose.kind, m[1] AS ev
+        FROM prose, LATERAL regexp_matches(prose.t, '\{([a-z0-9_]+)\}', 'g') AS m),
+    ev AS (
+      SELECT e.evidence_key FROM dm_research_evidence e
+        JOIN dm_load l ON l.id = e.load_id AND l.is_current),
+    fk AS (
+      SELECT f.finding_key FROM dm_research_finding f
+        JOIN dm_load l ON l.id = f.load_id AND l.is_current),
+    -- the declared set against the used set, per finding, both ways
+    declared AS (
+      SELECT f.finding_key, (j #>> '{}') AS ev
+        FROM dm_research_finding f JOIN dm_load l ON l.id = f.load_id AND l.is_current
+        CROSS JOIN LATERAL jsonb_array_elements(coalesce(f.placeholders,'[]')::jsonb) AS j)
+    SELECT (SELECT count(*) FROM fk)::int AS findings,
+           (SELECT count(*) FROM ev)::int AS evidence,
+           (SELECT count(*) FROM used)::int AS uses,
+           (SELECT count(*) FROM used u
+              WHERE NOT EXISTS (SELECT 1 FROM ev WHERE ev.evidence_key = u.ev))::int AS dangling,
+           (SELECT count(*) FROM used u
+              WHERE u.kind = 'finding'
+                AND NOT EXISTS (SELECT 1 FROM declared d
+                                 WHERE d.finding_key = u.owner AND d.ev = u.ev))::int
+             AS undeclared,
+           (SELECT count(*) FROM declared d
+              WHERE NOT EXISTS (SELECT 1 FROM used u
+                                 WHERE u.owner = d.finding_key AND u.ev = d.ev))::int
+             AS overdeclared,
+           (SELECT count(*) FROM dm_research_recommendation r
+              JOIN dm_load l ON l.id = r.load_id AND l.is_current
+             WHERE NOT EXISTS (SELECT 1 FROM fk WHERE fk.finding_key = r.because_finding))::int
+             AS orphaned,
+           (SELECT count(*) FROM dm_research_recommendation r
+              JOIN dm_load l ON l.id = r.load_id AND l.is_current)::int AS recs`))
+    .rows.map((r) => {
+    const bad = r.dangling + r.undeclared + r.overdeclared + r.orphaned;
+    return { fiscal_year: null, observed: bad, expected: 0, tolerance: 0,
+      variance_pct: r.uses ? 100 * bad / r.uses : 0,
+      status: bad ? 'fail' : 'pass',
+      message: bad
+        ? `The paper does not resolve: ${r.dangling} of ${r.uses} figure references have no evidence row, ${r.undeclared} appear in a finding that does not declare them, ${r.overdeclared} are declared by a finding that no longer uses them, ${r.orphaned} of ${r.recs} recommendations name a finding that does not exist.`
+        : `All ${r.uses} figure references across ${r.findings} findings and ${r.recs} recommendations resolve to one of ${r.evidence} evidence rows, every finding declares exactly the figures its own prose uses, and every recommendation names a finding that exists.` };
+  }),
+
   'GATE-01': async (c) => (await c.query(`
     SELECT count(*)::int AS gates,
            count(*) FILTER (WHERE g.citation IS NULL OR g.authority IS NULL)::int AS uncited,
@@ -1992,6 +2061,7 @@ const CONTROLS = {
       ['jbook.json',      'jbook_corpus',          'scripts/etl_analytics.py --step jbook'],
       ['timeline.json',   'execution_timeline',    'scripts/etl_analytics.py --step timeline'],
       ['chain.json',      'execution_chain',       'scripts/etl_analytics.py --step chain'],
+      ['research.json',   'curated_research',      'scripts/etl_analytics.py --step research'],
       ['raw.json',        'raw_samples',           'scripts/etl_analytics.py --step raw'],
     ];
     const COLS = {
@@ -2192,6 +2262,11 @@ const CONTROLS = {
         'treasury_account','days','bars_obligation','is_verbatim','requirement','citation',
         'authority','note','scope_ba','scope_resources','scope_obligations','scope_years',
         'scope_basis'],
+      dm_research_finding: ['finding_key','sort_order','title','claim','so_what',
+        'falsifier','confidence','source_pages','placeholders'],
+      dm_research_recommendation: ['rec_key','audience','sort_order','title','action',
+        'because_finding','cost','measure','authority','horizon'],
+      dm_research_evidence: ['evidence_key','value','display','unit','label','source','fiscal_year'],
       dm_chain_sensitivity: ['agency_code','agency_name','appropriation','metric','level','profile',
         'comparison_window_days','years','slope_days_per_cr_day','days_per_30_cr_days',
         'observations'],

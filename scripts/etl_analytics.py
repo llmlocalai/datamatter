@@ -6400,9 +6400,238 @@ def step_chain(out, only_fy=None):
                    "database/seed_approp_calendar.json"))
 
 
+
+# ===========================================================================
+# The research paper: curated argument, live figures.
+#
+# The prose lives in database/seed_research.json and contains NO NUMBERS. Every
+# figure in it is a {placeholder} resolved here from the same extracts the rest
+# of the site publishes, and RES-01 fails a load where one does not resolve.
+#
+# That constraint is the point. A paper with its figures typed into the prose is
+# correct on the day it is written and wrong after the next refresh, and nobody
+# finds out, because prose does not fail a control. Resolving them at load time
+# means the argument either still holds against current data or the load stops.
+# ===========================================================================
+
+def _ev(rows, key, value, display, unit, label, source, fy=None):
+    rows.append({"evidence_key": key, "value": (round(value, 4) if isinstance(value, (int, float))
+                                                and value is not None else None),
+                 "display": display, "unit": unit, "label": label,
+                 "source": source, "fiscal_year": fy})
+
+
+def step_research(out, only_fy=None):
+    seed_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "database/seed_research.json")
+    if not os.path.exists(seed_path):
+        print("  seed_research.json absent, skipping"); return
+    with open(seed_path) as fh: seed = json.load(fh)
+
+    def staged(name):
+        p = os.path.join(out, name)
+        if not os.path.exists(p): return None
+        with open(p) as fh: return json.load(fh)
+
+    sbr = staged("sbr.json"); tl = staged("timeline.json")
+    ch = staged("chain.json"); fc = staged("filec.json")
+    if not (sbr and tl and ch):
+        print("  sbr/timeline/chain not staged yet; run those steps first"); return
+
+    ev = []
+    B = lambda v: f"${v/1e9:,.1f}B"
+    P = lambda v: f"{v:.1f}%"
+
+    # ---- scope: the Department against every code in the file
+    fy_rows = sbr["rows"].get("dm_sbr_fy", [])
+    scope_year = max((r["fiscal_year"] for r in fy_rows if r.get("scope") == "DOW"
+                      and not r.get("is_partial_year")), default=None)
+    dow = next((r for r in fy_rows if r.get("scope") == "DOW"
+                and r["fiscal_year"] == scope_year), None)
+    allr = next((r for r in fy_rows if r.get("scope") == "ALL"
+                 and r["fiscal_year"] == scope_year), None)
+    if dow:
+        _ev(ev, "dow_obligations", dow["obligations_incurred"], B(dow["obligations_incurred"]),
+            "usd", f"FY{scope_year} Department obligations incurred", "File A", scope_year)
+        _ev(ev, "scope_year", scope_year, f"{scope_year}", "year",
+            "The last closed year", "File A", scope_year)
+    if dow and allr:
+        over = allr["obligations_incurred"] - dow["obligations_incurred"]
+        _ev(ev, "scope_overstatement", over,
+            f"{B(over)} ({100*over/dow['obligations_incurred']:.1f}%)", "usd",
+            "Overstatement from summing every agency code in File A", "File A", scope_year)
+
+    # ---- the timeline: year-end concentration and the calendar
+    trend = tl["rows"].get("dm_timeline_trend", [])
+    sep = sorted([(r["fiscal_year"], r["value"]) for r in trend
+                  if r["metric_key"] == "sep_share" and r["value"] is not None])
+    if sep:
+        _ev(ev, "sep_share_first", sep[0][1], P(sep[0][1]), "pct",
+            "September share of contract obligation, first year", "FPDS", sep[0][0])
+        _ev(ev, "sep_year_first", sep[0][0], f"{sep[0][0]}", "year", "First year", "FPDS")
+        _ev(ev, "sep_share_last", sep[-1][1], P(sep[-1][1]), "pct",
+            "September share, latest complete year", "FPDS", sep[-1][0])
+        _ev(ev, "sep_year_last", sep[-1][0], f"{sep[-1][0]}", "year", "Latest complete year", "FPDS")
+        s22 = next((v for y, v in sep if y == 2022), None)
+        if s22 is not None:
+            _ev(ev, "sep_share_2022", s22, P(s22), "pct", "FY2022 September share", "FPDS", 2022)
+    cr22 = next((r["cr_days"] for r in trend if r["fiscal_year"] == 2022
+                 and r["cr_days"] is not None), None)
+    if cr22 is not None:
+        _ev(ev, "cr_days_2022", cr22, f"{cr22}", "days",
+            "FY2022 days without a full-year act", "Appropriation calendar", 2022)
+
+    cov = tl["rows"].get("dm_timeline_coverage", [])
+    st = sorted([(r["fiscal_year"], r["pct"]) for r in cov if r["measure_key"] == "single_tas"])
+    if st:
+        hi = max(st, key=lambda x: x[1]); lo = min(st, key=lambda x: x[1])
+        _ev(ev, "single_tas_hi", hi[1], P(hi[1]), "pct",
+            "Best year for contract dollars naming one Treasury account", "FPDS", hi[0])
+        _ev(ev, "single_tas_lo", lo[1], P(lo[1]), "pct",
+            "Worst year for the same", "FPDS", lo[0])
+
+    # ---- the chain: sensitivity, the process model, the gates
+    sens = [r for r in ch["rows"].get("dm_chain_sensitivity", [])
+            if r["metric"] == "d50" and r.get("level") == "cell"
+            and r.get("days_per_30_cr_days") is not None]
+    if sens:
+        _ev(ev, "sens_pairs", len(sens), f"{len(sens)}", "count",
+            "Component and colour-of-money pairs with a measured slope", "FPDS + calendar")
+        def med(rows):
+            v = sorted(r["days_per_30_cr_days"] for r in rows)
+            if not v: return None
+            return v[len(v)//2] if len(v) % 2 else (v[len(v)//2-1]+v[len(v)//2])/2
+        for prof, key in (("operating", "sens_med_operating"), ("investment", "sens_med_investment")):
+            m = med([r for r in sens if r.get("profile") == prof])
+            if m is not None:
+                _ev(ev, key, m, f"{m:+.1f}", "days", f"Median slope, {prof} accounts",
+                    "FPDS + calendar")
+        slip = [r for r in sens if r["days_per_30_cr_days"] > 5]
+        _ev(ev, "sens_slip_count", len(slip), f"{len(slip)}", "count",
+            "Pairs slipping more than five days per thirty of continuing resolution",
+            "FPDS + calendar")
+        worst = max(sens, key=lambda r: r["days_per_30_cr_days"])
+        _ev(ev, "sens_worst_label", None,
+            f"{worst.get('agency_name') or worst['agency_code']} {worst['appropriation'].lower()}",
+            "text", "Most exposed pair", "FPDS + calendar")
+        _ev(ev, "sens_worst_value", worst["days_per_30_cr_days"],
+            f"{worst['days_per_30_cr_days']:+.1f}", "days", "Its slope", "FPDS + calendar")
+        for ag, key in (("021", "sens_army_om"), ("017", "sens_navy_om")):
+            r = next((x for x in sens if x["agency_code"] == ag
+                      and x["appropriation"] == "Operation and maintenance"), None)
+            if r: _ev(ev, key, r["days_per_30_cr_days"], f"{r['days_per_30_cr_days']:+.1f}",
+                      "days", f"{r.get('agency_name') or ag} operation and maintenance slope",
+                      "FPDS + calendar")
+
+    lag = ch["rows"].get("dm_chain_lag", [])
+    en = [r for r in lag if r.get("mode") == "enacted"]
+    if en:
+        h = en[0]
+        _ev(ev, "chain_model_likely", h["model_likely"], f"{h['model_likely']}", "days",
+            "Likely duration of the documented chain after a full-year act", "Statute + FMR")
+        _ev(ev, "chain_reg_ceiling", h["reg_ceiling_days"], f"{h['reg_ceiling_days']}", "days",
+            "Enactment to allotment, the ceiling law and regulation allow",
+            "31 U.S.C. 1513(b)(1); DoD FMR Volume 3")
+        obs = [r["observed_gap"] for r in en
+               if r["step_key"] == "enactment" and r.get("level") == "component"
+               and r.get("observed_gap") is not None]
+        if obs:
+            _ev(ev, "post_act_lo", min(obs), f"{min(obs)}", "days",
+                "Fastest component to a tenth of post-act obligation", "FPDS")
+            _ev(ev, "post_act_hi", max(obs), f"{max(obs)}", "days",
+                "Slowest component to the same", "FPDS")
+    steps = {r["step_key"]: r for r in lag if r.get("mode") == "enacted"}
+    if steps:
+        total = len(steps)
+        unpub = sum(1 for r in steps.values() if r.get("basis") == "practitioner")
+        _ev(ev, "chain_steps_total", total, f"{total}", "count",
+            "Steps from an appropriation to an obligation", "Statute + FMR")
+        _ev(ev, "chain_steps_unpublished", unpub, f"{unpub}", "count",
+            "Of those, with no published deadline", "Statute + FMR")
+
+    gates = ch["rows"].get("dm_legislative_gate", [])
+    if gates:
+        _ev(ev, "gates_total", len(gates), f"{len(gates)}", "count",
+            "Conditions catalogued between an appropriation and an obligation",
+            "Appropriations acts and statements")
+        bars = sum(1 for g in gates if g.get("bars_obligation"))
+        _ev(ev, "gates_bar", bars, f"{bars}", "count", "Of those, that bar obligation",
+            "Appropriations acts and statements")
+
+    # ---- File C linkage
+    if fc:
+        rec = sorted([(r["fiscal_year"], r.get("linkage_pct"))
+                      for r in fc["rows"].get("dm_reconciliation", [])
+                      if r.get("linkage_pct") is not None])
+        if rec:
+            _ev(ev, "filec_first", rec[0][1], P(rec[0][1]), "pct",
+                "File C linkage, first year", "File C", rec[0][0])
+            _ev(ev, "filec_year_first", rec[0][0], f"{rec[0][0]}", "year", "First year", "File C")
+            _ev(ev, "filec_last", rec[-1][1], P(rec[-1][1]), "pct",
+                "File C linkage, latest year", "File C", rec[-1][0])
+            _ev(ev, "filec_year_last", rec[-1][0], f"{rec[-1][0]}", "year", "Latest year", "File C")
+
+    # ---- the audit record, from the curated NFR seed
+    nfr_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "database/seed_nfr.json")
+    if os.path.exists(nfr_path):
+        with open(nfr_path) as fh: nfr = json.load(fh)
+        years = sorted(nfr["rows"].get("dm_nfr_year", []), key=lambda r: r["fiscal_year"])
+        if years:
+            a, b = years[0], years[-1]
+            for r, k1, k2, k3 in ((a, "nfrs_first", "mw_first", "nfr_year_first"),
+                                  (b, "nfrs_last", "mw_last", "nfr_year_last")):
+                if r.get("nfrs_issued") is not None:
+                    _ev(ev, k1, r["nfrs_issued"], f"{r['nfrs_issued']:,}", "count",
+                        f"Notices issued FY{r['fiscal_year']}", "DoD OIG", r["fiscal_year"])
+                if r.get("mw_agency_wide") is not None:
+                    _ev(ev, k2, r["mw_agency_wide"], f"{r['mw_agency_wide']}", "count",
+                        f"Agency-Wide material weaknesses FY{r['fiscal_year']}", "DoD OIG",
+                        r["fiscal_year"])
+                _ev(ev, k3, r["fiscal_year"], f"{r['fiscal_year']}", "year", "Year", "DoD OIG")
+        objs = nfr["rows"].get("dm_nfr_object", [])
+        if objs:
+            cnt = collections.Counter(o.get("coverage") for o in objs)
+            _ev(ev, "nfr_objects", len(objs), f"{len(objs)}", "count",
+                "Audit-risk objects built at material-weakness grain", "DoD OIG + this site")
+            for k, lab in (("testable", "nfr_testable"), ("partial", "nfr_partial"),
+                           ("absent", "nfr_absent")):
+                _ev(ev, lab, cnt.get(k, 0), f"{cnt.get(k, 0)}", "count",
+                    f"Objects scored {k} against these sources", "this site")
+
+    # ---- resolve the paper against what was computed
+    have = {e["evidence_key"] for e in ev}
+    findings = seed["rows"]["dm_research_finding"]
+    recs = seed["rows"]["dm_research_recommendation"]
+    needed = set()
+    for f in findings:
+        for field in ("claim", "so_what", "falsifier"):
+            needed |= set(re.findall(r"\{(\w+)\}", f.get(field) or ""))
+    missing = sorted(needed - have)
+    fkeys = {f["finding_key"] for f in findings}
+    orphans = sorted(r["rec_key"] for r in recs if r["because_finding"] not in fkeys)
+
+    for f in findings:
+        f["placeholders"] = json.dumps(sorted(
+            set(re.findall(r"\{(\w+)\}", " ".join(
+                str(f.get(x) or "") for x in ("claim", "so_what", "falsifier"))))))
+    print(f"  evidence resolved: {len(ev)} figures; paper needs {len(needed)}; "
+          f"missing {len(missing)}{': ' + ', '.join(missing[:6]) if missing else ''}")
+    if orphans: print(f"  recommendations pointing at a missing finding: {orphans}")
+
+    write(out, "research.json", payload("curated_research", seed["vintage"], {
+        "dm_research_finding": findings,
+        "dm_research_recommendation": recs,
+        "dm_research_evidence": ev,
+    }, source_path="database/seed_research.json + the current load's own extracts",
+       unresolved=json.dumps(missing)))
+
+
 # ------------------------------------------------------------------- main ---
 STEPS = {"exhibits": step_exhibits, "pb_display": step_pb_display, "execution": step_execution, "timing": step_timing, "currency": step_currency, "sbr": step_sbr, "timeline": step_timeline,
          "chain": step_chain,
+         # Last of the analytic steps: it reads the others' output.
+         "research": step_research,
          "obligations": step_obligations, "awards": step_awards,
          "filec": step_filec, "assistance": step_assistance, "program": step_program,
          "knowledge": step_knowledge,
@@ -6422,7 +6651,7 @@ def main():
     for nm in names:
         print(f"[{nm}]")
         fn = STEPS[nm]
-        fn(a.out, a.fy) if nm in ("awards", "assistance", "program", "timing", "timeline", "chain") else fn(a.out)
+        fn(a.out, a.fy) if nm in ("awards", "assistance", "program", "timing", "timeline", "chain", "research") else fn(a.out)
     print("done.")
 
 if __name__ == "__main__":

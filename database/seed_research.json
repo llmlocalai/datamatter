@@ -1,0 +1,258 @@
+{
+  "dataset": "curated_research",
+  "vintage": "2026-09-19",
+  "generated_at": "2026-09-19",
+  "note": "The paper's argument, curated. NO FIGURE IS WRITTEN HERE. Every number appears as a {placeholder} resolved at load time from the same extracts the rest of the site publishes, and RES-01 fails a load where a placeholder does not resolve. That is the whole point: a paper whose figures are typed into its prose goes stale on the next refresh and nobody notices.",
+  "rows": {
+    "dm_research_finding": [
+      {
+        "finding_key": "calendar_narrow",
+        "sort_order": 1,
+        "title": "The appropriations calendar does not slow the Department down. It stops a named few.",
+        "claim": "Across {sens_pairs} component-and-colour-of-money pairs measured over six years, the median effect of a longer continuing resolution on execution timing is {sens_med_operating} days for operating accounts and {sens_med_investment} days for investment accounts — both within two days of zero. The entire measured effect sits in {sens_slip_count} pairs, every one of them construction or family housing, led by {sens_worst_label} at {sens_worst_value} days later per thirty days of continuing resolution.",
+        "so_what": "A Department-wide continuing-resolution mitigation spends most of its effort on accounts that do not respond to it. The constraint is not that money moves slowly under a CR; it is that a CR bars new starts, and only some accounts need one.",
+        "falsifier": "If operating accounts also slipped materially as CR length grew, the effect would be general and a Department-wide response would be right. They do not: Army operation and maintenance is {sens_army_om} and Navy operation and maintenance {sens_navy_om} days per thirty.",
+        "confidence": "The direction is established over six years; the magnitude on the exposed pairs rests on very few observations each.",
+        "source_pages": "[\"/execution/chain\",\"/execution/timeline\"]"
+      },
+      {
+        "finding_key": "ahead_of_process",
+        "sort_order": 2,
+        "title": "The Department executes faster than its own documented process would allow. Authority, not capability, is the binding constraint.",
+        "claim": "Modelled from statute, regulation and the steps nobody publishes a clock for, the chain from a full-year act to a tenth of the post-act obligation being placed has a likely duration of {chain_model_likely} days. Observed, components place that first tenth between {post_act_lo} and {post_act_hi} days after the act.",
+        "so_what": "Work is being staged and held against authority that has not arrived, then released. That is the signature of a pipeline waiting on money rather than money waiting on a pipeline, and it means schedule recovered by earlier authority is real rather than theoretical.",
+        "falsifier": "If components were capacity-constrained, post-act execution would lag the model rather than beat it, and the spread between components running the same statute in the same year would be small. It is not: the fastest and slowest components differ by a factor of several in the same year.",
+        "confidence": "Measured on the contract actions that name their Treasury account, so it is an upper bound on how early money moved.",
+        "source_pages": "[\"/execution/chain\"]"
+      },
+      {
+        "finding_key": "unmeasured_interior",
+        "sort_order": 3,
+        "title": "{chain_steps_unpublished} of the {chain_steps_total} steps from an appropriation to an obligation have no published clock, so no remediation of it can be evaluated.",
+        "claim": "Statute gives OMB thirty days from enactment to apportion and the regulation gives the component thirty more to allot — {chain_reg_ceiling} days end to end, the only figure in the chain that comes from law alone. Of those {chain_steps_total} steps, {chain_steps_unpublished} have no deadline, no published date and no record of whether they were met, for any component, in any year.",
+        "so_what": "The Department cannot currently demonstrate whether the wait between authority and execution is funds distribution or acquisition lead time. It therefore cannot tell whether any corrective action worked, which is the definition of an uncontrolled process.",
+        "falsifier": "Four recorded dates per distribution action — apportionment, allocation, allotment, sub-allotment — would collapse the model's range to a measurement and settle it either way.",
+        "confidence": "The absence is certain; the interior durations on this site are explicitly assumptions and are labelled as such on every row.",
+        "source_pages": "[\"/execution/chain\"]"
+      },
+      {
+        "finding_key": "year_end_separate",
+        "sort_order": 4,
+        "title": "Year-end concentration is rising, and it is not the continuing resolution doing it.",
+        "claim": "September's share of the year's contract obligation rose from {sep_share_first} in FY{sep_year_first} to {sep_share_last} in FY{sep_year_last}. It does not track the calendar: FY2022 ran {cr_days_2022} days without a full-year act, the second longest of the six years, and closed with the lowest September share of them all at {sep_share_2022}.",
+        "so_what": "Reading year-end concentration as evidence of continuing-resolution delay sends scrutiny in September at a problem that starts in October, and it is the easiest wrong inference available on this data.",
+        "falsifier": "If the two moved together, the September series would rise with CR length across the six years. It does not.",
+        "confidence": "Measured on the full contract population, which is about a third of Department obligations and the only within-year series any published source here supports.",
+        "source_pages": "[\"/execution/timeline\",\"/execution\"]"
+      },
+      {
+        "finding_key": "evidence_gap",
+        "sort_order": 5,
+        "title": "The published record can test {nfr_testable} of the Department's {nfr_objects} material weaknesses.",
+        "claim": "Scored assertion by assertion against what these files actually carry, {nfr_testable} of the {nfr_objects} audit-risk objects built around the FY2025 Agency-Wide material weaknesses is testable here, {nfr_partial} are partial and {nfr_absent} are absent. The published execution files exist to report budgetary execution to the public and carry no journal entry, no user, no trading partner, no receipt and no proprietary balance.",
+        "so_what": "A remediation programme built on public reporting cannot reach {nfr_absent} of the {nfr_objects} at all. It has to be built where the transactions are, and the absences are the finding rather than a gap in this site's coverage.",
+        "falsifier": "An adjacent field existing is not the same as an assertion being testable, and this site does not soften an absent score because one does.",
+        "confidence": "The scoring is about THIS SITE's sources, not about the Department's own systems, and the page says so element by element.",
+        "source_pages": "[\"/nfr\",\"/sbr\"]"
+      },
+      {
+        "finding_key": "trail_degrading",
+        "sort_order": 6,
+        "title": "The trail between an award and the account that funded it is thin and getting thinner.",
+        "claim": "A contract action names exactly one Treasury account on {single_tas_hi} of its dollars in its best year and {single_tas_lo} in its worst, and the attribution is at award level rather than action level. On the accounting side, File C links {filec_first} of contract obligation in FY{filec_year_first} and {filec_last} in FY{filec_year_last}.",
+        "so_what": "Every timing statement about a colour of money in this Department is therefore an inference. So is any audit assertion that requires tracing an obligation to the appropriation that funded it — which is most of them.",
+        "falsifier": "Measured across two warehouse vintages a month apart, the linkage share for a given fiscal year does not move, so this is a property of the source rather than a reporting lag that will fill in.",
+        "confidence": "Both figures are measured, and both are published beside every figure derived from them.",
+        "source_pages": "[\"/linkage\",\"/traceability\",\"/execution/timeline\"]"
+      },
+      {
+        "finding_key": "scope_error",
+        "sort_order": 7,
+        "title": "The largest single mismeasurement risk in this data is a scope error, and it is trivially avoidable.",
+        "claim": "File A carries several agency identifier codes, one of which is the Executive Office of the President. Summing them all and calling the result the Department overstates FY{scope_year} obligations by {scope_overstatement} against a Department total of {dow_obligations}. An earlier build of this site did exactly that while labelling the total as the Department.",
+        "so_what": "Analytical errors of this size do not come from sophisticated mistakes. They come from a filter nobody wrote, and the only reliable defence is a control that blocks the load rather than a convention people are asked to remember.",
+        "falsifier": "The scope control asserts no Department-scope figure includes the Executive Office of the President, and it blocks the load. It has never been relaxed.",
+        "confidence": "Measured directly from the file.",
+        "source_pages": "[\"/sources\",\"/controls\"]"
+      },
+      {
+        "finding_key": "nfr_count_illusion",
+        "sort_order": 8,
+        "title": "A falling notice count is not improvement, and the opinion has not moved across the whole published window.",
+        "claim": "Notices issued ran {nfrs_first} in FY{nfr_year_first} and {nfrs_last} in FY{nfr_year_last}; Agency-Wide material weaknesses went from {mw_first} to {mw_last} over the same period. The audit opinion in every one of those years was a disclaimer.",
+        "so_what": "A notice leaves the population when it is closed, when it is merged, when its entity stops being separately audited, or when the audit approach changes what is tested. Two of those happened inside the window. Reporting the count as a trend rewards the three mechanisms that are not remediation.",
+        "falsifier": "If the count were tracking remediation, the material-weakness roster would fall with it. It rose for most of the window and the opinion never changed.",
+        "confidence": "Counts are as the Department's Inspector General published them; the roster pairing across renames is this site's and is published with the printed label beside every key.",
+        "source_pages": "[\"/nfr\",\"/audit\"]"
+      },
+      {
+        "finding_key": "gates_conflated",
+        "sort_order": 9,
+        "title": "Congressional conditions on obligation are managed as one category when only some of them stop money.",
+        "claim": "Of the {gates_total} conditions catalogued here, {gates_bar} actually bar obligation and the rest direct a report. The clearest bar carries no deadline at all: funds may not be obligated or expended until an execution plan reaches the committees, and nothing in the text says when that has to happen.",
+        "so_what": "A spend-plan direction and a clause reading none of these funds may be obligated are different instruments with different consequences, and treating them as one pile of congressional homework means the ones that actually hold money have no owner and no clock.",
+        "falsifier": "A register separating bars from reports, with days-to-satisfaction measured against each bar, would settle how much money each one actually holds and for how long. Nothing measures that today.",
+        "confidence": "A curated selection read out of the acts and statements, not a mechanical extraction of every direction, and the page says so.",
+        "source_pages": "[\"/execution/chain\"]"
+      }
+    ],
+    "dm_research_recommendation": [
+      {
+        "rec_key": "dept_instrument",
+        "audience": "department",
+        "sort_order": 1,
+        "title": "Instrument the distribution chain with four dates",
+        "action": "Capture and publish apportionment, allocation, allotment and sub-allotment dates per distribution action, from the systems that already create them, into the same reporting stream that carries obligations.",
+        "because_finding": "unmeasured_interior",
+        "cost": "No new system. These dates exist inside the funds-control chain today; what is missing is the requirement to retain and publish them.",
+        "measure": "The interior of the chain becomes measurement instead of assumption, and the model's range collapses. Until then no corrective action on funds distribution can be evaluated.",
+        "authority": "DoD FMR Volume 3, Chapter 2",
+        "horizon": "One budget cycle"
+      },
+      {
+        "rec_key": "dept_account_on_action",
+        "audience": "department",
+        "sort_order": 2,
+        "title": "Require the funding Treasury account on the contract action, not only on the award",
+        "action": "Make the funding account a required field at action level in contract writing systems feeding the public files, and reconcile it to the accounting record.",
+        "because_finding": "trail_degrading",
+        "cost": "A field-level change in contract writing systems and the interfaces that feed them.",
+        "measure": "Coverage. Today a timing statement about a colour of money is an inference drawn from a small sample; at half coverage it becomes a measurement.",
+        "authority": "FAR Part 4; DFARS PGI 204",
+        "horizon": "Two budget cycles"
+      },
+      {
+        "rec_key": "dept_stop_counting",
+        "audience": "department",
+        "sort_order": 3,
+        "title": "Stop reporting notice counts as remediation progress",
+        "action": "Report the material-weakness roster and the condition behind each notice, paired across renames, rather than the count of open notices. Publish what closed and why it closed.",
+        "because_finding": "nfr_count_illusion",
+        "cost": "A reporting change, not a remediation change.",
+        "measure": "Whether the roster falls. A count that falls while the roster does not is measuring attrition, not remediation.",
+        "authority": "OMB Circular A-123; FIAR guidance",
+        "horizon": "Immediate"
+      },
+      {
+        "rec_key": "dept_scope_control",
+        "audience": "department",
+        "sort_order": 4,
+        "title": "Make scope a blocking control, not a convention",
+        "action": "Any Department-wide figure built from the account files should be produced by a pipeline that refuses to publish when a non-Department agency code is inside the total.",
+        "because_finding": "scope_error",
+        "cost": "One assertion in whatever produces the figure.",
+        "measure": "The error cannot recur silently. A convention people are asked to remember will not survive a staff turnover; a control will.",
+        "authority": null,
+        "horizon": "Immediate"
+      },
+      {
+        "rec_key": "svc_scope_cr",
+        "audience": "service",
+        "sort_order": 1,
+        "title": "Scope continuing-resolution mitigation to construction and family housing",
+        "action": "Build the CR playbook — anomaly requests, new-start exception lists, pre-award authorisations — around the accounts that actually move, and leave operating accounts out of it.",
+        "because_finding": "calendar_narrow",
+        "cost": "Less effort than the Department-wide posture it replaces.",
+        "measure": "The slope on the exposed pairs. A mitigation that works pulls them toward the zero the rest of the Department already sits at.",
+        "authority": null,
+        "horizon": "Next continuing resolution"
+      },
+      {
+        "rec_key": "svc_preposition",
+        "audience": "service",
+        "sort_order": 2,
+        "title": "Pre-position award-ready requirements against the enactment date",
+        "action": "Run solicitation and source selection to the point authority permits during the continuing resolution, so the award is ready when the money is. Track design-complete-to-award separately from authority-to-award.",
+        "because_finding": "ahead_of_process",
+        "cost": "Contracting workforce time spent earlier in the year rather than later.",
+        "measure": "Days from the act to the first tenth of post-act obligation. Components already differ by a factor of several on this, which is the evidence the practice varies and can be taught.",
+        "authority": "FAR Part 6",
+        "horizon": "Next fiscal year"
+      },
+      {
+        "rec_key": "svc_own_index",
+        "audience": "service",
+        "sort_order": 3,
+        "title": "Measure your own pre-act pace, per colour of money, every year",
+        "action": "Adopt the pace index — the average month before the full-year act against the year's own average month — as a standing execution metric at component level, not Department level.",
+        "because_finding": "calendar_narrow",
+        "cost": "A query against data the component already holds.",
+        "measure": "The index itself. A component that cannot say whether it ran faster or slower than its own history cannot tell whether last year's mitigation worked.",
+        "authority": null,
+        "horizon": "Immediate"
+      },
+      {
+        "rec_key": "svc_separate_leadtime",
+        "audience": "service",
+        "sort_order": 4,
+        "title": "Separate acquisition lead time from the appropriation problem in construction",
+        "action": "For construction and family housing, treat the long wait from authority to first obligation as a design and solicitation cycle, and manage it as one. Do not charge it to funds distribution.",
+        "because_finding": "calendar_narrow",
+        "cost": "A reporting split that most commands can make today.",
+        "measure": "Authority-to-first-obligation should fall toward the solicitation cycle rather than track the appropriations calendar.",
+        "authority": null,
+        "horizon": "One budget cycle"
+      },
+      {
+        "rec_key": "approp_new_start",
+        "audience": "appropriator",
+        "sort_order": 1,
+        "title": "The new-start bar is the operative constraint. Consider targeted relief rather than general relief.",
+        "action": "Where a continuing resolution is expected to run long, consider naming a limited set of new starts that may proceed, rather than either a blanket anomaly or nothing. The measured exposure is narrow enough to name.",
+        "because_finding": "calendar_narrow",
+        "cost": "Committee time on a short list, against the alternative of a general anomaly or none.",
+        "measure": "Whether the exposed accounts' slope falls. The Department cannot currently produce that measurement, which is why the next recommendation matters more.",
+        "authority": "Continuing Appropriations Act, §102 and §104",
+        "horizon": "Next continuing resolution"
+      },
+      {
+        "rec_key": "approp_require_dates",
+        "audience": "appropriator",
+        "sort_order": 2,
+        "title": "Require the four distribution dates as a recurring deliverable instead of another spend plan",
+        "action": "In place of an additional narrative spend plan, direct the Department to report apportionment, allocation, allotment and sub-allotment dates by account, on a recurring schedule, in machine-readable form.",
+        "because_finding": "unmeasured_interior",
+        "cost": "Lower than the spend plans it would replace, and it produces evidence rather than narrative.",
+        "measure": "Whether the committees can see, for the first time, where between enactment and obligation the time actually goes.",
+        "authority": null,
+        "horizon": "Next appropriations act"
+      },
+      {
+        "rec_key": "approp_deadline_on_bars",
+        "audience": "appropriator",
+        "sort_order": 3,
+        "title": "Put a deadline on every condition that bars obligation",
+        "action": "Where a provision withholds funds until a document reaches the committees, state when the document is due. A bar with no deadline creates a wait bounded only by staffing.",
+        "because_finding": "gates_conflated",
+        "cost": "A clause.",
+        "measure": "Days from enactment to satisfaction, per bar. Not measured anywhere today.",
+        "authority": "Joint explanatory statements accompanying the annual act",
+        "horizon": "Next appropriations act"
+      },
+      {
+        "rec_key": "approp_monthly_files",
+        "audience": "appropriator",
+        "sort_order": 4,
+        "title": "Fund and direct monthly publication of the account files",
+        "action": "Direct that the Account Balances and Program Activity and Object Class files be published for every submission period rather than annually, and that the public warehouse retain each period.",
+        "because_finding": "trail_degrading",
+        "cost": "The data already exists and is already submitted monthly. What is missing is publication and retention.",
+        "measure": "A monthly obligation and outlay series at full coverage would replace every inference on this site with a measurement — including the ones the committees are asked to rely on.",
+        "authority": "DATA Act; OMB Circular A-11",
+        "horizon": "Next appropriations act"
+      },
+      {
+        "rec_key": "approp_obligating_doc",
+        "audience": "appropriator",
+        "sort_order": 5,
+        "title": "Require an obligating-document reference on the published execution files",
+        "action": "Direct that the public execution files carry a reference tying each reported obligation to the document that created it.",
+        "because_finding": "evidence_gap",
+        "cost": "A field the Department's own systems already hold.",
+        "measure": "It is the single field that would make the largest number of audit assertions testable from public data. Without it, no published file can tie an obligation to the appropriation that funded it.",
+        "authority": "31 U.S.C. 1501",
+        "horizon": "Two appropriations cycles"
+      }
+    ]
+  }
+}

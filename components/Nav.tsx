@@ -89,6 +89,11 @@ export default function Nav() {
                 </div>
               </div>
             ))}
+            <Link href="/research"
+              className={`text-[13px] font-medium py-4 transition-colors ${
+                isActive('/research') ? 'text-accent-400' : 'text-navy-300 hover:text-accent-400'}`}>
+              Research
+            </Link>
           </div>
 
           <button onClick={() => setOpen(!open)}
@@ -115,6 +120,11 @@ export default function Nav() {
               </div>
             </div>
           ))}
+          <Link href="/research" onClick={() => setOpen(false)}
+            className={`block px-2 py-1.5 rounded text-[13px] ${
+              isActive('/research') ? 'text-accent-400 bg-navy-800/60' : 'text-navy-300'}`}>
+            Research · Where the time goes
+          </Link>
         </div>
       )}
     </nav>

@@ -1,17 +1,132 @@
 # datamatter — Work Tracker
 
-- **Last updated:** 2026-09-18 (chain enhancement: rollups, process model, gates, patterns)
+- **Last updated:** 2026-09-19 (the research paper)
 - **Live site:** https://datamatter.vercel.app
-- **Build status (2026-09-18):** `tsc --noEmit` clean, `next build` green, 24 pages,
+- **Build status (2026-09-19):** `tsc --noEmit` clean, `next build` green, 25 pages,
   every page and endpoint requested against a running server, 400px and 1440px
   screenshots with no horizontal overflow and nothing under the 12px type floor.
-  `--step all` verified end to end.
+  Every ETL step run individually end to end.
   **Not yet loaded to Neon** — `npm run migrate` → `npm run refresh` → push.
-  The schema now adds seventeen tables and several columns across the three
+  The schema now adds twenty tables and several columns across the four
   passes below, so the migrate is not optional.
-- **Control status (2026-09-18):** 75 load controls, plus the 14-test SBR
-  assurance suite. All seventeen controls added across these passes were made to
+- **Control status (2026-09-19):** 76 load controls, plus the 14-test SBR
+  assurance suite. All eighteen controls added across these passes were made to
   fail on a corrupted staged extract and then restored.
+
+---
+
+## Done — 2026-09-19 (twenty-third pass) — the research paper
+
+Asked for: *based on the whole app, write an in-depth insightful research paper
+for recommendations, to the department, the services, and legislative
+appropriators — a new page.*
+
+`/research`, "Where the time goes": nine findings, thirteen recommendations
+across the three audiences, a limitations section written as tests rather than
+caveats, a short method section, and an appendix listing every figure the paper
+cites with its extracted value beside its printed one.
+
+### The one design decision that matters
+
+**The prose contains no numbers.** `database/seed_research.json` holds the
+sentences, written once by hand, with named `{placeholders}` where the figures
+go. `step_research` resolves all 41 of them from the *same staged extracts the
+rest of the site publishes* — `sbr.json`, `timeline.json`, `chain.json`,
+`filec.json`, `seed_nfr.json` — and the placeholders stay placeholders in the
+database. `lib/research.ts` resolves them at render time against the evidence
+table of the same load.
+
+A number typed into a sentence stops being checkable the moment it is typed. It
+does not move when the data moves, and it fails silently — reading exactly like
+a current figure. A placeholder fails loudly, and RES-01 fails the load before
+it can.
+
+This is not theoretical. The first draft had `Six of the nine links in the
+funds-distribution chain have no published clock` as a hand-written title while
+its own body resolved to *5 of 10*. The number had drifted the moment the chain
+model gained a step. A prose audit of the whole file then found three more:
+`one of the Department's twenty-six material weaknesses`, `eighteen of
+twenty-six`, and `the opinion has not moved in eight years`. All four are now
+placeholders or reworded to carry no count. So is the abstract on the page,
+which goes through the same renderer as the findings — an abstract that can
+quietly disagree with the paper underneath it is worse than no abstract.
+
+### Findings, in the order the argument needs them
+
+1. The appropriations calendar does not slow the Department down; it stops a
+   named few. Median slope −1.6 days per 30 CR days for operating accounts,
+   −0.2 for investment, over 22 pairs. The entire effect is 3 pairs, all
+   construction or family housing, led by Navy family housing at +27.1.
+2. The Department executes faster than its own documented process would allow.
+   Model says 89 days from act to first tenth of post-act obligation; components
+   do it in 5 to 84. Authority, not capability, is binding.
+3. 5 of the 10 steps from an appropriation to an obligation have no published
+   clock, so no remediation of the chain can be evaluated.
+4. Year-end concentration is rising (14.8% → 18.8%) and does not track the
+   calendar — FY2022 had the second-longest CR and the lowest September share.
+5. The published record can test 1 of the Department's 26 material weaknesses.
+6. The award-to-account trail is thin and thinning: 24.4% of contract dollars
+   name one account at best, 8.5% at worst; File C linkage 5.9% → 1.1%.
+7. The largest mismeasurement risk here is a scope error — summing every agency
+   code in File A overstates FY2025 by $108.7B (7.5%).
+8. A falling notice count is not improvement; the opinion has not moved.
+9. Congressional conditions on obligation are managed as one category when only
+   4 of the 9 catalogued here actually bar obligation.
+
+### Built
+
+- `database/seed_research.json` — the argument. 9 findings (claim, so-what,
+  falsifier, confidence, source pages), 13 recommendations (action, the finding
+  it rests on, cost, measure, authority, horizon). No numbers.
+- `step_research` in `scripts/etl_analytics.py` — last of the analytic steps,
+  because it reads the others' staged output. Emits `dm_research_finding`,
+  `dm_research_recommendation`, `dm_research_evidence`, and derives each
+  finding's `placeholders` array from its own prose rather than trusting a
+  hand-maintained list.
+- Three tables in `database/schema.analytics.sql`; three `COLS` entries and the
+  `research.json` file entry in `scripts/load_analytics.js`.
+- **RES-01** (critical): every `{figure}` in finding *and* recommendation prose
+  resolves to an evidence row of this load; every finding declares exactly the
+  figures its own sentences use, both directions; every recommendation names a
+  finding that exists. Proven by corrupting the staged extract two ways at once
+  — a sentence citing `{not_a_real_figure}` and a recommendation pointing at a
+  renamed finding — and watching the load roll back with the previous load left
+  current.
+- `lib/research.ts` — `runs()` splits a sentence into plain and figure runs so
+  the page can mark figures up rather than flatten them, and `plain()` does the
+  same for a `title=` attribute. An unresolved placeholder renders as its own
+  braces: the load should have refused it, and hiding it here would hide a
+  broken control. That is exactly how the un-resolved *titles* were caught —
+  `FindingCard` was rendering `f.title` raw.
+- `app/research/page.tsx`, nav entry (a direct top-level link, not a one-item
+  dropdown), and reciprocal links from `/execution/chain` and
+  `/execution/timeline`.
+
+### Verified
+
+- Every ETL step run individually end to end. The `--step all` lesson from the
+  twenty-first pass still holds and the module-level duplicate-binding scan was
+  re-run: none.
+- Load committed; RES-01 passes with *"All 41 figure references across 9
+  findings and 13 recommendations resolve to one of 41 evidence rows"*. The 7
+  pre-existing non-blocking failures are unchanged — no new ones.
+- `next build` green, `/research` prerendered, all 25 routes 200.
+- 400px and 1440px full-page screenshots read end to end. Fixed a 10px mobile
+  overflow (a flex child needs `min-w-0`; its default `min-width: auto` refuses
+  to shrink below its content — the same failure as the `/execution` grid
+  overflow in the twentieth pass, in a different layout primitive), and stopped
+  the appendix printing years as `2,025`.
+
+### Note for the next session
+
+This session's device mount put `AI_DATA` one level deeper than `data_root()`
+expects, so `KB` resolved to a directory that does not exist and the `exhibits`,
+`pb_display`, `knowledge`, `jbook` and `raw` steps silently degraded — `raw`
+wrote 5 files' samples instead of 40 and RAW-01 correctly rolled the load back.
+`DM_DATA_ROOT=$HOME/mnt/AI_DATA` fixed it. Nothing to change in the repo; on the
+Mac `/Volumes/AI_DATA` resolves correctly. But it is worth knowing that a
+missing knowledge bank degrades quietly in four steps and is only caught by
+RAW-01.
 
 ---
 
@@ -1641,6 +1756,13 @@ to actually run and verify against real numbers):
   by a real load).
 
 ## Changelog
+
+- **2026-09-19** — `/research`, "Where the time goes": a research paper whose
+  prose carries no numbers. 9 findings, 13 recommendations for the Department,
+  the components and the appropriations committees, 41 figures resolved at load
+  time from the site's own extracts, and RES-01 to block a load where one does
+  not resolve. Caught four hand-typed numbers that had already drifted. Not yet
+  loaded to Neon.
 
 - **2026-09-09 (second pass)** — Added the `exhibits` ETL step: 24 PB books,
   3,061 program lines, FY2018–FY2027, with the request/enacted/actual restatement

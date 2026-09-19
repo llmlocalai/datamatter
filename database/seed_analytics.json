@@ -231,6 +231,17 @@
       "refresh_cadence": "Annually, when a new act and statement are enacted",
       "limitations": "Curated by reading the acts and statements, not extracted mechanically, so it is a selection rather than a complete inventory of every congressional direction. Reprogramming thresholds by appropriation type are not published in a source this site could reach and are therefore not stated. Where a gate sits inside a component's accounts rather than in one of its own, File A cannot isolate its scope and none is given.",
       "sort_order": 104
+    },
+    {
+      "key": "curated_research",
+      "label": "Research paper: findings, recommendations and resolved evidence",
+      "source_system": "This site's own extracts, argued over in database/seed_research.json",
+      "source_path": "database/seed_research.json + every staged extract of the same load",
+      "grain": "One finding, one recommendation, or one resolved figure",
+      "description": "The argument published at /research. The prose is written once, by hand, and contains NO NUMBERS: every figure in it is a named placeholder resolved at extract time from the same staged extracts that feed the rest of the site. A finding carries the claim, what follows from it, and the observation that would falsify it. A recommendation names exactly one finding, and the load refuses to publish a recommendation whose finding does not exist or a sentence whose placeholder did not resolve.",
+      "refresh_cadence": "Every load",
+      "limitations": "The figures move with the data even though the sentences do not: the prose is fixed and every number in it is resolved afresh at each load. The findings are this site's readings of its own published measurements, not the Department's, and they inherit every limitation of the sources beneath them. Recommendations are judgements rather than measurements and are labelled as such. The cost and horizon attached to each are estimates from the outside; nobody here has priced them from inside the Department.",
+      "sort_order": 105
     }
   ],
   "controls": [
@@ -908,6 +919,15 @@
       "rationale": "These are quotations from public law and from congressional statements, and a page that characterises what Congress required had better be able to show where. The scope rule matters just as much: a gate whose money cannot be isolated in File A gets no number, because an estimated scope on a legislative requirement reads as a finding about Congress rather than about this site's data.",
       "authority": "Annual Department of Defense Appropriations Act and its joint explanatory statement",
       "severity": "high"
+    },
+    {
+      "code": "RES-01",
+      "name": "The research paper resolves to its own evidence",
+      "sort_order": 472,
+      "assertion": "Every figure the paper's prose refers to resolves to an evidence row of this load, each finding declares exactly the figures its own sentences use, and every recommendation names a finding that exists.",
+      "rationale": "The paper argues from numbers, and an argument whose numbers have gone stale is worse than no argument, because it reads exactly like a current one. The prose is therefore stored with named placeholders rather than numbers and resolved against this load's own evidence at render time -- so the failure mode is not a wrong figure but an unresolvable one, and this control blocks the load rather than letting the page print a brace. The declared-set check exists because the page and this control both read the placeholders column, and a stale column would make the join agree with itself while disagreeing with the sentence. The recommendation check exists because a recommendation separated from the finding that justified it is an opinion wearing evidence's clothes.",
+      "authority": "This site's own publication standard",
+      "severity": "critical"
     }
   ],
   "audit_posture": {

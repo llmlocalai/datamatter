@@ -589,6 +589,13 @@ export default async function TimelinePage() {
           continuing resolution costs in execution days. It trades this page&rsquo;s coverage for
           that page&rsquo;s depth.
         </p>
+        <p className="mt-4 text-sm text-navy-400 leading-relaxed max-w-3xl">
+          The argument these pages add up to, with what follows from it for the Department, the
+          components and the appropriations committees, is written up at{' '}
+          <Link href="/research" className="text-accent-400 hover:underline">
+            Where the time goes
+          </Link>.
+        </p>
       </Section>
     </Shell>
   );
