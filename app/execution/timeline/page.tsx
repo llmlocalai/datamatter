@@ -19,7 +19,10 @@ export const metadata: Metadata = {
     'When the money moved, for which fund holder, on which colour of money, read against the '
     + 'continuing resolutions, lapses and appropriation acts of FY2021 to FY2026.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 const MONTHS = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
 

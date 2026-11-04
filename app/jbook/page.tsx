@@ -21,7 +21,10 @@ export const metadata: Metadata = {
     + 'book, see what its editions actually do, then write the next one against it — with a '
     + 'screen that will not let an internal deliberative reference reach a page bound for Congress.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 export default async function JBookPage() {
   if (!(await isLoaded())) return <Shell><NotLoaded /></Shell>;

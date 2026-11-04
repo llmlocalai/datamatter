@@ -21,7 +21,10 @@ export const metadata: Metadata = {
   description:
     'Every figure on this site is the result of joining files that were built by different reporting chains, for different purposes, with no key in common. This page measures each of those joins, names what it loses, and shows the places where the data looks complete and is not.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 const K = (n: number | null | undefined) => Number(n ?? 0) * 1000;
 

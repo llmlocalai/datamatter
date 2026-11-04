@@ -12,7 +12,10 @@ export const metadata: Metadata = {
   title: 'Assistance · datamatter',
   description: 'Department of War financial-assistance obligations — cooperative agreements, grants, and direct payments — from the USASpending assistance archive.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 export default async function AssistancePage({ searchParams }: { searchParams: { fy?: string } }) {
   const [prov, years, drift] = await Promise.all([

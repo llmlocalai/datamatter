@@ -14,7 +14,10 @@ export const metadata: Metadata = {
   title: 'Raw data · datamatter',
   description: 'The first five records of every file behind this site — File A, File B, File C, FPDS contract and assistance transactions, the President’s Budget exhibit workbooks and the submission calendar — with every column, as the files hold them.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 const DR_FIELD = 'direct_or_reimbursable_funding_source';
 

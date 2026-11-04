@@ -529,6 +529,38 @@ at each step, because the loss happens in the sources rather than in the extract
 `/traceability` is the page about that break. Do not write copy on `/program`
 that implies the chain is tighter than this.
 
+### The refresh is scheduled, and it is the last link of a longer chain
+
+Upstream jobs outside this repo keep the warehouse current: the collector lands
+zips at 03:15, `com.dodfm.usaspending-refresh` rebuilds `warehouse/accounts` when
+the zip set changes (07:20 backstop), and `refresh-award-warehouse.sh` adds each
+contract/assistance vintage. Until 2026-10-13 nothing ran datamatter after them:
+the warehouse reached FY2026 P11 and contract vintage 2026-09-06 on 6-7 October
+while the site stayed on the 19 September load. `scripts/com.datamatter.refresh.plist`
+had existed since August and was never installed.
+
+`scripts/Install-Refresh-Schedule.command` (double-click) installs
+`com.datamatter.refresh`: WatchPaths on `data/usaspending` plus a 09:40 backstop.
+`scripts/refresh.sh` then does nothing unless the warehouse parquet digest
+changed or the last good run is a week old; otherwise migrate → ETL `--step all`
+→ load → knowledge index → verify → `VERCEL_DEPLOY_HOOK` from `.env.local`.
+It skips while either upstream lock exists or a parquet is under 15 minutes old.
+A failed step writes `/Volumes/AI_DATA/logs/DATAMATTER-REFRESH-ATTENTION.txt`
+and leaves the stamp, so the next fire retries. Log:
+`/Volumes/AI_DATA/logs/datamatter-refresh.log`.
+
+- `FY_RANGE` follows the account warehouse's `fiscal_year=` partitions, so a new
+  fiscal year enters the load when the warehouse first carries it.
+- Warehouse vintages are the newest FILE under the folder (`warehouse_vintage`),
+  not the folder's own mtime, which an in-place rebuild does not change.
+- **Neon quota is a failure mode that looks like missing data.** On 2026-10-13
+  every query returned "Your account or project has exceeded the quota". The
+  `*Ready()` guards catch the error and report "not in this database yet", and
+  ISR keeps serving the last good render, so the site looked stale rather than
+  down. Pages now revalidate every 6 hours, not 15 minutes; freshness comes from
+  the deploy hook after each load. Check an API route's error body before
+  believing a "not loaded" banner.
+
 ### The release order: migrate, refresh, deploy
 
 **The build prerenders every page against the live database.** A query naming a

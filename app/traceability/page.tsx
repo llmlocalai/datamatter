@@ -17,7 +17,10 @@ export const metadata: Metadata = {
   description:
     'F-35 followed from the FY2027 budget request through obligation into the account records and out to the audit findings that judge them — and the one link in that chain that fails.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 const F35 = '198';
 const K = 1000; // the exhibit tables are $ thousands

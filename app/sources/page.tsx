@@ -9,7 +9,10 @@ export const metadata: Metadata = {
   title: 'Sources and methods · datamatter',
   description: 'Every dataset behind this site: authoritative source, grain, vintage, transformation, refresh cadence, and stated limitations.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 export default async function SourcesPage() {
   const [datasets, inventory] = await Promise.all([getAllProvenance(), getKbInventory()]);

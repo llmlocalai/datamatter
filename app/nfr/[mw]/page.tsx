@@ -9,7 +9,10 @@ import {
   getNfrObjects, getNfrElements, getNfrRoster, getProvenance,
 } from '@/lib/analytics';
 
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 // Unknown keys 404 rather than rendering at request time. The 26 that exist are
 // prerendered by the build, so a broken query here fails the build instead of a
 // visitor's request -- which is the whole point of prerendering against the

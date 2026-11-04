@@ -9,7 +9,10 @@ export const metadata: Metadata = {
   title: 'Controls · datamatter',
   description: 'Validation rules over the published data, expressed as internal control over reporting, with their latest results.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 const STATUS = {
   pass: { label: 'Pass', cls: 'text-[color:var(--status-good)] border-[color:var(--status-good)]', icon: '✓' },

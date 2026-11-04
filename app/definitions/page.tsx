@@ -9,7 +9,10 @@ export const metadata: Metadata = {
   title: 'Definitions · datamatter',
   description: 'Financial-management terms used on this site, each with its authoritative source. One meaning per term, site-wide.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 export default async function DefinitionsPage() {
   const [defs, prov] = await Promise.all([getDefinitions(), getProvenance('knowledge_bank')]);

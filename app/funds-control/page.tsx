@@ -13,7 +13,10 @@ export const metadata: Metadata = {
   title: 'Funds control · datamatter',
   description: 'Treasury-account level obligation and outlay rates, unobligated balances, and lapse exposure for the Department of War.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 export default async function FundsControlPage({ searchParams }: { searchParams: { fy?: string } }) {
   const [prov, series] = await Promise.all([getProvenance('file_a_sbr'), getSbrSeries()]);

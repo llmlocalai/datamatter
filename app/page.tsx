@@ -15,7 +15,10 @@ export const metadata: Metadata = {
   description:
     'Budget formulation, execution, and audit analytics over the USASpending warehouse and a curated DoD financial-management knowledge bank. Every figure names its source and vintage.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 const PRODUCTS = [
   { href: '/execution', title: 'Budget to execution',

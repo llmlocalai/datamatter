@@ -15,7 +15,10 @@ export const metadata: Metadata = {
   description:
     'Notices of Findings and Recommendations issued, reissued and closed across eight years of Department financial statement audits, the material weakness roster behind them, and a ten-element audit-risk object built at material weakness grain.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 export default async function NfrPage() {
   const [years, roster, objects, prov] = await Promise.all([

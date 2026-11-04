@@ -19,7 +19,10 @@ export const metadata: Metadata = {
   description:
     "Every budget line in the President's Budget P-1 and R-1 exhibits, PB2020 through PB2027, at the grain the exhibits publish: a book year and a fiscal year. Each line can be followed from request to enactment to actual, then into the Treasury account it is appropriated to and the contracts written against it.",
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 /** Exhibit amounts are published in thousands. Everything on the site is dollars. */
 const K = (n: number | null | undefined) => Number(n ?? 0) * 1000;

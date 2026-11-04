@@ -58,7 +58,20 @@ WIKI      = _pick(os.path.join(ROOT, "knowledge-bank/Wiki/DOD-FM"))
 DOW_CODES   = {"097", "021", "017", "057"}
 AGENCY_NAME = {"097": "Defense-wide", "021": "Army", "017": "Navy",
                "057": "Air Force", "011": "Executive Office of the President"}
-FY_RANGE = range(2021, 2027)
+def _fy_range():
+    """FY2021 through the newest fiscal year the account warehouse holds.
+
+    Was a literal range(2021, 2027), which would have kept FY2027 off the site
+    for good once the warehouse began carrying it. Never shorter than
+    FY2021-FY2026, so a half-mounted volume cannot quietly drop years."""
+    fa = os.path.join(WAREHOUSE, "accounts/file_a")
+    try:
+        yrs = [int(d.split("=", 1)[1]) for d in os.listdir(fa)
+               if d.startswith("fiscal_year=") and d.split("=", 1)[1].isdigit()]
+    except OSError:
+        yrs = []
+    return range(2021, max(yrs + [2026]) + 1)
+FY_RANGE = _fy_range()
 
 def now_iso(): return dt.datetime.now(dt.timezone.utc).isoformat()
 
@@ -76,6 +89,23 @@ def write(out_dir, name, obj):
 
 def mtime_date(path) -> str:
     return dt.date.fromtimestamp(os.path.getmtime(path)).isoformat()
+
+def warehouse_vintage(path) -> str:
+    """Date of the newest file under a warehouse folder.
+
+    mtime_date() on the folder itself reads the PARENT's mtime, which does not
+    change when the account pipeline replaces data_0.parquet inside
+    fiscal_year=*/ -- so after the P10 rebuild /sources and the currency banner
+    kept saying 2026-08-21 over P10 data. The newest file is the snapshot date."""
+    newest = 0.0
+    for d, _, files in os.walk(path):
+        if "/_tmp" in d:
+            continue
+        for f in files:
+            if not f.startswith("."):
+                try: newest = max(newest, os.path.getmtime(os.path.join(d, f)))
+                except OSError: pass
+    return dt.date.fromtimestamp(newest).isoformat() if newest else mtime_date(path)
 
 # ---------------------------------------------------------------- File A ----
 FILE_A_COLS = ["agency_identifier_code","agency_identifier_name","submission_period",
@@ -122,7 +152,7 @@ def step_sbr(out):
     import pyarrow.dataset as ds
     base = os.path.join(WAREHOUSE, "accounts/file_a")
     fy_rows, dim_rows, resource_rows = [], [], []
-    vintage = mtime_date(base)
+    vintage = warehouse_vintage(base)
     for fy in FY_RANGE:
         p = os.path.join(base, f"fiscal_year={fy}")
         if not os.path.isdir(p): continue
@@ -326,7 +356,7 @@ def _fileb_value(c, idx, col, is_replicated):
 def step_obligations(out):
     import pyarrow.dataset as ds
     base = os.path.join(WAREHOUSE, "accounts/file_b")
-    vintage = mtime_date(base)
+    vintage = warehouse_vintage(base)
     stage_rows, oc_rows, grain_rows = [], [], []
     for fy in FY_RANGE:
         p = os.path.join(base, f"fiscal_year={fy}")
@@ -514,7 +544,7 @@ def _filec_best_period(base, fy, ds):
 def step_filec(out):
     import pyarrow.dataset as ds
     base = os.path.join(WAREHOUSE, "accounts/file_c_contracts")
-    vintage = mtime_date(base)
+    vintage = warehouse_vintage(base)
     awards_path = os.path.join(out, "awards.json")
     award_by_fy = {}
     if os.path.exists(awards_path):
@@ -2265,7 +2295,7 @@ def step_catalog(out, only_fy=None):
     import pyarrow.dataset as ds
     fields, samples = [], []
     fy = only_fy or 2025
-    vintage = mtime_date(os.path.join(WAREHOUSE, "accounts"))
+    vintage = warehouse_vintage(os.path.join(WAREHOUSE, "accounts"))
 
     for key, label, tmpl in SOURCES:
         p = os.path.join(WAREHOUSE, tmpl % fy)
@@ -3701,7 +3731,7 @@ def _split_zero():
 def step_execution(out):
     import pyarrow.dataset as ds
     base = os.path.join(WAREHOUSE, "accounts/file_b")
-    vintage = mtime_date(base)
+    vintage = warehouse_vintage(base)
     years = [fy for fy in FY_RANGE
              if os.path.isdir(os.path.join(base, f"fiscal_year={fy}"))]
     detail_years = set(years[-EXEC_DETAIL_YEARS:])

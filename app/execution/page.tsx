@@ -28,7 +28,10 @@ export const metadata: Metadata = {
     + 'by object class and expenditure stage, and contract timing against each category\'s own '
     + 'year-end history.',
 };
-export const revalidate = 900;
+// Data changes only when scripts/refresh.sh loads, and that run redeploys the
+// site through the deploy hook. A 15-minute window kept the Neon compute awake
+// for much of the day; on 2026-10-13 the Neon plan quota was found exhausted.
+export const revalidate = 21600;
 
 // The kinds, in the order the board offers them. Named here so the page can ask
 // for the most severe of each rather than the most severe overall.
